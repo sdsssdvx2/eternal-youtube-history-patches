@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, dev ]
+    paths-ignore:
+      - 'ci/last-semantic-release.log'
 
 jobs:
   release:
@@ -62,8 +64,6 @@ jobs:
           find . -name AddOnSupport.kt -print
           echo '--- forbidden helper symbols (should be empty) ---'
           grep -RInE 'titleKey|summaryKey|Sorting|sortBy' patches/src/main/kotlin || true
-          echo '--- AddOnSupport.kt ---'
-          nl -ba "$TARGET" | sed -n '1,220p'
       - name: Compile Eternal patches directly
         working-directory: eternal-youtube-history-patches
         env:
@@ -71,7 +71,39 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew :patches:compileKotlin --no-daemon --stacktrace
       - name: Release
+        id: semantic
+        continue-on-error: true
         working-directory: eternal-youtube-history-patches
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        shell: bash
+        run: |
+          set +e
+          npx semantic-release > /tmp/semantic-release.log 2>&1
+          code=$?
+          mkdir -p ci
+          if [ "$code" -ne 0 ]; then
+            {
+              echo "semantic-release exit code: $code"
+              echo
+              tail -n 220 /tmp/semantic-release.log
+            } > ci/last-semantic-release.log
+          else
+            rm -f ci/last-semantic-release.log
+          fi
+          exit "$code"
+      - name: Save release failure diagnostic
+        if: steps.semantic.outcome == 'failure'
+        working-directory: eternal-youtube-history-patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git reset
+          git add ci/last-semantic-release.log
+          git commit -m 'ci: capture semantic-release failure [skip ci]'
+          git push
+      - name: Fail workflow if release failed
+        if: steps.semantic.outcome == 'failure'
+        run: exit 1
