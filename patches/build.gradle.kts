@@ -12,9 +12,13 @@ patches {
     }
 }
 
+// Gson is required to compile and run PatchListGenerator, but should not be bundled
+// into the patched Android app / extension runtime.
 val patchListGeneratorClasspath = configurations.create("patchListGeneratorClasspath")
+
 dependencies {
     implementation(libs.morphe.patches.library)
+    compileOnly(libs.gson)
     patchListGeneratorClasspath(libs.gson)
 }
 
@@ -24,7 +28,7 @@ tasks {
         description = "Build patch with patch list"
         dependsOn(build)
         classpath = sourceSets["main"].runtimeClasspath + patchListGeneratorClasspath
-        mainClass.set("app.morphe.util.PatchListGeneratorKt")
+        mainClass.set("util.PatchListGeneratorKt")
     }
     publish { dependsOn("generatePatchesList") }
 }
