@@ -1,91 +1,79 @@
-# 👋🧩 Morphe Patches template
+# Eternal YouTube History — Morphe add-on v0.2.0 source overlay
 
-Template repository for Morphe Patches.
+This source overlay is the Android client for the Eternal D1 central ledger.
+It targets the current Morphe third-party add-on API instead of maintaining a full RVX/YouTube fork.
 
-## ❓ About
+## Implemented
 
-Patches for apps I like.
+### Direct Android recording
 
-<!-- TODO: Update this about section with a brief introduction/summary about this repo and what it offers. -->
+- Morphe `AddOnApi` video-id/new-video/time callbacks are used.
+- A watch is accepted after **actual forward playback time** reaches the configured threshold (default 5 seconds); seeking forward does not instantly satisfy the threshold.
+- One precise Android watch event is created per playback session.
+- Duplicate video-id callbacks from Morphe do not create duplicate sessions/events.
+- Video title, channel, channel id, exact watch start and maximum progress are sent to the existing Eternal Worker/D1.
+- Progress writes are bucketed (default every 5 percentage points) to avoid excessive D1 writes.
+- Failed uploads stay in a durable Android SQLite outbox.
 
-### How to use these patches
+### Server-first cache
 
-Click here to add these patches to Morphe: https://morphe.software/add-source?github=xyz-user/xyz-patches
+- D1 remains the source of truth.
+- Android downloads the video ledger once, stores a minimal local SQLite cache, then consumes `/v1/changes` revision deltas.
+- Feed decisions use an in-memory `videoId -> max progress` cache; **no request to Cloudflare is made per card**.
+- The SQLite merge uses Android-compatible `INSERT OR IGNORE` + `UPDATE`, avoiding dependence on newer SQLite UPSERT syntax.
 
-## 🩹 Patches list
+### Watched-card hiding
 
-<!-- PATCHES_START EXPANDED -->
+v0.2 adds the first mobile visual mode: **hide watched feed cards**.
 
-<!-- Do not modify this section by hand. The patch list is generated when release.yml creates a new release.
-     
-     If you wish for the patches list to be collapsed, then remove the word 'EXPANDED' from the comment tag above.
+- Home
+- Search
+- Subscriptions
+- Related/under-video cards
+- common Shorts card/shelf layouts
 
-     If you wish to manually keep this list updated then remove the PATCHES_START and PATCHES_END 
-     comment blocks entirely. -->
+The patch injects a conservative pre-filter into Morphe's existing Litho filter entry point and reuses Morphe's public video-id extraction helper.
+It excludes child components such as thumbnail/metadata/avatar/overflow so the decision is made on whole video cards.
 
-#### A list of your patches will automatically be shown here after your first patches release is created.
+Settings:
 
-&nbsp;
+- `시청한 피드 카드 숨기기`
+- `숨김 최소 진행률(%)`
+  - `0`: any Eternal watch record hides the card.
+  - `1-100`: only records whose real progress is known and at least the threshold are hidden.
 
-## 🚀 Getting development started
+The hide hook requires the selected official Morphe patch set to include the normal Litho filtering hook. If it is absent, direct D1 recording still works; only feed hiding has no effect.
 
-To start using this template, follow these steps:
+## Not implemented yet
 
-1. [Setup](https://github.com/MorpheApp/morphe-documentation/blob/main/docs/morphe-development/README.md) your development environment including adding a GitHub PAT as described [here](https://github.com/MorpheApp/morphe-patcher/blob/main/docs/2_1_setup.md#-prepare-the-environment).
-2. [Create a new repository using this template](https://github.com/new?template_name=morphe-patches-template&template_owner=MorpheApp). Select create a new repository, and **enable 'Include all branches'** 
-3. Enable "Allow GitHub Actions to create and approve pull requests" in your repo Settings > Actions > General > Workflow permissions
-4. Update the [build.gradle.kts](patches/build.gradle.kts) file (Specifically, the 
-   [group of the project](patches/build.gradle.kts#L1), and the [About](patches/build.gradle.kts#L6-L11))
-5. Update the [README.md](README.md) file to be specific of your repo, and update the links in the [issue templates](.github/ISSUE_TEMPLATE).
-6. Choose a name for your patches project. Keep in mind you must use a name that does not 
-   imply authorship by the Morphe open source project. If unsure, then simply name these
-   patches after yourself ("UserXYZ Morphe patches"). See the [NOTICE](NOTICE) for details. 
-7. (Optional): Add `patches-bundle.png` to the project if you want a custom icon to show in
-   Morphe Manager instead of your GitHub profile avatar.
+**Dimming** is intentionally not claimed yet. Hiding can return an empty Litho component through the existing stable filter path; dimming requires modifying the rendered View/component and needs a different hook. It will be added only after that hook is verified against current Morphe/YouTube builds.
 
-🎉 You are now ready to start creating patches!
+## Intended publishing flow
 
-## 🧑‍💻 Dev usage
+1. Create a new repository from `MorpheApp/morphe-patches-template`.
+2. Repository name: `eternal-youtube-history-patches`.
+3. Keep it public; the repository contains no Eternal token or private history.
+4. Copy `overlay/` over the template repository root.
+5. The overlay already points to `sdsssdvx2/eternal-youtube-history-patches`.
+6. Keep the template Gradle wrapper, package files, `.releaserc`, generator utility and other files not replaced by the overlay.
+7. Enable GitHub Actions write permission for releases.
+8. Commit with a semantic `feat:` message. The release workflow checks out the current official Morphe sources and publishes the patch bundle.
+9. Add that repository/release as a remote patch source in Morphe Manager.
 
-To develop and release your Patches using this template:
+The current SinAble716/RVX app should remain installed until the Morphe build is independently installed and verified.
 
-- **Make all changes to the `dev` branch.**
-- For local development work build your patches using the gradle task `./gradlew buildAndroid` to generate the mpp file found in `patches/build/libs/patches-*.mpp`. Apply your patches locally using Morphe Desktop tool like any other patch bundle.
-- Always use [Semantic commit](https://kapeli.com/cheat_sheets/Semantic_Commits.docset/Contents/Resources/Documents/index) messages for commits. To keep it simple use only 3 commit message types: 
-  - `feat: Added a new feature`
-  - `fix: Some problem now fixed`
-  - `chore: Random change you do not want in the user facing changelog`
-- Commits of `fix:` and `feat:` will automatically generate new pre-releases and `chore:` will not create a new release.
-- Users can apply your dev branch releases by enabling `pre-release` in Morphe Manager patch sources.
-- When your dev branch is ready, and you want a stable release, merge dev branch to main (do not squash, and only merge).
-- **Always use semantic release (release.yml)**. Do not manually upload or create releases by hand
-  because many files must be updated and release.yml handles everything.
+## Phone configuration after patching
 
-## 🤓 Tips
-- See the [patcher documentation](https://github.com/MorpheApp/morphe-patcher/blob/main/docs/1_patcher_intro.md) for more examples of creating patches and fingerprints.
-- Do not use AI to create new release scripts. The `release.yml` here already handles everything.
-  If you need something custom with your releases then modify the existing `release.yml`
-  and `.releaserc` instead of writing everything new from scratch.
-- Do not manually edit or manually commit any generated files such as: `patches-list.json`,
-  `patches-bundle.json`, `CHANGELOG.md`.  These files will be automatically updated by `release.yml`.
-- Do not force push any semantic release commits as that will break all future releases.
-  If you need to fix a broken release, it's always easiest to create a new release instead of 
-  fixing an existing release.
+In Morphe YouTube settings → Eternal YouTube History:
 
+- enable Eternal direct sync;
+- enter the same Worker URL used by the PC extension;
+- enter the private Eternal connection token locally on the phone;
+- leave D1 local cache enabled;
+- optionally enable watched-card hiding and choose its progress threshold.
 
-<!-- The patches end tag is intentionally placed here so the first release will clean up 
-     this readme of all developer instructions above. -->
-<!-- PATCHES_END -->
+Never commit the Worker token to GitHub and never send it to another person.
 
-### 🛠️ Building locally
+## Update model
 
-- Run `./gradlew buildAndroid`
-- The built patches .mpp file is found in `patches/build/libs/patches-*.mpp`
-- Patch the mpp file using [Morphe-Desktop](https://github.com/MorpheApp/morphe-desktop)
-  like any other patch bundle.
-
-See the [Morphe documentation](https://github.com/MorpheApp/morphe-documentation) for more information.
-
-## 📜 License
-
-UserXYZ Patches are licensed under the [GNU General Public License v3.0](LICENSE)
+The Eternal patch source can be updated independently and Morphe Manager can refresh remote sources. A new YouTube base version still requires an intentional patch action, but with Shizuku/Sui/root the post-patch install step can be automated. This removes the current Obtainium workflow of repeatedly opening the app and retrying an already-built RVX APK update.

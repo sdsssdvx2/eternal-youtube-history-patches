@@ -1,0 +1,9 @@
+-dontobfuscate
+-dontoptimize
+-keepattributes *
+-keep class app.morphe.** { *; }
+-keep class app.eternal.** { *; }
+-keep class kotlin.jvm.internal.Intrinsics { public static *; }
+-dontwarn app.morphe.extension.**
+-dontwarn java.lang.reflect.AnnotatedType
+-dontwarn javax.lang.model.element.Modifier
