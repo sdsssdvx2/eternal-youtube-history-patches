@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           if grep -RInE 'eternal-youtube-history\.joj2035\.workers\.dev|66087779-3c32-42fe-bb65-7fed0f8ae8e8' \
-            --exclude-dir=.git .; then
+            --exclude-dir=.git --exclude='bootstrap-eternal.yml' .; then
             echo 'Private deployment-specific value detected.' >&2
             exit 1
           fi
