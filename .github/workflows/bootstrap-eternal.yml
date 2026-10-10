@@ -34,6 +34,11 @@ jobs:
           cp "$SRC/README.md" README.md
           cp -a "$SRC/overlay/." .
 
+          # GitHub Actions' token is intentionally not allowed to rewrite workflow files.
+          # Keep the temporary release workflow here; ChatGPT's GitHub connection installs
+          # the verified final release workflow after this source commit succeeds.
+          git checkout HEAD -- .github/workflows/release.yml
+
           # Remove the Morphe template demonstration patch/extension.
           rm -f extensions/extension/src/main/java/app/template/extension/extension/ExamplePatch.java
           rm -f patches/src/main/kotlin/app/template/patches/example/ExamplePatch.kt
