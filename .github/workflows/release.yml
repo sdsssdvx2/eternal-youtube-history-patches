@@ -51,6 +51,25 @@ jobs:
           ./gradlew :extensions:youtube:compileReleaseKotlin \
                     :extensions:youtube:compileReleaseJavaWithJavac \
                     --no-daemon --stacktrace
+      - name: Diagnose Eternal source checkout
+        working-directory: eternal-youtube-history-patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "HEAD=$(git rev-parse HEAD)"
+          TARGET=patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
+          sha256sum "$TARGET"
+          find . -name AddOnSupport.kt -print
+          echo '--- forbidden helper symbols (should be empty) ---'
+          grep -RInE 'titleKey|summaryKey|Sorting|sortBy' patches/src/main/kotlin || true
+          echo '--- AddOnSupport.kt ---'
+          nl -ba "$TARGET" | sed -n '1,220p'
+      - name: Compile Eternal patches directly
+        working-directory: eternal-youtube-history-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew :patches:compileKotlin --no-daemon --stacktrace
       - name: Release
         working-directory: eternal-youtube-history-patches
         env:
