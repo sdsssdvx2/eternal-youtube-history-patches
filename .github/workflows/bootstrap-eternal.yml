@@ -1,0 +1,66 @@
+name: Bootstrap Eternal source
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.bootstrap/**'
+      - '.github/workflows/bootstrap-eternal.yml'
+
+jobs:
+  bootstrap:
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Expand verified Eternal source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .bootstrap/part*.b64 | tr -d '\r\n' | base64 -d > /tmp/eternal-addon.zip
+          unzip -t /tmp/eternal-addon.zip
+          rm -rf /tmp/eternal-addon
+          mkdir -p /tmp/eternal-addon
+          unzip -q /tmp/eternal-addon.zip -d /tmp/eternal-addon
+          SRC=/tmp/eternal-addon/eternal-youtube-history-morphe-addon-v0.2.0
+          test -d "$SRC/overlay"
+          cp "$SRC/README.md" README.md
+          cp -a "$SRC/overlay/." .
+
+          # Remove the Morphe template demonstration patch/extension.
+          rm -f extensions/extension/src/main/java/app/template/extension/extension/ExamplePatch.java
+          rm -f patches/src/main/kotlin/app/template/patches/example/ExamplePatch.kt
+          rm -f patches/src/main/kotlin/app/template/patches/example/Fingerprints.kt
+          rm -f patches/src/main/kotlin/app/template/patches/example/InternalPatch.kt
+          rm -f patches/src/main/kotlin/app/template/patches/shared/Constants.kt
+
+          # The chunks are only a one-time transport mechanism and must not remain public.
+          rm -rf .bootstrap
+
+      - name: Verify no private runtime values were committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'eternal-youtube-history\.joj2035\.workers\.dev|66087779-3c32-42fe-bb65-7fed0f8ae8e8' \
+            --exclude-dir=.git .; then
+            echo 'Private deployment-specific value detected.' >&2
+            exit 1
+          fi
+
+      - name: Commit Eternal source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: add Eternal YouTube History Morphe client'
+          git push
