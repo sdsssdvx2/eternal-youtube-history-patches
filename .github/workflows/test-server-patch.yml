@@ -85,6 +85,7 @@ jobs:
       - name: Patch on GitHub runner with both sources
         run: |
           mkdir -p .server-test/out
+          # This validates the currently released Eternal source against the exact clean base the phone uses.
           java -Xmx5g -jar .server-test/tools/morphe-desktop.jar patch \
             -p .server-test/tools/morphe.mpp \
             -p .server-test/tools/eternal.mpp -e 'Eternal YouTube History' \
