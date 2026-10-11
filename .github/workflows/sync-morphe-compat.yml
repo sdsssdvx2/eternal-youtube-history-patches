@@ -20,11 +20,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout official Morphe patches
+      - name: Resolve latest stable Morphe release
+        id: stable
+        shell: bash
+        run: |
+          tag="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest | jq -r '.tag_name')"
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo 'Could not resolve latest stable Morphe release' >&2
+            exit 1
+          fi
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "Using Morphe stable release: $tag"
+
+      - name: Checkout official Morphe stable patches
         uses: actions/checkout@v7
         with:
           repository: MorpheApp/morphe-patches
-          ref: dev
+          ref: ${{ steps.stable.outputs.ref }}
           path: .morphe-official
           fetch-depth: 1
 
@@ -44,5 +56,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
-          git commit -m "fix: sync YouTube compatibility with Morphe"
+          git commit -m "fix: sync YouTube compatibility with stable Morphe release"
           git push
