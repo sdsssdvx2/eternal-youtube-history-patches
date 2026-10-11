@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "morphe_patches": "v1.46.0",
-  "eternal_patches": "v1.1.0",
+  "morphe_patches": "v1.47.0",
+  "eternal_patches": "v1.3.0",
   "youtube": {
-    "version": "21.16.256",
+    "version": "21.20.405",
     "min_sdk": 28
   },
   "youtube_music": {
