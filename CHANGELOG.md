@@ -1,3 +1,9 @@
+## [1.3.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.4...v1.3.0) (2026-10-11)
+
+### ✨ New Features
+
+* thumbnail-only watched styling controls ([bda2339](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/bda2339781a7b61a555bdb8d070cad5eebefb6dd))
+
 ## [1.2.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.3...v1.2.4) (2026-10-11)
 
 ### 🐛 Bug Fixes

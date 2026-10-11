@@ -6,19 +6,19 @@ It targets the current Morphe third-party add-on API instead of maintaining a fu
 ## Available patch
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.2.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/tag/v1.2.4)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;1 patches total
+> **[v1.3.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/tag/v1.3.0)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;1 patches total
 <details open>
 <summary>📦 YouTube&nbsp;&nbsp;•&nbsp;&nbsp;1 patch</summary>
 <br>
 
 **🎯 Supported versions:**
 
-| 21.16.256 | 21.13.164 | 20.51.39 | 20.21.37 |
+| 21.20.405 | 21.16.256 | 20.51.39 | 20.21.37 |
 | :---: | :---: | :---: | :---: |
 
 | 💊&nbsp;Patch | 📜&nbsp;Description | ⚙️&nbsp;Options |
 |----------|----------------|-----------|
-| [Eternal YouTube History](#eternal-youtube-history) | Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can dim or hide watched feed cards from the local cache. |  |
+| [Eternal YouTube History](#eternal-youtube-history) | Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can style watched thumbnails or hide watched feed cards from the local cache. |  |
 
 </details>
 
