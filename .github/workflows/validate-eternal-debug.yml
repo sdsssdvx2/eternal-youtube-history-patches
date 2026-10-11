@@ -1,0 +1,137 @@
+name: Validate Eternal debug build
+
+on:
+  push:
+    paths:
+      - '.github/workflows/validate-eternal-debug.yml'
+      - 'extensions/**'
+      - 'patches/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout Eternal patches
+        uses: actions/checkout@v7
+        with:
+          path: eternal-youtube-history-patches
+
+      - name: Checkout official Morphe patches
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches
+          ref: dev
+          path: morphe-patches
+
+      - name: Checkout Morphe patcher
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patcher
+          path: morphe-patcher
+
+      - name: Checkout Morphe patch library
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches-library
+          ref: dev
+          path: morphe-patches-library
+
+      - name: Checkout APK acquisition helper
+        uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: morphe-builds
+          fetch-depth: 1
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Precompile official Morphe extension API
+        working-directory: morphe-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:youtube:compileReleaseKotlin \
+                    :extensions:youtube:compileReleaseJavaWithJavac \
+                    --no-daemon --stacktrace
+
+      - name: Compile and build Eternal bundle
+        working-directory: eternal-youtube-history-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
+                    :patches:compileKotlin \
+                    :patches:build \
+                    --no-daemon --stacktrace
+          find patches/build/libs -maxdepth 1 -type f -name '*.mpp' -print -ls
+
+      - name: Acquire validated YouTube 21.16.256
+        env:
+          PYTHONPATH: ${{ github.workspace }}/morphe-builds
+        run: |
+          python -m pip install --disable-pip-version-check requests >/dev/null
+          mkdir -p input
+          python - <<'PY'
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
+          out=Path('input/youtube.apk'); expected='724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
+          for url,ref in r.iter_candidates(app,'21.16.256'):
+              try:
+                  got=r.download_candidate(url,ref,out)
+                  if got.sha256 == expected:
+                      print('validated', got.size, got.sha256)
+                      break
+                  out.unlink(missing_ok=True)
+              except Exception:
+                  out.unlink(missing_ok=True)
+          else: raise SystemExit('validated base not found')
+          PY
+
+      - name: Download stable Morphe Desktop and patch bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools out
+          asset() {
+            local repo="$1" regex="$2" out="$3"
+            local url
+            url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$regex" '.assets[] | select(.name|test($re)) | .browser_download_url' | head -1)"
+            test -n "$url" && test "$url" != null
+            curl -fL --retry 3 "$url" -o "$out"
+          }
+          asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\.jar$' tools/morphe-desktop.jar
+          asset MorpheApp/morphe-patches '^patches-.*\.mpp$' tools/morphe.mpp
+          cp "$(find eternal-youtube-history-patches/patches/build/libs -maxdepth 1 -type f -name '*.mpp' | head -1)" tools/eternal-debug.mpp
+          ls -lh tools
+
+      - name: Patch exact phone base with debug Eternal bundle
+        run: |
+          java -Xmx5g -jar tools/morphe-desktop.jar patch \
+            -p tools/morphe.mpp \
+            -p tools/eternal-debug.mpp -e 'Eternal YouTube History' \
+            -o out/youtube-morphe-eternal-debug.apk \
+            -r out/result.json \
+            input/youtube.apk
+          test -s out/youtube-morphe-eternal-debug.apk
+          cat out/result.json
+          echo "patched APK bytes: $(stat -c%s out/youtube-morphe-eternal-debug.apk)"
+
+      - name: Cleanup proprietary APKs
+        if: always()
+        run: rm -rf input out tools
