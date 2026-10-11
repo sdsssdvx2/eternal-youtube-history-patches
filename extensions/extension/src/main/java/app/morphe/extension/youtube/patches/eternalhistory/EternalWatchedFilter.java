@@ -45,15 +45,14 @@ public final class EternalWatchedFilter {
             StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
             if (pathBuilder == null || !looksLikeWholeVideoCard(pathBuilder.toString())) return false;
 
+            // Lazy-start the local permanent-history cache only when feed visuals actually need it.
+            EternalHistoryClient.ensureFeedCacheStarted();
+
             String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
             if (!EternalHistoryClient.isWatchedCached(
                     videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
                 return false;
             }
-
-            // Starting the cache only after a plausible card is encountered keeps normal playback
-            // free of the permanent-history cache when feed visuals are disabled.
-            EternalHistoryClient.ensureFeedCacheStarted();
 
             if (EternalHistorySettings.isDimMode()) {
                 EternalWatchedDim.markAccessibility(accessibilityId, accessibilityText);
