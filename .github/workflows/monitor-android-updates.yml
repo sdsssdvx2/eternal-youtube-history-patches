@@ -1,0 +1,93 @@
+name: Monitor Android update targets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '27 */6 * * *'
+  push:
+    paths:
+      - '.github/workflows/monitor-android-updates.yml'
+
+concurrency:
+  group: monitor-android-update-targets
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve stable Morphe, YouTube, YouTube Music and MicroG-RE targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .update-monitor
+
+          curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .update-monitor/morphe.json
+          MORPHE_TAG="$(jq -r '.tag_name' .update-monitor/morphe.json)"
+          test -n "$MORPHE_TAG" && test "$MORPHE_TAG" != null
+
+          curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${MORPHE_TAG}/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt" > .update-monitor/youtube.kt
+          curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${MORPHE_TAG}/patches/src/main/kotlin/app/morphe/patches/music/shared/Constants.kt" > .update-monitor/music.kt
+          curl -fsSL https://api.github.com/repos/MorpheApp/MicroG-RE/releases/latest > .update-monitor/microg.json
+          curl -fsSL https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/latest > .update-monitor/eternal.json
+
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          def stable_target(path):
+              text = Path(path).read_text()
+              for m in re.finditer(r'AppTarget\((.*?)\)', text, re.S):
+                  block = m.group(1)
+                  vm = re.search(r'version\s*=\s*"([^"]+)"', block)
+                  if not vm:
+                      continue
+                  if re.search(r'isExperimental\s*=\s*true', block):
+                      continue
+                  mm = re.search(r'minSdk\s*=\s*(\d+)', block)
+                  return {"version": vm.group(1), "min_sdk": int(mm.group(1)) if mm else None}
+              raise RuntimeError(f'No stable target found in {path}')
+
+          morphe = json.loads(Path('.update-monitor/morphe.json').read_text())
+          microg = json.loads(Path('.update-monitor/microg.json').read_text())
+          eternal = json.loads(Path('.update-monitor/eternal.json').read_text())
+          mg_tag = microg['tag_name']
+          arm64 = next((a for a in microg.get('assets', []) if a.get('name') == f'microg-{mg_tag}-icon-arm64-v8a.apk'), None)
+
+          state = {
+              "schema": 1,
+              "morphe_patches": morphe['tag_name'],
+              "eternal_patches": eternal['tag_name'],
+              "youtube": stable_target('.update-monitor/youtube.kt'),
+              "youtube_music": stable_target('.update-monitor/music.kt'),
+              "microg_re": {
+                  "version": mg_tag,
+                  "arm64_asset": arm64['browser_download_url'] if arm64 else None,
+                  "arm64_sha256": (arm64.get('digest') or '').removeprefix('sha256:') if arm64 else None,
+              },
+          }
+          Path('android-update-status.json').write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(state, indent=2))
+          PY
+
+      - name: Commit state only when public update targets changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .update-monitor
+          if git diff --quiet -- android-update-status.json && git ls-files --error-unmatch android-update-status.json >/dev/null 2>&1; then
+            echo 'No update target change.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android-update-status.json
+          git commit -m 'chore: update Android target status'
+          git push
