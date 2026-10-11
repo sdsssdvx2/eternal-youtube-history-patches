@@ -43,5 +43,12 @@ afterEvaluate {
 
 configure<ApplicationExtension> {
     namespace = "app.eternal.extension"
-    defaultConfig { minSdk = 26 }
+    buildFeatures { buildConfig = true }
+    defaultConfig {
+        minSdk = 26
+        // semantic-release updates project.version in gradle.properties. Embedding it in BuildConfig
+        // lets the runtime updater compare the installed Eternal patch with the latest public target
+        // without a second hand-maintained version constant.
+        versionName = project.version.toString()
+    }
 }
