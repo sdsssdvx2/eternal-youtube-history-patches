@@ -23,6 +23,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Acquire validated YouTube base
         env:
           PYTHONPATH: ${{ github.workspace }}/.analysis/morphe-builds
@@ -44,7 +48,7 @@ jobs:
               except Exception: out.unlink(missing_ok=True)
           else: raise SystemExit('validated base not found')
           PY
-      - name: Decompile
+      - name: Decompile Java
         shell: bash
         run: |
           set -euo pipefail
@@ -54,8 +58,7 @@ jobs:
           mkdir -p .analysis/decompiled
           .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-alpha.log 2>&1 || true
           test -d .analysis/decompiled/sources/defpackage
-          rm -f .analysis/input/youtube.apk
-      - name: Inspect exact Litho alpha targets
+      - name: Inspect exact Litho alpha Java targets
         shell: bash
         run: |
           set -euo pipefail
@@ -64,20 +67,51 @@ jobs:
             f="$D/$cls.java"
             [ -f "$f" ] || continue
             echo "===== $cls signatures/fields ====="
-            grep -n -E '^(public|final|class|interface|    public|    final|    private|    protected)|setAlpha|alpha|floatValue|Float\.valueOf|ComponentHost' "$f" | head -420 || true
+            grep -n -E '^(public|final|class|interface|    public|    final|    private|    protected|    static)|setAlpha|alpha|floatValue|Float\.valueOf|ComponentHost' "$f" | head -520 || true
           done
           echo '===== setAlpha hits inside known Litho classes ====='
           grep -n -E 'setAlpha\(' "$D"/{ggo,gij,gtx,guf,gho,gee,gfg,ghz,gjz,tqu,uzc,gec,tri}.java 2>/dev/null || true
-          echo '===== context around known setAlpha hits ====='
-          for f in "$D"/{ggo,gij,gtx,guf,gho,gee,gfg,ghz,gjz,tqu,uzc,gec,tri}.java; do
-            [ -f "$f" ] || continue
-            if grep -q 'setAlpha(' "$f"; then
-              echo "--- $f"
-              grep -n -B45 -A65 'setAlpha(' "$f" | head -800 || true
-            fi
-          done
-          echo '===== callers touching gij/tqu alpha-like fields ====='
-          grep -R -n -E '\bgij\b|\btqu\b|\.m[[:space:]]*=|Float\.valueOf\(|floatValue\(' "$D" 2>/dev/null | grep -E 'gij|tqu|uzc|setAlpha|alpha|Float|\.m[[:space:]]*=' | head -700 || true
+          echo '===== exact ghz methods around setAlpha ====='
+          grep -n -B85 -A85 'setAlpha(' "$D/ghz.java" | head -1800 || true
+          echo '===== exact gij alpha setter ====='
+          grep -n -B25 -A45 'public final void g(float' "$D/gij.java" || true
+      - name: Decompile exact smali
+        shell: bash
+        run: |
+          set -euo pipefail
+          apktool_url="$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | jq -r '.assets[] | select(.name|test("^apktool_[0-9].*\\.jar$")) | .browser_download_url' | head -1)"
+          test -n "$apktool_url"
+          curl -fL --retry 3 "$apktool_url" -o .analysis/apktool.jar
+          java -jar .analysis/apktool.jar d -f -r -s=false .analysis/input/youtube.apk -o .analysis/apktool >/tmp/apktool-alpha.log 2>&1 || {
+            cat /tmp/apktool-alpha.log
+            exit 1
+          }
+      - name: Inspect exact Litho alpha smali
+        shell: bash
+        run: |
+          set -euo pipefail
+          GHZ="$(find .analysis/apktool -type f -path '*/defpackage/ghz.smali' | head -1)"
+          GIJ="$(find .analysis/apktool -type f -path '*/defpackage/gij.smali' | head -1)"
+          test -n "$GHZ" && test -n "$GIJ"
+          echo "===== GHZ FILE: $GHZ ====="
+          grep -n -B55 -A55 'Landroid/view/View;->setAlpha(F)V' "$GHZ" | head -900 || true
+          echo "===== GHZ METHOD HEADERS CONTAINING setAlpha ====="
+          python - "$GHZ" <<'PY'
+          import sys
+          p=sys.argv[1]
+          lines=open(p,encoding='utf-8').read().splitlines()
+          for i,line in enumerate(lines):
+              if 'Landroid/view/View;->setAlpha(F)V' not in line: continue
+              start=i
+              while start>=0 and not lines[start].lstrip().startswith('.method '): start-=1
+              end=i
+              while end<len(lines) and not lines[end].lstrip().startswith('.end method'): end+=1
+              print(f'--- hit line {i+1} / method line {start+1}: {lines[start].strip()}')
+              for j in range(max(start,i-35), min(end+1,i+36)):
+                  print(f'{j+1:6}: {lines[j]}')
+          PY
+          echo "===== GIJ alpha float setter candidates ====="
+          grep -n -B18 -A38 -E '^\.method .*\(F\)V|->m:F|0x100000' "$GIJ" | head -1200 || true
       - name: Cleanup
         if: always()
-        run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
+        run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip .analysis/apktool .analysis/apktool.jar
