@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.2...v1.2.3) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* correlate dim decisions by watched video id ([1a785ad](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/1a785add31a203fef6d55d6353cefd29be6ef30f))
+* make watched dim matching resilient ([aa2f5f5](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/aa2f5f5aef9917dde12c816e981ceeb9be98e9fa))
+
 ## [1.2.2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.1...v1.2.2) (2026-10-11)
 
 ### 🐛 Bug Fixes
