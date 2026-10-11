@@ -1,0 +1,148 @@
+name: Validate Android update targets on server
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android-update-status.json'
+      - '.github/workflows/validate-android-targets.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  youtube:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: .validation/morphe-builds
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Acquire recommended clean YouTube base
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check requests >/dev/null
+          version="$(jq -r '.youtube.version' android-update-status.json)"
+          mkdir -p .validation/input
+          VERSION="$version" python - <<'PY'
+          import os
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          version=os.environ['VERSION']
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('arm64-v8a','universal'),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
+          out=Path('.validation/input/youtube.apk')
+          errs=[]
+          for url,ref in r.iter_candidates(app,version):
+              try:
+                  got=r.download_candidate(url,ref,out)
+                  print('selected candidate',got.size,got.sha256)
+                  break
+              except Exception as e:
+                  errs.append(str(e)); out.unlink(missing_ok=True)
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
+          PY
+      - name: Resolve Morphe Desktop and both patch sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .validation/tools .validation/out
+          get_asset(){ repo="$1" re="$2" out="$3"; url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$re" '.assets[]|select(.name|test($re))|.browser_download_url' | head -1)"; test -n "$url" && test "$url" != null; curl -fL --retry 3 "$url" -o "$out"; }
+          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\\.jar$' .validation/tools/morphe-desktop.jar
+          get_asset MorpheApp/morphe-patches '^patches-.*\\.mpp$' .validation/tools/morphe.mpp
+          get_asset sdsssdvx2/eternal-youtube-history-patches '^patches-.*\\.mpp$' .validation/tools/eternal.mpp
+      - name: Patch recommended YouTube entirely on server
+        run: |
+          set -euo pipefail
+          java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
+            -p .validation/tools/morphe.mpp \
+            -p .validation/tools/eternal.mpp -e 'Eternal YouTube History' \
+            -o .validation/out/youtube.apk \
+            -r .validation/out/result.json \
+            .validation/input/youtube.apk
+          test -s .validation/out/youtube.apk
+          cat .validation/out/result.json
+      - name: Remove proprietary files
+        if: always()
+        run: rm -rf .validation/input .validation/out .validation/tools
+
+  youtube-music:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: .validation/morphe-builds
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Acquire recommended clean YouTube Music base
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check requests >/dev/null
+          version="$(jq -r '.youtube_music.version' android-update-status.json)"
+          mkdir -p .validation/input
+          VERSION="$version" python - <<'PY'
+          import os
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          version=os.environ['VERSION']
+          app=AppConfig(key='yt-music',name='YouTube Music',package='com.google.android.apps.youtube.music',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube-music/',formats=('apk',),prefer=('arm64-v8a','universal'),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
+          out=Path('.validation/input/ytmusic.apk')
+          errs=[]
+          for url,ref in r.iter_candidates(app,version):
+              try:
+                  got=r.download_candidate(url,ref,out)
+                  print('selected candidate',got.size,got.sha256)
+                  break
+              except Exception as e:
+                  errs.append(str(e)); out.unlink(missing_ok=True)
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
+          PY
+      - name: Resolve Morphe Desktop and stable patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .validation/tools .validation/out
+          get_asset(){ repo="$1" re="$2" out="$3"; url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$re" '.assets[]|select(.name|test($re))|.browser_download_url' | head -1)"; test -n "$url" && test "$url" != null; curl -fL --retry 3 "$url" -o "$out"; }
+          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\\.jar$' .validation/tools/morphe-desktop.jar
+          get_asset MorpheApp/morphe-patches '^patches-.*\\.mpp$' .validation/tools/morphe.mpp
+      - name: Patch recommended YouTube Music entirely on server
+        run: |
+          set -euo pipefail
+          java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
+            -p .validation/tools/morphe.mpp \
+            -o .validation/out/ytmusic.apk \
+            -r .validation/out/result.json \
+            .validation/input/ytmusic.apk
+          test -s .validation/out/ytmusic.apk
+          cat .validation/out/result.json
+      - name: Remove proprietary files
+        if: always()
+        run: rm -rf .validation/input .validation/out .validation/tools
