@@ -1,3 +1,9 @@
+## [1.2.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.3...v1.2.4) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* dim watched cards on exact Litho component ([147deab](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/147deabbdf78e3eecf9744e8e1765406381520e3))
+
 ## [1.2.3](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.2...v1.2.3) (2026-10-11)
 
 ### 🐛 Bug Fixes
