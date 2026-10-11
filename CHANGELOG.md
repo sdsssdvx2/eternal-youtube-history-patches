@@ -1,3 +1,9 @@
+## [1.4.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.3.0...v1.4.0) (2026-10-11)
+
+### ✨ New Features
+
+* optionally link watched card info styling ([2495f48](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/2495f480fb0bfb0664950ae5c7c7cd39faccdd52))
+
 ## [1.3.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.4...v1.3.0) (2026-10-11)
 
 ### ✨ New Features
