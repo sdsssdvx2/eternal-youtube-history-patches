@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string-array name="morphe_eternal_history_feed_mode_entries">
+    <item>변경 없음</item>
+    <item>흐리게</item>
+    <item>숨기기</item>
+  </string-array>
+  <string-array name="morphe_eternal_history_feed_mode_values">
+    <item>none</item>
+    <item>dim</item>
+    <item>hide</item>
+  </string-array>
+</resources>
