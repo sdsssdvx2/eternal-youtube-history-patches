@@ -22,6 +22,8 @@ public final class EternalHistorySettings {
             new IntegerSetting("morphe_eternal_history_progress_step", 5, false, parent(ENABLED));
     public static final BooleanSetting SYNC_CACHE =
             new BooleanSetting("morphe_eternal_history_sync_cache", TRUE, false, parent(ENABLED));
+    public static final BooleanSetting AUTO_UPDATE_CHECK =
+            new BooleanSetting("morphe_eternal_history_auto_update_check", TRUE, false, parent(ENABLED));
 
     /** Empty default lets existing installs migrate from the legacy hide toggle. */
     public static final StringSetting FEED_MODE =
