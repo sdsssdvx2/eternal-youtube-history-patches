@@ -57,12 +57,18 @@ public final class EternalWatchedFilter {
             if (pathBuilder == null) return false;
             String path = pathBuilder.toString();
 
-            // Hide mode removes the whole video card. Dim mode intentionally targets only the
-            // thumbnail child component so title/channel/metadata stay fully readable.
+            // Hide mode always removes the whole video card.
+            // Dim mode normally targets only the thumbnail child component. If the user enables
+            // DIM_CARD_INFO, target the card root instead; the exact same alpha/grayscale then
+            // naturally covers the thumbnail, channel avatar, title, views/date metadata and menu.
             if (EternalHistorySettings.isHideMode()) {
                 if (!looksLikeWholeVideoCard(path)) return false;
             } else if (EternalHistorySettings.isDimMode()) {
-                if (!looksLikeThumbnailComponent(path)) return false;
+                if (EternalHistorySettings.DIM_CARD_INFO.get()) {
+                    if (!looksLikeWholeVideoCard(path)) return false;
+                } else if (!looksLikeThumbnailComponent(path)) {
+                    return false;
+                }
             } else {
                 return false;
             }
@@ -78,7 +84,7 @@ public final class EternalWatchedFilter {
 
             if (EternalHistorySettings.isDimMode()) {
                 // The protobuf videoId/local cache decision is authoritative. A tiny ThreadLocal
-                // hand-off lets the bytecode patch style this exact thumbnail component.
+                // hand-off lets the bytecode patch style this exact thumbnail or card-root component.
                 EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
                 return false;
             }
