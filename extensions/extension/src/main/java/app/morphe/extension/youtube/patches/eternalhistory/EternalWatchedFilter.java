@@ -33,6 +33,13 @@ public final class EternalWatchedFilter {
             "avatar.e",
             "overflow_button.e"
     };
+    private static final String[] THUMBNAIL_COMPONENTS = {
+            "thumbnail.e",
+            "video_lockup_thumbnail.e",
+            "shorts-lockup-image",
+            "shorts_thumbnail",
+            "shorts-thumbnail"
+    };
 
     public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer,
                                      @Nullable String accessibilityId,
@@ -47,7 +54,18 @@ public final class EternalWatchedFilter {
             if (contextInterface == null || buffer == null || buffer.length == 0) return false;
 
             StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
-            if (pathBuilder == null || !looksLikeWholeVideoCard(pathBuilder.toString())) return false;
+            if (pathBuilder == null) return false;
+            String path = pathBuilder.toString();
+
+            // Hide mode removes the whole video card. Dim mode intentionally targets only the
+            // thumbnail child component so title/channel/metadata stay fully readable.
+            if (EternalHistorySettings.isHideMode()) {
+                if (!looksLikeWholeVideoCard(path)) return false;
+            } else if (EternalHistorySettings.isDimMode()) {
+                if (!looksLikeThumbnailComponent(path)) return false;
+            } else {
+                return false;
+            }
 
             // Lazy-start the local permanent-history cache only when feed visuals actually need it.
             EternalHistoryClient.ensureFeedCacheStarted();
@@ -60,11 +78,11 @@ public final class EternalWatchedFilter {
 
             if (EternalHistorySettings.isDimMode()) {
                 // The protobuf videoId/local cache decision is authoritative. A tiny ThreadLocal
-                // hand-off lets the bytecode patch apply alpha to this exact returned component.
+                // hand-off lets the bytecode patch style this exact thumbnail component.
                 EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
                 return false;
             }
-            return EternalHistorySettings.isHideMode();
+            return true;
         } catch (Throwable t) {
             // Feed rendering must always fail open. A future YouTube/Morphe layout change should
             // never make the feed disappear or crash just because Eternal could not classify it.
@@ -73,15 +91,28 @@ public final class EternalWatchedFilter {
         }
     }
 
-    private static boolean looksLikeWholeVideoCard(String path) {
-        for (String child : CHILD_EXCEPTIONS) {
-            if (path.contains(child)) return false;
-        }
+    private static boolean looksLikeVideoContext(String path) {
         for (String root : ROOT_CARD_PATHS) {
             if (path.startsWith(root)) return true;
         }
         for (String nested : NESTED_CARD_PATHS) {
             if (path.contains(nested)) return true;
+        }
+        return false;
+    }
+
+    private static boolean looksLikeWholeVideoCard(String path) {
+        if (!looksLikeVideoContext(path)) return false;
+        for (String child : CHILD_EXCEPTIONS) {
+            if (path.contains(child)) return false;
+        }
+        return true;
+    }
+
+    private static boolean looksLikeThumbnailComponent(String path) {
+        if (!looksLikeVideoContext(path)) return false;
+        for (String thumbnail : THUMBNAIL_COMPONENTS) {
+            if (path.contains(thumbnail)) return true;
         }
         return false;
     }
