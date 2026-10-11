@@ -1,0 +1,198 @@
+name: Implement watched-card dim mode
+
+on:
+  push:
+    paths:
+      - '.github/workflows/implement-watched-dim.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply dim mode implementation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def edit(path, fn):
+              p=Path(path); old=p.read_text(); new=fn(old)
+              if new == old: raise SystemExit(f'no change for {path}')
+              p.write_text(new)
+
+          # Settings: introduce tri-state feed mode while preserving the old hide switch as a migration fallback.
+          path='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistorySettings.java'
+          def settings(s):
+              s=s.replace(
+                  '    public static final BooleanSetting HIDE_WATCHED =\n            new BooleanSetting("morphe_eternal_history_hide_watched", FALSE, false, parent(ENABLED));\n    public static final IntegerSetting HIDE_MIN_PROGRESS =\n            new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(HIDE_WATCHED));\n',
+                  '    /** Empty default lets existing installs migrate from the legacy hide toggle. */\n    public static final StringSetting FEED_MODE =\n            new StringSetting("morphe_eternal_history_feed_mode", "", false, parent(ENABLED));\n    /** Kept only so existing installs that enabled hide keep their previous behavior. */\n    public static final BooleanSetting HIDE_WATCHED =\n            new BooleanSetting("morphe_eternal_history_hide_watched", FALSE, false, parent(ENABLED));\n    public static final IntegerSetting HIDE_MIN_PROGRESS =\n            new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));\n\n    public static String feedMode() {\n        String mode = FEED_MODE.get();\n        if (mode == null || mode.isEmpty()) return HIDE_WATCHED.get() ? "hide" : "none";\n        if ("dim".equals(mode) || "hide".equals(mode)) return mode;\n        return "none";\n    }\n\n    public static boolean isFeedVisualEnabled() { return !"none".equals(feedMode()); }\n    public static boolean isDimMode() { return "dim".equals(feedMode()); }\n    public static boolean isHideMode() { return "hide".equals(feedMode()); }\n')
+              return s
+          edit(path, settings)
+
+          # DB: title snapshot is loaded once with the progress snapshot, never queried per card.
+          path='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryDb.java'
+          def db(s):
+              needle='''    synchronized Map<String, Float> loadProgressSnapshot() {\n        Map<String, Float> out = new HashMap<>();\n        try (Cursor c = getReadableDatabase().rawQuery("SELECT video_id,max_progress_pct FROM videos", null)) {\n            while (c.moveToNext()) out.put(c.getString(0), c.isNull(1) ? -1f : c.getFloat(1));\n        }\n        return out;\n    }\n'''
+              repl=needle+'''\n    /** Titles are used only for the dim renderer bridge; loaded in one background snapshot. */\n    synchronized Map<String, String> loadTitleSnapshot() {\n        Map<String, String> out = new HashMap<>();\n        try (Cursor c = getReadableDatabase().rawQuery("SELECT video_id,title FROM videos WHERE title IS NOT NULL AND title <> ''", null)) {\n            while (c.moveToNext()) out.put(c.getString(0), c.getString(1));\n        }\n        return out;\n    }\n'''
+              if needle not in s: raise SystemExit('DB snapshot anchor missing')
+              return s.replace(needle,repl)
+          edit(path, db)
+
+          # Client: full-history cache is used by both dim and hide, and carries titles in memory.
+          path='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryClient.java'
+          def client(s):
+              s=s.replace('    private static final ConcurrentHashMap<String, Float> WATCHED_CACHE = new ConcurrentHashMap<>();\n',
+                          '    private static final ConcurrentHashMap<String, Float> WATCHED_CACHE = new ConcurrentHashMap<>();\n    private static final ConcurrentHashMap<String, String> TITLE_CACHE = new ConcurrentHashMap<>();\n')
+              s=s.replace('EternalHistorySettings.HIDE_WATCHED.get()', 'EternalHistorySettings.isFeedVisualEnabled()')
+              s=s.replace('''    private static void loadLocalCache() {\n        WATCHED_CACHE.putAll(EternalHistoryDb.get().loadProgressSnapshot());\n    }\n''', '''    private static void loadLocalCache() {\n        EternalHistoryDb db = EternalHistoryDb.get();\n        WATCHED_CACHE.putAll(db.loadProgressSnapshot());\n        TITLE_CACHE.putAll(db.loadTitleSnapshot());\n    }\n''')
+              anchor='''    static boolean isWatchedCached(String videoId, double minimumProgress) {\n        if (videoId == null || videoId.length() != 11) return false;\n        Float pct = WATCHED_CACHE.get(videoId);\n        if (pct == null) return false;\n        if (minimumProgress <= 0) return true;\n        return pct >= 0 && pct >= minimumProgress;\n    }\n'''
+              addition=anchor+'''\n    static String cachedTitle(String videoId) {\n        if (videoId == null || videoId.length() != 11) return null;\n        return TITLE_CACHE.get(videoId);\n    }\n'''
+              if anchor not in s: raise SystemExit('client watched anchor missing')
+              s=s.replace(anchor,addition)
+              old='''        float incoming = r.isNull("maxProgressPct") ? -1f : (float)r.optDouble("maxProgressPct", -1);\n        WATCHED_CACHE.merge(id, incoming, (oldValue, newValue) -> {\n'''
+              new='''        String title = r.optString("title", "").trim();\n        if (!title.isEmpty()) TITLE_CACHE.put(id, title);\n        float incoming = r.isNull("maxProgressPct") ? -1f : (float)r.optDouble("maxProgressPct", -1);\n        WATCHED_CACHE.merge(id, incoming, (oldValue, newValue) -> {\n'''
+              if old not in s: raise SystemExit('client cacheVideo anchor missing')
+              s=s.replace(old,new)
+              return s
+          edit(path, client)
+
+          # Feed filter: hide still returns true; dim records a tiny bounded title hint and lets the card render.
+          path='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchedFilter.java'
+          def filt(s):
+              start=s.index('    public static boolean shouldHide(')
+              end=s.index('\n    private static boolean isWholeCardPath', start)
+              method='''    public static boolean shouldHide(ContextInterface contextInterface, byte[] buffer) {\n        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isFeedVisualEnabled()) return false;\n        if (contextInterface == null || buffer == null || buffer.length == 0) return false;\n\n        EternalHistoryClient.ensureFeedCacheStarted();\n        String path = contextInterface.patch_getPathBuilder().toString();\n        if (!isWholeCardPath(path)) return false;\n\n        String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);\n        if (!EternalHistoryClient.isWatchedCached(videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {\n            return false;\n        }\n\n        if (EternalHistorySettings.isDimMode()) {\n            EternalWatchedDim.markTitle(EternalHistoryClient.cachedTitle(videoId));\n            return false;\n        }\n        return EternalHistorySettings.isHideMode();\n    }\n'''
+              return s[:start]+method+s[end:]
+          edit(path, filt)
+
+          # Renderer bridge. No reflection/DB/network occurs for ordinary cards; reflection is cached once.
+          helper=Path('extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchedDim.java')
+          helper.write_text(r'''package app.morphe.extension.youtube.patches.eternalhistory;
+
+import android.view.View;
+
+import java.lang.reflect.Method;
+import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+/** Bridges a watched feed-card decision to Litho's node alpha before mount. */
+@SuppressWarnings("unused")
+public final class EternalWatchedDim {
+    private static final float DIM_ALPHA = 0.38f;
+    private static final int MAX_PENDING_TITLES = 256;
+    private static final ConcurrentHashMap<String, Boolean> PENDING = new ConcurrentHashMap<>();
+    private static final ConcurrentLinkedQueue<String> ORDER = new ConcurrentLinkedQueue<>();
+    private static volatile Class<?> nodeClass;
+    private static volatile Method setAlphaMethod;
+
+    private EternalWatchedDim() { }
+
+    static void markTitle(String title) {
+        if (!EternalHistorySettings.isDimMode()) return;
+        String key = normalize(title);
+        if (key.isEmpty() || PENDING.putIfAbsent(key, Boolean.TRUE) != null) return;
+        ORDER.add(key);
+        while (PENDING.size() > MAX_PENDING_TITLES) {
+            String oldest = ORDER.poll();
+            if (oldest == null) break;
+            PENDING.remove(oldest);
+        }
+    }
+
+    /** Called from the patched Litho mount path immediately before its existing alpha application. */
+    public static void apply(View view, Object nodeInfo) {
+        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isDimMode()) return;
+        if (view == null || nodeInfo == null || PENDING.isEmpty()) return;
+        CharSequence description = view.getContentDescription();
+        if (description == null) return;
+        String text = normalize(description.toString());
+        if (text.isEmpty() || !matchesPendingTitle(text)) return;
+        try {
+            Method method = setAlphaMethod;
+            Class<?> cls = nodeInfo.getClass();
+            if (method == null || nodeClass != cls) {
+                method = cls.getDeclaredMethod("g", float.class);
+                method.setAccessible(true);
+                nodeClass = cls;
+                setAlphaMethod = method;
+            }
+            method.invoke(nodeInfo, DIM_ALPHA);
+        } catch (Throwable ignored) {
+            // A YouTube obfuscation change must never break feed rendering. The patcher validates
+            // the mount hook for supported versions; this fallback keeps runtime failure harmless.
+        }
+    }
+
+    private static boolean matchesPendingTitle(String description) {
+        if (PENDING.containsKey(description)) return true;
+        for (String title : PENDING.keySet()) {
+            if (!description.startsWith(title) || description.length() == title.length()) continue;
+            char c = description.charAt(title.length());
+            if (Character.isWhitespace(c) || c == '·' || c == '•' || c == '-' || c == '|' || c == ',' || c == '–' || c == '—') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalize(String value) {
+        if (value == null) return "";
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+}
+''')
+
+          # Add-on settings UI: tri-state selector replaces the old binary hide switch.
+          path='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
+          def addon(s):
+              old='''                  <SwitchPreference android:key="morphe_eternal_history_hide_watched" android:title="@string/morphe_eternal_history_hide_watched_title" android:summary="@string/morphe_eternal_history_hide_watched_summary" android:defaultValue="false" />\n                  <EditTextPreference android:key="morphe_eternal_history_hide_min_progress" android:title="@string/morphe_eternal_history_hide_min_progress_title" android:summary="@string/morphe_eternal_history_hide_min_progress_summary" android:defaultValue="0" android:inputType="numberDecimal" />\n'''
+              new='''                  <ListPreference android:key="morphe_eternal_history_feed_mode" android:title="@string/morphe_eternal_history_feed_mode_title" android:summary="@string/morphe_eternal_history_feed_mode_summary" android:entries="@array/morphe_eternal_history_feed_mode_entries" android:entryValues="@array/morphe_eternal_history_feed_mode_values" android:defaultValue="none" />\n                  <EditTextPreference android:key="morphe_eternal_history_hide_min_progress" android:title="@string/morphe_eternal_history_visual_min_progress_title" android:summary="@string/morphe_eternal_history_visual_min_progress_summary" android:defaultValue="0" android:inputType="numberDecimal" />\n'''
+              if old not in s: raise SystemExit('prefs anchor missing')
+              return s.replace(old,new)
+          edit(path, addon)
+
+          # Strings/arrays for the selector and updated note.
+          path='patches/src/main/resources/addresources/values/youtube/strings.xml'
+          def strings(s):
+              insert='''    <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>\n    <string name="morphe_eternal_history_feed_mode_summary">변경 없음 / 흐리게 / 숨기기 중 선택합니다.</string>\n    <string-array name="morphe_eternal_history_feed_mode_entries">\n        <item>변경 없음</item>\n        <item>흐리게</item>\n        <item>숨기기</item>\n    </string-array>\n    <string-array name="morphe_eternal_history_feed_mode_values">\n        <item>none</item>\n        <item>dim</item>\n        <item>hide</item>\n    </string-array>\n    <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>\n    <string name="morphe_eternal_history_visual_min_progress_summary">0이면 진행률을 모르는 과거 기록도 흐리게/숨김 대상으로 봅니다.</string>\n'''
+              marker='    <string name="morphe_eternal_history_hide_watched_title">'
+              idx=s.index(marker)
+              s=s[:idx]+insert+s[idx:]
+              s=s.replace('v0.2는 기록/진행률/D1 캐시/시청 카드 숨기기를 제공합니다. 흐리게 표시는 후속 렌더 훅에서 추가합니다.',
+                          '시청 기록은 D1에 직접 동기화되며, 피드 카드는 변경 없음/흐리게/숨기기 모드와 최소 진행률을 지원합니다.')
+              return s
+          edit(path, strings)
+
+          # Patcher: hook Litho's existing node alpha path so recycling automatically resets to 1.0.
+          path='patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt'
+          def patch(s):
+              s=s.replace('import app.morphe.patcher.patch.BytecodePatchContext\n',
+                          'import app.morphe.patcher.Fingerprint\nimport app.morphe.patcher.InstructionLocation\nimport app.morphe.patcher.methodCall\nimport app.morphe.patcher.patch.BytecodePatchContext\n')
+              s=s.replace('import com.android.tools.smali.dexlib2.Opcode\n',
+                          'import com.android.tools.smali.dexlib2.AccessFlags\nimport com.android.tools.smali.dexlib2.Opcode\nimport com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction\nimport com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction\nimport com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction\nimport com.android.tools.smali.dexlib2.iface.reference.FieldReference\nimport com.android.tools.smali.dexlib2.iface.reference.MethodReference\n')
+              s=s.replace('private const val EXTENSION_FILTER =\n    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalWatchedFilter;"\n',
+                          'private const val EXTENSION_FILTER =\n    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalWatchedFilter;"\nprivate const val EXTENSION_DIM =\n    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalWatchedDim;"\n')
+              anchor='''object EternalHistoryPatch : Patch(\n'''
+              fp='''private object LithoMountPropertiesFingerprint : Fingerprint(\n    accessFlags = listOf(AccessFlags.STATIC),\n    returnType = "V",\n    parameters = listOf("Ljava/lang/Object;", "L"),\n    filters = listOf(\n        methodCall(\n            opcode = Opcode.INVOKE_VIRTUAL,\n            smali = "Landroid/view/View;->setContentDescription(Ljava/lang/CharSequence;)V"\n        ),\n        methodCall(\n            opcode = Opcode.INVOKE_VIRTUAL,\n            smali = "Landroid/view/View;->setAlpha(F)V"\n        )\n    )\n)\n\n'''
+              if anchor not in s: raise SystemExit('patch object anchor missing')
+              s=s.replace(anchor,fp+anchor)
+              s=s.replace('        installWatchedCardHook(context)\n', '        installWatchedCardHook(context)\n        installWatchedDimHook(context)\n')
+              end='''    private fun MutableMethod.removeInstructionsCompat(index: Int, count: Int) {\n        repeat(count) { removeInstruction(index) }\n    }\n}\n'''
+              dim='''    private fun installWatchedDimHook(context: BytecodePatchContext) {\n        val method = LithoMountPropertiesFingerprint.method\n        val instructions = method.implementation?.instructions\n            ?: throw PatchException("Eternal dim: Litho mount method has no implementation")\n\n        // Pick the setAlpha fed directly from the node-info float field (not reset-to-1 calls).\n        var alphaIndex = -1\n        var viewRegister = -1\n        var nodeRegister = -1\n        var nodeClass = ""\n        for (i in instructions.indices) {\n            val insn = instructions[i]\n            val ref = (insn as? ReferenceInstruction)?.reference as? MethodReference ?: continue\n            if (ref.definingClass != "Landroid/view/View;" || ref.name != "setAlpha" || ref.parameterTypes.size != 1) continue\n            val invoke = insn as? FiveRegisterInstruction ?: continue\n            for (j in (i - 1) downTo maxOf(0, i - 5)) {\n                val fieldInsn = instructions[j] as? ReferenceInstruction ?: continue\n                val field = fieldInsn.reference as? FieldReference ?: continue\n                val regs = fieldInsn as? TwoRegisterInstruction ?: continue\n                if (field.type != "F") continue\n                alphaIndex = i\n                viewRegister = invoke.registerC\n                nodeRegister = regs.registerB\n                nodeClass = field.definingClass\n                break\n            }\n            if (alphaIndex >= 0) break\n        }\n        if (alphaIndex < 0 || viewRegister < 0 || nodeRegister < 0 || nodeClass.isEmpty()) {\n            throw PatchException("Eternal dim: node alpha application not found")\n        }\n\n        // Insert before the existing node-info alpha-presence check. EternalWatchedDim mutates the\n        // node alpha + flag, then YouTube's own mount code applies it and its own unmount code resets it.\n        var gateIndex = -1\n        for (i in (alphaIndex - 1) downTo maxOf(0, alphaIndex - 12)) {\n            val ref = (instructions[i] as? ReferenceInstruction)?.reference as? MethodReference ?: continue\n            if (ref.definingClass == nodeClass && ref.returnType == "Z" && ref.parameterTypes.isEmpty()) {\n                gateIndex = i\n                break\n            }\n        }\n        if (gateIndex < 0) throw PatchException("Eternal dim: node alpha gate not found")\n        if (viewRegister > 15 || nodeRegister > 15) {\n            throw PatchException("Eternal dim: mount registers exceed invoke-static encoding")\n        }\n        method.addInstruction(\n            gateIndex,\n            "invoke-static { v$viewRegister, v$nodeRegister }, $EXTENSION_DIM->apply(Landroid/view/View;Ljava/lang/Object;)V"\n        )\n    }\n\n'''
+              if end not in s: raise SystemExit('patch end anchor missing')
+              return s.replace(end,dim+end)
+          edit(path, patch)
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add extensions patches
+          git commit -m 'feat: add watched-card dim mode'
+          git push
