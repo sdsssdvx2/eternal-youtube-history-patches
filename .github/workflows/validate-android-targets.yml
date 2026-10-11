@@ -28,7 +28,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire recommended clean YouTube base
+      - name: Acquire patchable clean YouTube base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -38,7 +38,7 @@ jobs:
           version="$(jq -r '.youtube.version' android-update-status.json)"
           mkdir -p .validation/input
           VERSION="$version" python - <<'PY'
-          import os
+          import os, zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
@@ -50,11 +50,15 @@ jobs:
           for url,ref in r.iter_candidates(app,version):
               try:
                   got=r.download_candidate(url,ref,out)
-                  print('selected candidate',got.size,got.sha256)
+                  with zipfile.ZipFile(out) as z:
+                      names=set(z.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
+                      raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
+                  print('selected standalone candidate',got.size,got.sha256,ref)
                   break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
-          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-6:]))
           PY
       - name: Resolve Morphe Desktop and both patch sources
         env:
@@ -109,7 +113,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire recommended clean YouTube Music base
+      - name: Acquire patchable clean YouTube Music base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -119,7 +123,7 @@ jobs:
           version="$(jq -r '.youtube_music.version' android-update-status.json)"
           mkdir -p .validation/input
           VERSION="$version" python - <<'PY'
-          import os
+          import os, zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
@@ -131,11 +135,15 @@ jobs:
           for url,ref in r.iter_candidates(app,version):
               try:
                   got=r.download_candidate(url,ref,out)
-                  print('selected candidate',got.size,got.sha256)
+                  with zipfile.ZipFile(out) as z:
+                      names=set(z.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
+                      raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
+                  print('selected standalone candidate',got.size,got.sha256,ref)
                   break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
-          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-6:]))
           PY
       - name: Resolve Morphe Desktop and stable patches
         env:
