@@ -2,6 +2,8 @@ package app.morphe.extension.youtube.patches.eternalhistory;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Process;
+import android.os.SystemClock;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -30,11 +32,18 @@ import app.morphe.extension.youtube.patches.VideoInformation;
 
 /**
  * Android thin client for the Eternal D1 ledger.
- * Network/SQLite work stays on one background thread. Feed membership checks use an in-memory map.
+ * Network/SQLite work stays on one low-priority background thread. Feed membership checks use an
+ * in-memory map. Cloud uploads are deliberately batched so playback never causes one request per
+ * progress bucket.
  */
 final class EternalHistoryClient {
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "EternalHistoryIO");
+        Thread t = new Thread(() -> {
+            try {
+                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+            } catch (Throwable ignored) { }
+            r.run();
+        }, "EternalHistoryIO");
         t.setDaemon(true);
         return t;
     });
@@ -45,7 +54,9 @@ final class EternalHistoryClient {
     private static final String SOURCE = "android-morphe-direct";
     private static final String META_REV = "cloud_rev";
     private static final String META_PULL_AT = "last_pull_at";
+    private static final long MIN_UPLOAD_INTERVAL_MS = 60_000L;
 
+    private static volatile long lastUploadAttemptElapsed;
     private static String currentVideoId = "";
     private static long sessionStartedAt;
     private static long lastVideoTimeMs = -1;
@@ -57,25 +68,29 @@ final class EternalHistoryClient {
 
     static void initialize() {
         if (!initialized.compareAndSet(false, true)) return;
-        scheduleCacheLoadAndMaintenance(true);
-    }
 
-    /** Called by feed filter too, so feed-only users initialize the cache without opening a video. */
-    static void ensureFeedCacheStarted() {
-        if (initialized.compareAndSet(false, true)) {
+        // The large permanent-history cache exists only to support watched-card visuals. Do not
+        // download/touch tens of thousands of historical rows when that feature is disabled.
+        if (EternalHistorySettings.HIDE_WATCHED.get()) {
             scheduleCacheLoadAndMaintenance(true);
-        } else if (WATCHED_CACHE.isEmpty()) {
-            scheduleCacheLoadOnly();
+        } else {
+            IO.execute(() -> {
+                try {
+                    flushOutboxIfDue(true);
+                } catch (Throwable t) {
+                    Logger.printDebug(() -> "Eternal History startup upload deferred: " + t.getMessage());
+                }
+            });
         }
     }
 
-    private static void scheduleCacheLoadOnly() {
-        if (!cacheLoadScheduled.compareAndSet(false, true)) return;
-        IO.execute(() -> {
-            try { loadLocalCache(); }
-            catch (Throwable t) { Logger.printDebug(() -> "Eternal History local cache load deferred: " + t.getMessage()); }
-            finally { cacheLoadScheduled.set(false); }
-        });
+    /** Called by the feed filter when watched-card visuals are actually enabled. */
+    static void ensureFeedCacheStarted() {
+        if (!EternalHistorySettings.HIDE_WATCHED.get()) return;
+        initialized.compareAndSet(false, true);
+        if (WATCHED_CACHE.isEmpty()) {
+            scheduleCacheLoadAndMaintenance(true);
+        }
     }
 
     private static void scheduleCacheLoadAndMaintenance(boolean forcePull) {
@@ -83,7 +98,7 @@ final class EternalHistoryClient {
         IO.execute(() -> {
             try {
                 loadLocalCache();
-                flushOutbox();
+                flushOutboxIfDue(true);
                 syncCacheIfDue(forcePull);
             } catch (Throwable t) {
                 Logger.printException(() -> "Eternal History initialization failure", t);
@@ -117,7 +132,7 @@ final class EternalHistoryClient {
 
         IO.execute(() -> {
             try {
-                flushOutbox();
+                flushOutboxIfDue(false);
                 syncCacheIfDue(false);
             } catch (Throwable t) {
                 Logger.printDebug(() -> "Eternal History video-change maintenance deferred: " + t.getMessage());
@@ -144,7 +159,7 @@ final class EternalHistoryClient {
             final JSONObject video = makeVideoRecord(videoId, now, progress(videoTimeMs));
             final JSONObject event = makeEvent(videoId, now);
             eventQueued = true;
-            IO.execute(() -> persistAndFlush(video, event));
+            IO.execute(() -> persistAndQueue(video, event));
             return;
         }
         if (!qualified) return;
@@ -157,7 +172,7 @@ final class EternalHistoryClient {
         lastProgressBucket = bucket;
         final long now = System.currentTimeMillis();
         final JSONObject video = makeVideoRecord(videoId, now, pct);
-        IO.execute(() -> persistAndFlush(video, null));
+        IO.execute(() -> persistAndQueue(video, null));
     }
 
     static boolean isWatchedCached(String videoId, double minimumProgress) {
@@ -181,7 +196,7 @@ final class EternalHistoryClient {
         });
     }
 
-    private static void persistAndFlush(JSONObject video, JSONObject event) {
+    private static void persistAndQueue(JSONObject video, JSONObject event) {
         try {
             EternalHistoryDb db = EternalHistoryDb.get();
             db.upsertVideo(video);
@@ -190,7 +205,8 @@ final class EternalHistoryClient {
             if (event != null && eventQueued) {
                 db.enqueue("event:" + event.optString("eventId"), "event", event);
             }
-            flushOutbox();
+            // The outbox is durable. Batch uploads instead of waking radio/TLS for every 5% step.
+            flushOutboxIfDue(false);
         } catch (Throwable t) {
             Logger.printException(() -> "Eternal History persist failure", t);
         }
@@ -244,6 +260,15 @@ final class EternalHistoryClient {
         return Math.max(0.0, Math.min(100.0, (videoTimeMs * 100.0) / length));
     }
 
+    private static void flushOutboxIfDue(boolean force) {
+        if (!configured()) return;
+        long now = SystemClock.elapsedRealtime();
+        long previous = lastUploadAttemptElapsed;
+        if (!force && previous > 0 && now - previous < MIN_UPLOAD_INTERVAL_MS) return;
+        lastUploadAttemptElapsed = now;
+        flushOutbox();
+    }
+
     private static void flushOutbox() {
         if (!configured()) return;
         EternalHistoryDb db = EternalHistoryDb.get();
@@ -274,7 +299,9 @@ final class EternalHistoryClient {
     }
 
     private static void syncCacheIfDue(boolean force) {
-        if (!configured() || !EternalHistorySettings.SYNC_CACHE.get()) return;
+        if (!configured()
+                || !EternalHistorySettings.SYNC_CACHE.get()
+                || !EternalHistorySettings.HIDE_WATCHED.get()) return;
         EternalHistoryDb db = EternalHistoryDb.get();
         long now = System.currentTimeMillis();
         long last = db.getMetaLong(META_PULL_AT, 0);
@@ -300,6 +327,7 @@ final class EternalHistoryClient {
             for (int i = 0; i < records.length(); i++) cacheVideo(records.getJSONObject(i));
             after = records.getJSONObject(records.length() - 1).optString("videoId", after);
             if (records.length() < 500) break;
+            Thread.yield();
         }
         db.setMetaLong(META_REV, baselineRev);
         deltaSync(db, 50);
@@ -320,6 +348,7 @@ final class EternalHistoryClient {
                 db.setMetaLong(META_REV, cursor);
             }
             if (!result.optBoolean("hasMore", false) || next <= 0) break;
+            Thread.yield();
         }
     }
 
