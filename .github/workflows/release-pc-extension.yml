@@ -33,13 +33,17 @@ jobs:
           file="pc-extension/${rel}"
           test -f "$file"
           actual="$(sha256sum "$file" | awk '{print $1}')"
-          test "$actual" = "$expected"
+          echo "Expected SHA-256: $expected"
+          echo "Actual SHA-256:   $actual"
+          unzip -t "$file"
           rm -rf .pc-release && mkdir .pc-release
           unzip -q "$file" -d .pc-release
           manifest="$(find .pc-release -path '*/extension/manifest.json' -print -quit)"
           test -n "$manifest"
           manifest_version="$(jq -r '.version' "$manifest")"
+          echo "Manifest version: $manifest_version"
           test "$manifest_version" = "$version"
+          test "$actual" = "$expected"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "file=$file" >> "$GITHUB_OUTPUT"
           echo "sha256=$actual" >> "$GITHUB_OUTPUT"
