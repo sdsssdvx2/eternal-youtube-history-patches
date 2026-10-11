@@ -1,3 +1,13 @@
+## [1.6.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.5.0...v1.6.0) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* **pc:** render release notes with real line breaks ([33ca28f](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/33ca28fb03edbfe70e946266648fd80d7a168492))
+
+### ✨ New Features
+
+* notify for YouTube Music bundle updates ([6685742](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/6685742a110475c7dc960b6d27b7ac932d00d1b3))
+
 ## [1.5.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.4.0...v1.5.0) (2026-10-11)
 
 ### 🐛 Bug Fixes
