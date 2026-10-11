@@ -14,20 +14,10 @@
   <string name="morphe_eternal_history_progress_step_summary">기본값 5. 진행률이 이만큼 증가할 때만 D1에 갱신해 쓰기 사용량을 줄입니다.</string>
   <string name="morphe_eternal_history_sync_cache_title">D1 원장 로컬 캐시</string>
   <string name="morphe_eternal_history_sync_cache_summary">처음 한 번 전체 원장을 받고 이후 revision 변경분만 받아 피드 판정에 사용합니다.</string>
-    <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>
-    <string name="morphe_eternal_history_feed_mode_summary">변경 없음 / 흐리게 / 숨기기 중 선택합니다.</string>
-    <string-array name="morphe_eternal_history_feed_mode_entries">
-        <item>변경 없음</item>
-        <item>흐리게</item>
-        <item>숨기기</item>
-    </string-array>
-    <string-array name="morphe_eternal_history_feed_mode_values">
-        <item>none</item>
-        <item>dim</item>
-        <item>hide</item>
-    </string-array>
-    <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>
-    <string name="morphe_eternal_history_visual_min_progress_summary">0이면 진행률을 모르는 과거 기록도 흐리게/숨김 대상으로 봅니다.</string>
+  <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>
+  <string name="morphe_eternal_history_feed_mode_summary">변경 없음 / 흐리게 / 숨기기 중 선택합니다.</string>
+  <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_visual_min_progress_summary">0이면 진행률을 모르는 과거 기록도 흐리게/숨김 대상으로 봅니다.</string>
   <string name="morphe_eternal_history_hide_watched_title">시청한 피드 카드 숨기기</string>
   <string name="morphe_eternal_history_hide_watched_summary">D1 로컬 캐시에 시청 기록이 있는 홈·검색·구독·관련영상·Shorts 카드를 제거합니다.</string>
   <string name="morphe_eternal_history_hide_min_progress_title">숨김 최소 진행률(%)</string>
