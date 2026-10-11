@@ -1,5 +1,6 @@
 name: Analyze Litho alpha hook
 
+# Debug rerun: 2026-10-11 watched-card dim hook ordering
 on:
   workflow_dispatch:
   push:
