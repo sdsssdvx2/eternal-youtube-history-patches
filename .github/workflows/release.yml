@@ -3,6 +3,17 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, dev ]
+    paths:
+      - 'patches/**'
+      - 'extensions/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.releaserc*'
 
 jobs:
   release:
