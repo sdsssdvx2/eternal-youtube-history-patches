@@ -2,22 +2,16 @@ package app.morphe.extension.youtube.patches.eternalhistory;
 
 import android.view.View;
 
-import java.lang.reflect.Method;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/** Bridges a watched feed-card decision to Litho's node alpha before mount. */
+/** Fast watched-card matcher used by the patched Litho alpha path. */
 @SuppressWarnings("unused")
 public final class EternalWatchedDim {
-    private static final float DIM_ALPHA = 0.38f;
-    // Only titles for recently encountered watched cards are needed. Keeping this small prevents
-    // feed scrolling from turning into an ever-growing prefix search.
     private static final int MAX_PENDING_TITLES = 64;
     private static final ConcurrentHashMap<String, Boolean> PENDING = new ConcurrentHashMap<>();
     private static final ConcurrentLinkedQueue<String> ORDER = new ConcurrentLinkedQueue<>();
-    private static volatile Class<?> nodeClass;
-    private static volatile Method setAlphaMethod;
 
     private EternalWatchedDim() { }
 
@@ -33,27 +27,18 @@ public final class EternalWatchedDim {
         }
     }
 
-    /** Called from the patched Litho mount path immediately before its existing alpha application. */
-    public static void apply(View view, Object nodeInfo) {
-        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isDimMode()) return;
-        if (view == null || nodeInfo == null || PENDING.isEmpty()) return;
+    /**
+     * Called on the normal Litho mount path. It only decides whether the current card should be
+     * dimmed; the bytecode patch invokes YouTube's own node-alpha setter so normal unmount/reuse
+     * logic restores alpha correctly without reflection or per-card database/network work.
+     */
+    public static boolean shouldDim(View view) {
+        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isDimMode()) return false;
+        if (view == null || PENDING.isEmpty()) return false;
         CharSequence description = view.getContentDescription();
-        if (description == null || description.length() == 0) return;
+        if (description == null || description.length() == 0) return false;
         String text = normalize(description.toString());
-        if (text.isEmpty() || !matchesPendingTitle(text)) return;
-        try {
-            Method method = setAlphaMethod;
-            Class<?> cls = nodeInfo.getClass();
-            if (method == null || nodeClass != cls) {
-                method = cls.getDeclaredMethod("g", float.class);
-                method.setAccessible(true);
-                nodeClass = cls;
-                setAlphaMethod = method;
-            }
-            method.invoke(nodeInfo, DIM_ALPHA);
-        } catch (Throwable ignored) {
-            // Obfuscation changes must never break the feed. Supported versions are patch-time validated.
-        }
+        return !text.isEmpty() && matchesPendingTitle(text);
     }
 
     private static boolean matchesPendingTitle(String description) {
@@ -68,7 +53,7 @@ public final class EternalWatchedDim {
         return false;
     }
 
-    /** Avoid regex allocation in the mount path; collapse whitespace with one small linear pass. */
+    /** Avoid regex allocation in the mount path; collapse whitespace with one linear pass. */
     private static String normalize(String value) {
         if (value == null) return "";
         int length = value.length();
@@ -84,7 +69,7 @@ public final class EternalWatchedDim {
                 out.append(' ');
                 pendingSpace = false;
             }
-            out.append(Character.toLowerCase(c));
+            out.append(c);
         }
         return out.toString().toLowerCase(Locale.ROOT);
     }
