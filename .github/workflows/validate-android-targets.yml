@@ -43,7 +43,7 @@ jobs:
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
           version=os.environ['VERSION']
-          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('arm64-v8a','universal'),target_abi='arm64-v8a')
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal','arm64-v8a'),target_abi='arm64-v8a')
           r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
           out=Path('.validation/input/youtube.apk')
           errs=[]
@@ -61,10 +61,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
-          get_asset(){ repo="$1" re="$2" out="$3"; url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$re" '.assets[]|select(.name|test($re))|.browser_download_url' | head -1)"; test -n "$url" && test "$url" != null; curl -fL --retry 3 "$url" -o "$out"; }
-          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\\.jar$' .validation/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches '^patches-.*\\.mpp$' .validation/tools/morphe.mpp
-          get_asset sdsssdvx2/eternal-youtube-history-patches '^patches-.*\\.mpp$' .validation/tools/eternal.mpp
+          get_asset(){
+            repo="$1" kind="$2" out="$3"
+            case "$kind" in
+              desktop) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' | head -1)" ;;
+              patches) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .browser_download_url' | head -1)" ;;
+              *) exit 2 ;;
+            esac
+            test -n "$url" && test "$url" != null
+            curl -fL --retry 3 "$url" -o "$out"
+          }
+          get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
+          get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
+          get_asset sdsssdvx2/eternal-youtube-history-patches patches .validation/tools/eternal.mpp
       - name: Patch recommended YouTube entirely on server
         run: |
           set -euo pipefail
@@ -130,9 +139,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
-          get_asset(){ repo="$1" re="$2" out="$3"; url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$re" '.assets[]|select(.name|test($re))|.browser_download_url' | head -1)"; test -n "$url" && test "$url" != null; curl -fL --retry 3 "$url" -o "$out"; }
-          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\\.jar$' .validation/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches '^patches-.*\\.mpp$' .validation/tools/morphe.mpp
+          get_asset(){
+            repo="$1" kind="$2" out="$3"
+            case "$kind" in
+              desktop) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' | head -1)" ;;
+              patches) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .browser_download_url' | head -1)" ;;
+              *) exit 2 ;;
+            esac
+            test -n "$url" && test "$url" != null
+            curl -fL --retry 3 "$url" -o "$out"
+          }
+          get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
+          get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
       - name: Patch recommended YouTube Music entirely on server
         run: |
           set -euo pipefail
