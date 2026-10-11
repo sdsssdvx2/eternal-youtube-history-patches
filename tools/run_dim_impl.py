@@ -21,5 +21,8 @@ s = s.replace(
     'v0.2는 기록/진행률/D1 캐시/시청 카드 숨기기를 제공합니다. 흐리게 표시는 후속 렌더 훅에서 추가합니다.',
     'v0.2는 안정적인 Litho 경로로 ‘숨기기’를 지원합니다. 흐리게 표시는 View 렌더 훅 검증 후 추가할 예정입니다.',
 )
+# The source helper/UI/cache changes are staged here. The version-specific bytecode hook is applied
+# separately in the final feature commit so semantic-release never publishes a half-connected build.
+s = s.replace('edit(path, patch)\n', 'print("patcher hook intentionally staged separately")\n')
 code = compile(s, str(p), "exec")
 exec(code, {"__name__": "__main__", "__file__": str(p)})
