@@ -55,17 +55,26 @@ jobs:
           .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-style.log 2>&1 || true
           test -d .analysis/decompiled/sources/defpackage
           rm -f .analysis/input/youtube.apk
-      - name: Inspect alpha style setters
+      - name: Inspect component common-props alpha path
         shell: bash
         run: |
+          set -euo pipefail
           D=.analysis/decompiled/sources/defpackage
-          echo '===== gij full ====='; sed -n '1,430p' "$D/gij.java" || true
-          echo '===== tqu full ====='; sed -n '1,420p' "$D/tqu.java" || true
-          echo '===== bksa full ====='; sed -n '1,320p' "$D/bksa.java" || true
-          echo '===== calls to uzc.i / tqu.i with Float ====='
-          grep -R -n -E '\.i\([^;]*Float|\.i\([^;]*float|\.i\([^;]*valueOf' "$D" 2>/dev/null | head -260 || true
-          echo '===== direct gij alpha field setter references ====='
-          grep -R -n -E '\.m[[:space:]]*=|\.g\([^;]*\)|\.A\([^;]*\)|\.B\([^;]*\)|\.D\([^;]*\)|\.E\([^;]*\)|\.z\([^;]*\)' "$D" 2>/dev/null | grep -E 'gij|tqu|uzc|alpha|Float' | head -260 || true
+          echo '===== gec common-props accessor ====='
+          grep -n -B25 -A55 -E 'public final gdy k\(| gdy k\(' "$D/gec.java" || true
+          echo '===== gdy full signatures and NodeInfo access ====='
+          grep -n -E 'class gdy|gij|public|final| F\(| k\(' "$D/gdy.java" | head -500 || true
+          grep -n -B35 -A75 -E 'gij F\(|public final gij|new gij' "$D/gdy.java" || true
+          echo '===== gdz wrapper around component ====='
+          sed -n '1,260p' "$D/gdz.java" || true
+          echo '===== tqu build tail ====='
+          sed -n '400,490p' "$D/tqu.java" || true
+          echo '===== callers using component.k().F() ====='
+          grep -R -n -F '.k().F()' "$D" | head -250 || true
+          echo '===== callers setting static alpha on nodeinfo/common props ====='
+          grep -R -n -E '\.F\(\)\.g\(|gijVar\.g\(' "$D" | head -250 || true
+          echo '===== tvw direct component transforms ====='
+          sed -n '210,275p' "$D/tvw.java" || true
       - name: Cleanup
         if: always()
         run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
