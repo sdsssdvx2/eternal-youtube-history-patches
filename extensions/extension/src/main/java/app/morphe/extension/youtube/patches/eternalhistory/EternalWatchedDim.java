@@ -11,7 +11,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 @SuppressWarnings("unused")
 public final class EternalWatchedDim {
     private static final float DIM_ALPHA = 0.38f;
-    private static final int MAX_PENDING_TITLES = 256;
+    // Only titles for recently encountered watched cards are needed. Keeping this small prevents
+    // feed scrolling from turning into an ever-growing prefix search.
+    private static final int MAX_PENDING_TITLES = 64;
     private static final ConcurrentHashMap<String, Boolean> PENDING = new ConcurrentHashMap<>();
     private static final ConcurrentLinkedQueue<String> ORDER = new ConcurrentLinkedQueue<>();
     private static volatile Class<?> nodeClass;
@@ -36,7 +38,7 @@ public final class EternalWatchedDim {
         if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isDimMode()) return;
         if (view == null || nodeInfo == null || PENDING.isEmpty()) return;
         CharSequence description = view.getContentDescription();
-        if (description == null) return;
+        if (description == null || description.length() == 0) return;
         String text = normalize(description.toString());
         if (text.isEmpty() || !matchesPendingTitle(text)) return;
         try {
@@ -66,8 +68,24 @@ public final class EternalWatchedDim {
         return false;
     }
 
+    /** Avoid regex allocation in the mount path; collapse whitespace with one small linear pass. */
     private static String normalize(String value) {
         if (value == null) return "";
-        return value.trim().replaceAll("\s+", " ").toLowerCase(Locale.ROOT);
+        int length = value.length();
+        StringBuilder out = new StringBuilder(length);
+        boolean pendingSpace = false;
+        for (int i = 0; i < length; i++) {
+            char c = value.charAt(i);
+            if (Character.isWhitespace(c)) {
+                if (out.length() > 0) pendingSpace = true;
+                continue;
+            }
+            if (pendingSpace) {
+                out.append(' ');
+                pendingSpace = false;
+            }
+            out.append(Character.toLowerCase(c));
+        }
+        return out.toString().toLowerCase(Locale.ROOT);
     }
 }
