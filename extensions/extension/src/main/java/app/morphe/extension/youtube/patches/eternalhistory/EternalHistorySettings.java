@@ -32,7 +32,7 @@ public final class EternalHistorySettings {
     public static final IntegerSetting HIDE_MIN_PROGRESS =
             new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));
 
-    /** Opacity of watched thumbnails in dim mode. Text/metadata stay untouched. */
+    /** Opacity of watched thumbnails in dim mode. Text and metadata stay untouched. */
     public static final IntegerSetting THUMBNAIL_OPACITY =
             new IntegerSetting("morphe_eternal_history_thumbnail_opacity", 65, false, parent(ENABLED));
     public static final BooleanSetting THUMBNAIL_GRAYSCALE =
