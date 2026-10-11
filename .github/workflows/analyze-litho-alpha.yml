@@ -7,14 +7,16 @@ on:
       - '.github/workflows/analyze-litho-alpha.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/checkout@v7
         with:
           repository: krishhari2105/morphe-builds
@@ -34,7 +36,7 @@ jobs:
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
           app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
-          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=8)
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
           out=Path('.analysis/input/youtube.apk'); expected='724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
           for url,ref in r.iter_candidates(app,'21.16.256'):
               try:
@@ -55,24 +57,74 @@ jobs:
           .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-alpha.log 2>&1 || true
           test -d .analysis/decompiled/sources/defpackage
           rm -f .analysis/input/youtube.apk
-      - name: Inspect Litho mount alpha path
+      - name: Persist hook report
         shell: bash
         run: |
           set -euo pipefail
-          D=.analysis/decompiled/sources/defpackage
-          for cls in ggo gtx guf gho gij gee gfg ghz gjz tri uzc gec; do
-            f="$D/$cls.java"
-            [ -f "$f" ] || continue
-            echo "===== CLASS $cls ====="
-            grep -n -E 'setAlpha|alpha|ComponentHost|View |View\)|float |public |final |void |Object ' "$f" | head -260 || true
-          done
-          echo '===== ComponentHost reset/content allocator ggo full ====='
-          sed -n '1,180p' "$D/ggo.java" 2>/dev/null || true
-          echo '===== parser tri key region ====='
-          grep -n -B50 -A180 -E 'Element missing correct type extension|Element missing type' "$D/tri.java" 2>/dev/null | head -280 || true
-          echo '===== likely generic alpha setter wrappers ====='
-          for cls in bxo epp gki aipe bmyj; do
-            f="$D/$cls.java"; [ -f "$f" ] || continue; echo "--- $cls"; sed -n '1,180p' "$f"; done
+          mkdir -p analysis
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.analysis/decompiled/sources/defpackage')
+          out = []
+          def add(title, text=''):
+              out.append('\n===== ' + title + ' =====\n')
+              out.append(text)
+
+          # Every direct View alpha application, with enough context to recover method signatures.
+          hits=[]
+          for p in root.glob('*.java'):
+              try: lines=p.read_text(errors='ignore').splitlines()
+              except Exception: continue
+              for i,line in enumerate(lines):
+                  if '.setAlpha(' in line:
+                      hits.append((p.name,i,lines))
+          add('DIRECT setAlpha HITS', f'count={len(hits)}\n')
+          for name,i,lines in hits[:80]:
+              lo=max(0,i-55); hi=min(len(lines),i+70)
+              add(f'{name}:{i+1}', '\n'.join(f'{n+1:5d}: {lines[n]}' for n in range(lo,hi))+'\n')
+
+          # Known Litho candidates from the first pass, kept mostly whole.
+          for cls in ['ggo','gij','gtx','guf','gho','gee','gfg','ghz','gjz','tqu','uzc','gec']:
+              p=root/(cls+'.java')
+              if p.exists():
+                  text=p.read_text(errors='ignore')
+                  add(f'FULL {cls}.java', text[:70000])
+
+          # Find references to the known style/node classes and alpha-like Float writes.
+          patterns=[r'\bgij\b',r'\btqu\b',r'\buzc\b',r'Float\.valueOf',r'floatValue\(\)',r'ComponentHost']
+          refs=[]
+          rx=re.compile('|'.join(patterns))
+          for p in root.glob('*.java'):
+              try: lines=p.read_text(errors='ignore').splitlines()
+              except Exception: continue
+              if not any(rx.search(x) for x in lines): continue
+              picked=[]
+              for i,line in enumerate(lines):
+                  if rx.search(line):
+                      picked.extend(range(max(0,i-6),min(len(lines),i+10)))
+              if picked:
+                  uniq=sorted(set(picked))[:500]
+                  refs.append((p.name,'\n'.join(f'{n+1:5d}: {lines[n]}' for n in uniq)))
+          add('CLASS/STYLE REFERENCES', f'files={len(refs)}\n')
+          for name,text in refs[:100]:
+              add(name,text+'\n')
+
+          Path('analysis/litho-alpha-21.16.256.txt').write_text(''.join(out), encoding='utf-8')
+          PY
+          wc -c analysis/litho-alpha-21.16.256.txt
+      - name: Commit report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add analysis/litho-alpha-21.16.256.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: record Litho alpha analysis'
+            git push
+          fi
       - name: Cleanup
         if: always()
         run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
