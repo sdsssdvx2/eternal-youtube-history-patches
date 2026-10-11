@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Apply implementation
-        run: python3 tools/implement_watched_dim.py
+        run: python3 tools/run_dim_impl.py
       - name: Commit implementation
         shell: bash
         run: |
