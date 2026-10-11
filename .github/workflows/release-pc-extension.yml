@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - feat-pc-extension-source-073
     paths:
       - 'pc-extension/src/**'
       - 'pc-extension/README.md'
