@@ -97,30 +97,35 @@ jobs:
           test "$count" -gt 1000
           rm -f .analysis/input/youtube.apk
 
-      - name: Locate Cronet image loader and Litho parser
+      - name: Inspect Litho parser and tree-node result flow
         shell: bash
         run: |
-          echo '=== image URL fingerprint candidates ==='
-          grep -R -l -F "@#&=*+-_.,:!?()/~'%;$" .analysis/decompiled/sources | head -20 | tee /tmp/image-files || true
+          set -euo pipefail
+          S=.analysis/decompiled/sources
+
+          echo '=== create-component hook method ==='
+          grep -R -l -F 'Element missing correct type extension' "$S" | head -10 | tee /tmp/create-component-files || true
           while IFS= read -r f; do
             [ -n "$f" ] || continue
             echo "----- $f"
-            grep -n -B20 -A80 -F "@#&=*+-_.,:!?()/~'%;$" "$f" | head -180 || true
-          done < /tmp/image-files
+            grep -n -B120 -A220 -F 'Element missing correct type extension' "$f" | head -520 || true
+          done < /tmp/create-component-files
 
-          echo '=== Litho element parser candidates ==='
-          grep -R -l -F 'Element missing correct type extension' .analysis/decompiled/sources | head -20 | tee /tmp/litho-files || true
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
+          echo '=== component-context parser class ==='
+          grep -R -l -F 'Failed to parse Element proto.' "$S" | while IFS= read -r f; do
+            grep -q -F 'Cannot read theme key from model.' "$f" || continue
             echo "----- $f"
-            grep -n -B80 -A160 -F 'Element missing correct type extension' "$f" | head -320 || true
-          done < /tmp/litho-files
+            grep -n -E 'Collections\.nCopies|nCopies\(|private final .*List|List<|java.util.List|return .*;' "$f" | head -500 || true
+            echo '--- nCopies context ---'
+            grep -n -B100 -A180 -E 'nCopies\(' "$f" | head -1000 || true
+          done
 
-          echo '=== ComponentHost / alpha-related candidates ==='
-          grep -R -l -E 'ComponentHost|setAlpha\(' .analysis/decompiled/sources/com/google/android/apps/youtube 2>/dev/null | head -30 || true
+          echo '=== classes around parser calls / result lists ==='
+          grep -R -l -E 'Collections\.nCopies|nCopies\(' "$S/defpackage" 2>/dev/null | head -40 | while IFS= read -r f; do
+            echo "----- $f"
+            grep -n -B35 -A90 -E 'nCopies\(' "$f" | head -300 || true
+          done
 
       - name: Remove proprietary decompile tree
         if: always()
         run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
-
-# Triggered to inspect the v21.16.256 feed render path for Eternal dim mode.
