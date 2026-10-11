@@ -57,19 +57,22 @@ jobs:
           else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
           PY
       - name: Resolve Morphe Desktop and both patch sources
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
           get_asset(){
             repo="$1" kind="$2" out="$3"
+            release="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${repo}/releases/latest")"
             case "$kind" in
-              desktop) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' | head -1)" ;;
-              patches) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .browser_download_url' | head -1)" ;;
+              desktop) api_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$release" | head -1)" ;;
+              patches) api_url="$(jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .url' <<<"$release" | head -1)" ;;
               *) exit 2 ;;
             esac
-            test -n "$url" && test "$url" != null
-            curl -fL --retry 3 "$url" -o "$out"
+            test -n "$api_url" && test "$api_url" != null
+            curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api_url" -o "$out"
           }
           get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
           get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
@@ -135,19 +138,22 @@ jobs:
           else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-5:]))
           PY
       - name: Resolve Morphe Desktop and stable patches
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
           get_asset(){
             repo="$1" kind="$2" out="$3"
+            release="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${repo}/releases/latest")"
             case "$kind" in
-              desktop) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' | head -1)" ;;
-              patches) url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .browser_download_url' | head -1)" ;;
+              desktop) api_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$release" | head -1)" ;;
+              patches) api_url="$(jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .url' <<<"$release" | head -1)" ;;
               *) exit 2 ;;
             esac
-            test -n "$url" && test "$url" != null
-            curl -fL --retry 3 "$url" -o "$out"
+            test -n "$api_url" && test "$api_url" != null
+            curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api_url" -o "$out"
           }
           get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
           get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
