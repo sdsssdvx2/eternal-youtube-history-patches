@@ -15,7 +15,7 @@ import app.morphe.patcher.util.smali.ExternalLabel
 import app.morphe.util.findFreeRegister
 import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.Opcode
-import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.reference.FieldReference
@@ -65,8 +65,8 @@ private val YOUTUBE = Compatibility(
 
 /**
  * YouTube's Litho mount helper applies node properties such as content description and alpha.
- * Matching the platform View calls rather than an obfuscated class/method name keeps the hook
- * resilient across the supported app versions.
+ * We use it only as an obfuscation-safe structural anchor to discover NodeInfo's alpha field and
+ * setter. Eternal no longer executes any code from the hot View mount path.
  */
 private object LithoMountPropertiesFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.STATIC),
@@ -80,6 +80,18 @@ private object LithoMountPropertiesFingerprint : Fingerprint(
             opcode = Opcode.INVOKE_VIRTUAL,
             smali = "Landroid/view/View;->setAlpha(F)V"
         )
+    )
+)
+
+/**
+ * This is the same create-component method Morphe's Litho filter patches. The two diagnostic
+ * strings have remained the stable anchor while the surrounding YouTube classes are obfuscated.
+ */
+private object LithoCreateComponentFingerprint : Fingerprint(
+    returnType = "L",
+    strings = listOf(
+        "Element missing correct type extension",
+        "Element missing type"
     )
 )
 
@@ -112,24 +124,18 @@ private fun installWatchedCardHook() {
 }
 
 /**
- * Connects Eternal's watched-card decision to YouTube's own Litho alpha property instead of
- * directly mutating recycled Views. This matters because Litho's normal unmount path then resets
- * alpha to 1.0, preventing a watched card's opacity from leaking into a reused unwatched card.
+ * Resolves Litho's NodeInfo alpha setter from the actual mount implementation. This is patch-time
+ * discovery only; no Eternal code is executed for every mounted View.
  */
 context(context: BytecodePatchContext)
-private fun installWatchedDimHook() {
-    val method = LithoMountPropertiesFingerprint.method
-    val instructions = method.implementation?.instructions
+private fun resolveLithoAlphaSetter(): Pair<FieldReference, MethodReference> {
+    val mountMethod = LithoMountPropertiesFingerprint.method
+    val instructions = mountMethod.implementation?.instructions
         ?: throw PatchException("Eternal dim: Litho mount method has no implementation")
 
-    var alphaIndex = -1
-    var viewRegister = -1
-    var nodeRegister = -1
     var alphaField: FieldReference? = null
 
-    // Find the View.setAlpha() whose argument is loaded from the Litho node-info float field.
-    // Other setAlpha() calls (for animations/resets) are ignored because they are not preceded by
-    // an iget of a float from the node-info object.
+    // Find the View.setAlpha() whose argument is loaded from a float field on Litho NodeInfo.
     for (i in instructions.indices) {
         val instruction = instructions[i]
         val methodRef = (instruction as? ReferenceInstruction)?.reference as? MethodReference ?: continue
@@ -140,50 +146,25 @@ private fun installWatchedDimHook() {
             methodRef.parameterTypes.first().toString() != "F"
         ) continue
 
-        val invoke = instruction as? FiveRegisterInstruction ?: continue
         for (j in (i - 1) downTo maxOf(0, i - 5)) {
             val fieldInstruction = instructions[j]
             val fieldRef = (fieldInstruction as? ReferenceInstruction)?.reference as? FieldReference ?: continue
-            val registers = fieldInstruction as? TwoRegisterInstruction ?: continue
             if (fieldRef.type != "F" || fieldInstruction.opcode != Opcode.IGET) continue
-
-            alphaIndex = i
-            viewRegister = invoke.registerC
-            nodeRegister = registers.registerB
+            if (fieldInstruction !is TwoRegisterInstruction) continue
             alphaField = fieldRef
             break
         }
-        if (alphaIndex >= 0) break
+        if (alphaField != null) break
     }
 
     val field = alphaField
         ?: throw PatchException("Eternal dim: Litho node alpha field was not found")
-    if (viewRegister < 0 || nodeRegister < 0) {
-        throw PatchException("Eternal dim: Litho alpha registers were not found")
-    }
-
-    // The alpha-presence boolean getter immediately precedes the branch that guards setAlpha().
-    // Insert before it, so setting node alpha also makes the existing guard see the new value.
-    var gateIndex = -1
-    for (i in (alphaIndex - 1) downTo maxOf(0, alphaIndex - 12)) {
-        val ref = (instructions[i] as? ReferenceInstruction)?.reference as? MethodReference ?: continue
-        if (
-            ref.definingClass == field.definingClass &&
-            ref.returnType == "Z" &&
-            ref.parameterTypes.isEmpty()
-        ) {
-            gateIndex = i
-            break
-        }
-    }
-    if (gateIndex < 0) throw PatchException("Eternal dim: Litho alpha gate was not found")
-
-    // Resolve the node's own alpha setter by the exact field it writes. This avoids hard-coding
-    // an obfuscated method name and avoids reflection on the hot feed-render path.
     val nodeClass = context.mutableClassDefByOrNull(field.definingClass)
         ?: throw PatchException("Eternal dim: Litho node-info class was not found")
+
     val alphaSetter = nodeClass.methods.firstOrNull { candidate ->
-        candidate.returnType == "V" &&
+        !AccessFlags.STATIC.isSet(candidate.accessFlags) &&
+            candidate.returnType == "V" &&
             candidate.parameters.size == 1 &&
             candidate.parameters.first().type == "F" &&
             candidate.implementation?.instructions?.any { setterInstruction ->
@@ -196,24 +177,117 @@ private fun installWatchedDimHook() {
             } == true
     } ?: throw PatchException("Eternal dim: Litho node alpha setter was not found")
 
-    method.apply {
-        val free = findFreeRegister(gateIndex, viewRegister, nodeRegister)
-        // Standard invoke encodings use 4-bit registers. The current supported YouTube versions
-        // all use low registers here; fail closed at patch time if that ever changes.
-        if (free > 15 || viewRegister > 15 || nodeRegister > 15) {
-            throw PatchException("Eternal dim: Litho mount registers exceed invoke encoding")
+    return field to alphaSetter
+}
+
+/**
+ * Applies dimming to the exact component that Eternal just classified as watched.
+ *
+ * Morphe invokes its extension filter immediately before returning this component. Eternal stores
+ * only a per-layout-thread boolean for that tiny hand-off. We consume it at the original return,
+ * then write alpha through the component's own CommonProps -> NodeInfo path. This completely
+ * removes the old global FIFO, accessibility/contentDescription matching and mount-order guesses.
+ *
+ * The CommonProps byte flag is also set exactly like Litho's normal builder alpha method. This is
+ * important because it tells Litho that this component carries a view-affecting common property,
+ * allowing the whole card to receive the alpha rather than relying on a random child mount node.
+ */
+context(context: BytecodePatchContext)
+private fun installWatchedDimHook() {
+    val (alphaField, alphaSetter) = resolveLithoAlphaSetter()
+    val nodeInfoType = alphaField.definingClass
+
+    val createMethod = LithoCreateComponentFingerprint.method
+    val createInstructions = createMethod.implementation?.instructions
+        ?: throw PatchException("Eternal dim: create-component method has no implementation")
+    val returnIndex = createInstructions.indexOfLast { it.opcode == Opcode.RETURN_OBJECT }
+    if (returnIndex < 0) throw PatchException("Eternal dim: component return was not found")
+
+    val componentRegister =
+        (createInstructions[returnIndex] as? OneRegisterInstruction)?.registerA
+            ?: throw PatchException("Eternal dim: component return register was not found")
+    val componentType = createMethod.returnType
+    if (!componentType.startsWith("L")) {
+        throw PatchException("Eternal dim: unexpected component return type $componentType")
+    }
+
+    val componentClass = context.mutableClassDefByOrNull(componentType)
+        ?: throw PatchException("Eternal dim: component class was not found")
+
+    // The CommonProps type is the component field whose class owns both a NodeInfo field and the
+    // byte property-mask field. On 21.16.256 this resolves gec -> gdy without hard-coded names.
+    val commonPropsTypes = componentClass.fields.map { it.type }.distinct().filter { candidateType ->
+        if (!candidateType.startsWith("L")) return@filter false
+        val candidateClass = context.mutableClassDefByOrNull(candidateType) ?: return@filter false
+        candidateClass.fields.any { it.type == nodeInfoType } &&
+            candidateClass.fields.any { it.type == "B" }
+    }
+    if (commonPropsTypes.size != 1) {
+        throw PatchException("Eternal dim: expected one CommonProps type, found ${commonPropsTypes.size}")
+    }
+    val commonPropsType = commonPropsTypes.single()
+    val commonPropsClass = context.mutableClassDefByOrNull(commonPropsType)
+        ?: throw PatchException("Eternal dim: CommonProps class was not found")
+
+    val commonPropsAccessor = componentClass.methods.singleOrNull { candidate ->
+        !AccessFlags.STATIC.isSet(candidate.accessFlags) &&
+            candidate.parameters.isEmpty() &&
+            candidate.returnType == commonPropsType
+    } ?: throw PatchException("Eternal dim: CommonProps accessor was not uniquely found")
+
+    val nodeInfoAccessor = commonPropsClass.methods.singleOrNull { candidate ->
+        !AccessFlags.STATIC.isSet(candidate.accessFlags) &&
+            candidate.parameters.isEmpty() &&
+            candidate.returnType == nodeInfoType
+    } ?: throw PatchException("Eternal dim: NodeInfo accessor was not uniquely found")
+
+    val commonPropsFlag = commonPropsClass.fields.singleOrNull { it.type == "B" }
+        ?: throw PatchException("Eternal dim: CommonProps property-mask byte was not uniquely found")
+    val commonPropsFlagRef =
+        "${commonPropsFlag.definingClass}->${commonPropsFlag.name}:${commonPropsFlag.type}"
+
+    createMethod.apply {
+        val decisionRegister = findFreeRegister(returnIndex, componentRegister)
+        val commonPropsRegister = findFreeRegister(returnIndex, componentRegister, decisionRegister)
+        val nodeInfoRegister = findFreeRegister(
+            returnIndex, componentRegister, decisionRegister, commonPropsRegister
+        )
+        val alphaRegister = findFreeRegister(
+            returnIndex, componentRegister, decisionRegister, commonPropsRegister, nodeInfoRegister
+        )
+
+        // The compact invoke encoding needs 4-bit registers. Fail at patch time rather than emit an
+        // invalid APK if a future YouTube build changes this method's register layout substantially.
+        val registers = listOf(
+            decisionRegister, commonPropsRegister, nodeInfoRegister, alphaRegister, componentRegister
+        )
+        if (registers.any { it > 15 }) {
+            throw PatchException("Eternal dim: component registers exceed invoke encoding")
         }
-        val continueInstruction = getInstruction(gateIndex)
+
+        val originalReturn = getInstruction(returnIndex)
         addInstructionsWithLabels(
-            gateIndex,
+            returnIndex,
             """
-                invoke-static { v$viewRegister }, $WATCHED_DIM->shouldDim(Landroid/view/View;)Z
-                move-result v$free
-                if-eqz v$free, :eternal_dim_continue
-                const v$free, 0x3ec28f5c
-                invoke-virtual { v$nodeRegister, v$free }, ${field.definingClass}->${alphaSetter.name}(F)V
+                invoke-static {}, $WATCHED_DIM->consumePreparedDim()Z
+                move-result v$decisionRegister
+                if-eqz v$decisionRegister, :eternal_dim_component_continue
+                if-eqz v$componentRegister, :eternal_dim_component_continue
+
+                invoke-virtual { v$componentRegister }, $componentType->${commonPropsAccessor.name}()$commonPropsType
+                move-result-object v$commonPropsRegister
+                invoke-virtual { v$commonPropsRegister }, $commonPropsType->${nodeInfoAccessor.name}()$nodeInfoType
+                move-result-object v$nodeInfoRegister
+
+                const v$alphaRegister, 0x3ec28f5c
+                invoke-virtual { v$nodeInfoRegister, v$alphaRegister }, $nodeInfoType->${alphaSetter.name}(F)V
+
+                iget-byte v$decisionRegister, v$commonPropsRegister, $commonPropsFlagRef
+                or-int/lit8 v$decisionRegister, v$decisionRegister, 0x8
+                int-to-byte v$decisionRegister, v$decisionRegister
+                iput-byte v$decisionRegister, v$commonPropsRegister, $commonPropsFlagRef
             """.trimIndent(),
-            ExternalLabel("eternal_dim_continue", continueInstruction)
+            ExternalLabel("eternal_dim_component_continue", originalReturn)
         )
     }
 }
