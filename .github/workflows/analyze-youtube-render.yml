@@ -52,12 +52,13 @@ jobs:
           resolver = ApkMirrorResolver(min_request_interval=1.2, max_release_attempts=3, max_variant_attempts=8)
           dest = Path('.analysis/input/youtube.apk')
           errors = []
+          expected = '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
           for url, referer in resolver.iter_candidates(app, '21.16.256'):
               try:
                   result = resolver.download_candidate(url, referer, dest)
-                  print('Downloaded clean base APK:', result.size, 'bytes', result.sha256)
-                  if result.sha256 != '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00':
-                      raise RuntimeError('Unexpected base APK SHA-256')
+                  print('Downloaded candidate:', result.size, 'bytes', result.sha256)
+                  if result.sha256 != expected:
+                      raise RuntimeError('Candidate is not the validated universal APK')
                   break
               except Exception as exc:
                   errors.append(str(exc))
@@ -81,13 +82,19 @@ jobs:
           curl -fL --retry 3 "$(cat .analysis/jadx-url)" -o .analysis/jadx.zip
           unzip -q .analysis/jadx.zip -d .analysis/jadx
 
-      - name: Decompile only enough for hook discovery
+      - name: Decompile enough for hook discovery
+        shell: bash
         run: |
           mkdir -p .analysis/decompiled
-          .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx.log 2>&1 || {
-            tail -100 /tmp/jadx.log
-            exit 1
-          }
+          set +e
+          .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx.log 2>&1
+          rc=$?
+          set -e
+          tail -40 /tmp/jadx.log
+          test -d .analysis/decompiled/sources
+          count="$(find .analysis/decompiled/sources -type f -name '*.java' | wc -l)"
+          echo "Decompiled Java files: $count (JADX exit code $rc)"
+          test "$count" -gt 1000
           rm -f .analysis/input/youtube.apk
 
       - name: Locate Cronet image loader and Litho parser
