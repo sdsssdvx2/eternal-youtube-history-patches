@@ -1,0 +1,103 @@
+name: Validate server-side app patching
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-server-patch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  youtube:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Checkout APK acquisition helper
+        uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: .server-test/morphe-builds
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install acquisition dependencies
+        run: python -m pip install --disable-pip-version-check requests
+
+      - name: Acquire clean compatible YouTube APK
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.server-test/morphe-builds
+        run: |
+          mkdir -p .server-test/input
+          python - <<'PY'
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          app = AppConfig(
+              key='youtube', name='YouTube', package='com.google.android.youtube',
+              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
+              formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
+          r = ApkMirrorResolver(min_request_interval=1.2, max_release_attempts=3, max_variant_attempts=8)
+          dest = Path('.server-test/input/youtube.apk')
+          errors=[]
+          for url, referer in r.iter_candidates(app, '21.16.256'):
+              try:
+                  result=r.download_candidate(url, referer, dest)
+                  print('base', result.size, result.sha256)
+                  break
+              except Exception as e:
+                  errors.append(str(e))
+                  dest.unlink(missing_ok=True)
+          else:
+              raise RuntimeError('base acquisition failed: ' + ' | '.join(errors[-4:]))
+          PY
+
+      - name: Resolve and download Morphe Desktop and patch bundles
+        shell: bash
+        run: |
+          mkdir -p .server-test/tools
+          get_asset() {
+            local repo="$1" regex="$2" out="$3"
+            url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$regex" '.assets[] | select(.name|test($re)) | .browser_download_url' | head -1)"
+            test -n "$url" && test "$url" != null
+            curl -fL --retry 3 "$url" -o "$out"
+          }
+          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\.jar$' .server-test/tools/morphe-desktop.jar
+          get_asset MorpheApp/morphe-patches '^patches-.*\.mpp$' .server-test/tools/morphe.mpp
+          get_asset sdsssdvx2/eternal-youtube-history-patches '^patches-.*\.mpp$' .server-test/tools/eternal.mpp
+          ls -lh .server-test/tools
+
+      - name: Patch on GitHub runner with both sources
+        run: |
+          mkdir -p .server-test/out
+          java -Xmx5g -jar .server-test/tools/morphe-desktop.jar patch \
+            -p .server-test/tools/morphe.mpp \
+            -p .server-test/tools/eternal.mpp -e 'Eternal YouTube History' \
+            -o .server-test/out/youtube-morphe-eternal.apk \
+            -r .server-test/out/result.json \
+            .server-test/input/youtube.apk
+          test -s .server-test/out/youtube-morphe-eternal.apk
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('.server-test/out/result.json')
+          data=json.loads(p.read_text())
+          print('package:', data.get('packageName') or data.get('package'))
+          print('version:', data.get('versionName') or data.get('version'))
+          print('success:', data.get('success'))
+          print('output bytes:', pathlib.Path('.server-test/out/youtube-morphe-eternal.apk').stat().st_size)
+          PY
+
+      - name: Remove proprietary APKs and ephemeral signing material
+        if: always()
+        run: rm -rf .server-test/input .server-test/out .server-test/tools
