@@ -1,0 +1,27 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eternal YouTube History 설정</title><link rel="stylesheet" href="options.css"></head><body><main>
+<h1>Eternal YouTube History 설정</h1>
+<div class="row"><button id="openCloudHistory" type="button">서버 영구 기록 검색</button></div>
+<section><h2>시청한 영상 표시</h2>
+<label>표시 방식
+<select id="watchedDisplayMode"><option value="dim">시청 영상 옅게 표시</option><option value="hide">완전히 숨기기</option><option value="none">표시 변경 안 함</option></select></label>
+<label>시청한 썸네일 불투명도 (%) <input id="watchedThumbnailOpacityPct" type="number" min="10" max="100" step="5"></label>
+<label><input id="watchedThumbnailGrayscale" type="checkbox"> 시청한 영상 이미지 흑백 필터</label>
+<label><input id="watchedLinkCardInfo" type="checkbox"> 채널 이미지·제목·조회수 등 영상 정보도 썸네일과 같은 불투명도로 표시</label>
+<label>흐림/숨김 최소 진행률 (%) <input id="watchedMinProgressPct" type="number" min="0" max="100" step="5"></label>
+<label>PC에서 시청으로 확정할 최소 재생 초 <input id="directWatchSeconds" type="number" min="1" max="120"></label>
+<p class="note">옅게 표시 모드는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 채널 이미지·제목·채널명·조회수·업로드 시점·메뉴까지 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 <strong>CSS blur는 전혀 사용하지 않습니다.</strong> <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. 1~100%는 실제 진행률을 알고 있는 영상만 기준 이상일 때 적용합니다.</p>
+</section>
+<section><h2>Cloudflare D1 중앙 원장</h2>
+<p class="note"><strong>D1이 본체</strong>이고 PC IndexedDB는 YouTube 카드 표시를 위한 로컬 캐시입니다. v0.7은 Chrome 시작 시 동기화, 15분 polling, 자동 History 탭 생성 같은 백그라운드 작업을 하지 않습니다. YouTube 페이지를 실제로 열거나 이동할 때만 필요한 변경분을 확인합니다.</p>
+<label><input id="cloudEnabled" type="checkbox"> D1 중앙 원장 사용</label>
+<label>Worker URL <input id="workerUrl" type="url" placeholder="https://eternal-history.example.workers.dev"></label>
+<label>연결 토큰 <input id="apiToken" type="password" autocomplete="off"></label>
+<div class="row"><button id="testCloud" type="button" class="secondary">연결 확인</button><button id="rebuildCache" type="button" class="secondary">D1 → PC 표시 캐시 재구축</button><button id="flushQueue" type="button" class="secondary">대기 기록 지금 전송</button></div>
+<p id="cloudQueueStatus" class="note">상태 확인 중…</p>
+</section>
+<section><h2>YouTube History 수동 누락 복구</h2>
+<label>수동 복구 페이지 수 <input id="autoHistoryPages" type="number" min="1" max="50"></label>
+<p class="note">Android 직접 D1 기록이 완성되면 거의 사용할 필요가 없는 보조 기능입니다. <strong>자동 실행되지 않으며</strong> 팝업에서 직접 누른 경우에만 시청 기록 페이지를 엽니다.</p>
+</section>
+<button id="save">설정 저장</button><div id="status"></div>
+</main><script src="options.js"></script></body></html>

@@ -1,0 +1,13 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eternal YouTube History</title><link rel="stylesheet" href="popup.css"></head><body>
+<main>
+  <h1>Eternal YouTube History</h1>
+  <div class="stat"><b id="count">-</b><span id="countLabel">서버 원장 영상</span></div>
+  <div id="eventStat" class="eventStat" hidden>정확 시각 시청 이벤트 <b id="eventCount">0</b>회</div>
+  <div id="displayRule" class="eventStat"></div>
+  <button id="openHistory" class="historyButton">서버 영구 기록 검색</button>
+  <button id="syncRecent">YouTube History 수동 누락 복구</button>
+  <button id="syncFull" class="secondary">과거 기록 최대한 복구</button>
+  <div class="hint">v0.7은 백그라운드 폴링/자동 History 탭/주기 타이머가 없습니다. PC에서는 YouTube를 실제로 사용할 때만 중앙 D1과 동기화합니다.</div>
+  <div id="status"></div>
+  <a id="options" href="#">설정</a>
+</main><script src="popup.js"></script></body></html>
