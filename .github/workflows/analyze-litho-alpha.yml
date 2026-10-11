@@ -7,7 +7,7 @@ on:
       - '.github/workflows/analyze-litho-alpha.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   analyze:
@@ -15,8 +15,6 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: actions/checkout@v7
         with:
           repository: krishhari2105/morphe-builds
@@ -57,74 +55,29 @@ jobs:
           .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-alpha.log 2>&1 || true
           test -d .analysis/decompiled/sources/defpackage
           rm -f .analysis/input/youtube.apk
-      - name: Persist hook report
+      - name: Inspect exact Litho alpha targets
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p analysis
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          root = Path('.analysis/decompiled/sources/defpackage')
-          out = []
-          def add(title, text=''):
-              out.append('\n===== ' + title + ' =====\n')
-              out.append(text)
-
-          # Every direct View alpha application, with enough context to recover method signatures.
-          hits=[]
-          for p in root.glob('*.java'):
-              try: lines=p.read_text(errors='ignore').splitlines()
-              except Exception: continue
-              for i,line in enumerate(lines):
-                  if '.setAlpha(' in line:
-                      hits.append((p.name,i,lines))
-          add('DIRECT setAlpha HITS', f'count={len(hits)}\n')
-          for name,i,lines in hits[:80]:
-              lo=max(0,i-55); hi=min(len(lines),i+70)
-              add(f'{name}:{i+1}', '\n'.join(f'{n+1:5d}: {lines[n]}' for n in range(lo,hi))+'\n')
-
-          # Known Litho candidates from the first pass, kept mostly whole.
-          for cls in ['ggo','gij','gtx','guf','gho','gee','gfg','ghz','gjz','tqu','uzc','gec']:
-              p=root/(cls+'.java')
-              if p.exists():
-                  text=p.read_text(errors='ignore')
-                  add(f'FULL {cls}.java', text[:70000])
-
-          # Find references to the known style/node classes and alpha-like Float writes.
-          patterns=[r'\bgij\b',r'\btqu\b',r'\buzc\b',r'Float\.valueOf',r'floatValue\(\)',r'ComponentHost']
-          refs=[]
-          rx=re.compile('|'.join(patterns))
-          for p in root.glob('*.java'):
-              try: lines=p.read_text(errors='ignore').splitlines()
-              except Exception: continue
-              if not any(rx.search(x) for x in lines): continue
-              picked=[]
-              for i,line in enumerate(lines):
-                  if rx.search(line):
-                      picked.extend(range(max(0,i-6),min(len(lines),i+10)))
-              if picked:
-                  uniq=sorted(set(picked))[:500]
-                  refs.append((p.name,'\n'.join(f'{n+1:5d}: {lines[n]}' for n in uniq)))
-          add('CLASS/STYLE REFERENCES', f'files={len(refs)}\n')
-          for name,text in refs[:100]:
-              add(name,text+'\n')
-
-          Path('analysis/litho-alpha-21.16.256.txt').write_text(''.join(out), encoding='utf-8')
-          PY
-          wc -c analysis/litho-alpha-21.16.256.txt
-      - name: Commit report
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add analysis/litho-alpha-21.16.256.txt
-          if ! git diff --cached --quiet; then
-            git commit -m 'chore: record Litho alpha analysis'
-            git push
-          fi
+          D=.analysis/decompiled/sources/defpackage
+          for cls in ggo gij gtx guf gho gee gfg ghz gjz tqu uzc gec tri; do
+            f="$D/$cls.java"
+            [ -f "$f" ] || continue
+            echo "===== $cls signatures/fields ====="
+            grep -n -E '^(public|final|class|interface|    public|    final|    private|    protected)|setAlpha|alpha|floatValue|Float\.valueOf|ComponentHost' "$f" | head -420 || true
+          done
+          echo '===== setAlpha hits inside known Litho classes ====='
+          grep -n -E 'setAlpha\(' "$D"/{ggo,gij,gtx,guf,gho,gee,gfg,ghz,gjz,tqu,uzc,gec,tri}.java 2>/dev/null || true
+          echo '===== context around known setAlpha hits ====='
+          for f in "$D"/{ggo,gij,gtx,guf,gho,gee,gfg,ghz,gjz,tqu,uzc,gec,tri}.java; do
+            [ -f "$f" ] || continue
+            if grep -q 'setAlpha(' "$f"; then
+              echo "--- $f"
+              grep -n -B45 -A65 'setAlpha(' "$f" | head -800 || true
+            fi
+          done
+          echo '===== callers touching gij/tqu alpha-like fields ====='
+          grep -R -n -E '\bgij\b|\btqu\b|\.m[[:space:]]*=|Float\.valueOf\(|floatValue\(' "$D" 2>/dev/null | grep -E 'gij|tqu|uzc|setAlpha|alpha|Float|\.m[[:space:]]*=' | head -700 || true
       - name: Cleanup
         if: always()
         run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
