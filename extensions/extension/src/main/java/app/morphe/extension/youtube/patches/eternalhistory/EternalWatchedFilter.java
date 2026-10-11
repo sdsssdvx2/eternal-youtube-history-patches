@@ -37,6 +37,10 @@ public final class EternalWatchedFilter {
     public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer,
                                      @Nullable String accessibilityId,
                                      @Nullable String accessibilityText) {
+        // This method is invoked exactly once for every component through Morphe's filter entry.
+        // Clear any prior hand-off first so a filtered/aborted component can never contaminate the
+        // next one processed by the same Litho worker thread.
+        EternalWatchedDim.beginCardDecision();
         try {
             if (!EternalHistorySettings.ENABLED.get()
                     || !EternalHistorySettings.isFeedVisualEnabled()) return false;
@@ -55,8 +59,8 @@ public final class EternalWatchedFilter {
             }
 
             if (EternalHistorySettings.isDimMode()) {
-                // The protobuf video id is the authoritative watched decision. Accessibility is
-                // merely a mount-time correlation hint and can be null/differently formatted.
+                // The protobuf videoId/local cache decision is authoritative. A tiny ThreadLocal
+                // hand-off lets the bytecode patch apply alpha to this exact returned component.
                 EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
                 return false;
             }
