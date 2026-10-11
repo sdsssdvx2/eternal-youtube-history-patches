@@ -1,3 +1,9 @@
+## [1.2.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.0...v1.2.1) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* register Eternal feed mode resources safely ([c7ec666](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c7ec66629c78f8e915d6a52814ecba3d88f5f79c))
+
 ## [1.2.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.1.1...v1.2.0) (2026-10-11)
 
 ### ✨ New Features
