@@ -35,7 +35,7 @@ jobs:
       - name: Install acquisition dependencies
         run: python -m pip install --disable-pip-version-check requests
 
-      - name: Acquire clean compatible YouTube APK
+      - name: Acquire validated clean YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.server-test/morphe-builds
         run: |
@@ -50,11 +50,15 @@ jobs:
               formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
           r = ApkMirrorResolver(min_request_interval=1.2, max_release_attempts=3, max_variant_attempts=8)
           dest = Path('.server-test/input/youtube.apk')
+          expected = '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
           errors=[]
           for url, referer in r.iter_candidates(app, '21.16.256'):
               try:
                   result=r.download_candidate(url, referer, dest)
-                  print('base', result.size, result.sha256)
+                  print('candidate', result.size, result.sha256)
+                  if result.sha256 != expected:
+                      raise RuntimeError('Candidate is not the validated universal APK')
+                  print('validated universal APK selected')
                   break
               except Exception as e:
                   errors.append(str(e))
