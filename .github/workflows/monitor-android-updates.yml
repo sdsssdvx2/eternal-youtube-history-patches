@@ -41,6 +41,22 @@ jobs:
           curl -fsSL https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/latest > .update-monitor/eternal.json
           ETERNAL_TAG="$(jq -r '.tag_name' .update-monitor/eternal.json)"
           test -n "$ETERNAL_TAG" && test "$ETERNAL_TAG" != null
+
+          # Do not advertise a just-published Morphe/Eternal target until the private builder has had
+          # at least one complete 6-hour schedule window to create and sign the matching APK. This
+          # handles the edge case where a public release appears just after the :41 private build.
+          now_epoch="$(date -u +%s)"
+          for release_json in .update-monitor/morphe.json .update-monitor/eternal.json; do
+            published="$(jq -r '.published_at // .created_at // empty' "$release_json")"
+            test -n "$published"
+            published_epoch="$(date -u -d "$published" +%s)"
+            age="$((now_epoch - published_epoch))"
+            if [ "$age" -lt 21600 ]; then
+              echo "Newest public target is only ${age}s old; keep the previous recommended status until the next signed-build window."
+              exit 0
+            fi
+          done
+
           curl -fsSL "https://raw.githubusercontent.com/sdsssdvx2/eternal-youtube-history-patches/${ETERNAL_TAG}/patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt" > .update-monitor/eternal-youtube.kt
 
           python3 - <<'PY'
