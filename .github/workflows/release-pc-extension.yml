@@ -1,0 +1,127 @@
+name: Release PC extension
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feat-pc-extension-source-073
+    paths:
+      - 'pc-extension/src/**'
+      - 'pc-extension/README.md'
+      - '.github/workflows/release-pc-extension.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: eternal-pc-extension-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+
+      - name: Validate canonical source
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pc-extension/src/manifest.json
+          jq empty pc-extension/src/manifest.json
+          version="$(jq -r '.version' pc-extension/src/manifest.json)"
+          test -n "$version" && test "$version" != null
+          test "$version" != '0.0.0'
+
+          required=(
+            background.js content.js content.css manifest.json
+            options.html options.js options.css page-bridge.js
+            popup.html popup.js popup.css
+          )
+          for file in "${required[@]}"; do
+            test -f "pc-extension/src/$file"
+          done
+
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find pc-extension/src -type f -name '*.js' -print0 | sort -z)
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build deterministic release ZIP
+        id: archive
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          root="eternal-youtube-history-v${VERSION}"
+          zip_name="eternal-youtube-history-pc-v${VERSION}.zip"
+          rm -rf .pc-dist "$zip_name"
+          mkdir -p ".pc-dist/${root}/extension"
+          cp -a pc-extension/src/. ".pc-dist/${root}/extension/"
+          cp pc-extension/README.md ".pc-dist/${root}/README.md"
+
+          find ".pc-dist/${root}" -exec touch -d '2026-01-01 00:00:00 UTC' {} +
+          (
+            cd .pc-dist
+            find "$root" -type f -print0 | sort -z | xargs -0 zip -X -q "../${zip_name}"
+          )
+
+          unzip -t "$zip_name"
+          rm -rf .pc-verify
+          mkdir .pc-verify
+          unzip -q "$zip_name" -d .pc-verify
+          test "$(jq -r '.version' ".pc-verify/${root}/extension/manifest.json")" = "$VERSION"
+
+          sha="$(sha256sum "$zip_name" | awk '{print $1}')"
+          bytes="$(stat -c %s "$zip_name")"
+          echo "file=$zip_name" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
+          echo "Built $zip_name ($bytes bytes) SHA-256=$sha"
+
+      - name: Publish stable PC release without changing Android latest release
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          FILE: ${{ steps.archive.outputs.file }}
+          SHA256: ${{ steps.archive.outputs.sha256 }}
+          BYTES: ${{ steps.archive.outputs.bytes }}
+        run: |
+          set -euo pipefail
+          tag="pc-v${VERSION}"
+          title="Eternal YouTube History PC v${VERSION}"
+          body="Canonical unpacked Chrome extension release.\n\nSHA-256: ${SHA256}\nSize: ${BYTES} bytes\n\nUpdate an existing install by overwriting the current extension directory with the ZIP's extension/ contents, then press Reload in chrome://extensions. Do not remove the extension."
+
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/pc-release.json 2>/dev/null; then
+            release_id="$(jq -r '.id' /tmp/pc-release.json)"
+            jq -n \
+              --arg name "$title" \
+              --arg body "$body" \
+              '{name:$name, body:$body, draft:false, prerelease:false, make_latest:"false"}' \
+              > /tmp/pc-release-payload.json
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              --input /tmp/pc-release-payload.json > /tmp/pc-release-updated.json
+          else
+            jq -n \
+              --arg tag "$tag" \
+              --arg name "$title" \
+              --arg body "$body" \
+              '{tag_name:$tag, name:$name, body:$body, draft:false, prerelease:false, make_latest:"false"}' \
+              > /tmp/pc-release-payload.json
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+              --input /tmp/pc-release-payload.json > /tmp/pc-release-updated.json
+          fi
+
+          gh release upload "$tag" "$FILE" --clobber
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.tag_name')" = "$tag"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" != "$tag"
