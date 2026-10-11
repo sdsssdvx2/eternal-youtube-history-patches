@@ -24,18 +24,21 @@ import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
 /**
- * Very low-frequency updater for the privately distributed signed Morphe APK.
+ * Very low-frequency updater for the privately distributed signed Morphe APK bundle.
  *
  * It reads only the tiny public target-status JSON generated after the private build window. No
- * GitHub credential or signing material is stored in the app. If a newer validated target exists,
- * a dialog is shown and the user can open the private GitHub release page. Android still performs
- * the normal user-approved package update; this class never installs APKs.
+ * GitHub credential or signing material is stored in the app. If a newer validated Eternal,
+ * YouTube, or YouTube Music target exists, a dialog is shown and the user can open the matching
+ * private GitHub release page. Android still performs the normal user-approved package update;
+ * this class never installs APKs.
  */
 final class EternalUpdateChecker {
     private static final String STATUS_URL =
             "https://raw.githubusercontent.com/sdsssdvx2/eternal-youtube-history-patches/main/android-update-status.json";
     private static final String PRIVATE_RELEASE_BASE =
             "https://github.com/sdsssdvx2/eternal-android-builds/releases/tag/";
+    private static final String MORPHE_MUSIC_PACKAGE = "app.morphe.android.apps.youtube.music";
+    private static final String ORIGINAL_MUSIC_PACKAGE = "com.google.android.apps.youtube.music";
     private static final String PREFS = "eternal_history_update_checker";
     private static final String PREF_LAST_CHECK = "last_check_ms";
     private static final String PREF_LAST_NOTIFIED = "last_notified_fingerprint";
@@ -84,10 +87,21 @@ final class EternalUpdateChecker {
         if (latestYoutube.isEmpty() || latestMusic.isEmpty()) return;
 
         String currentEternal = BuildConfig.VERSION_NAME;
-        String currentYoutube = installedVersion(context);
+        String currentYoutube = installedVersion(context, context.getPackageName());
+        String currentMusic = installedVersion(context, MORPHE_MUSIC_PACKAGE);
+        if (currentMusic == null) {
+            currentMusic = installedVersion(context, ORIGINAL_MUSIC_PACKAGE);
+        }
+
         boolean eternalUpdate = compareVersions(latestEternal, currentEternal) > 0;
-        boolean youtubeUpdate = compareVersions(latestYoutube, currentYoutube) > 0;
-        if (!eternalUpdate && !youtubeUpdate) {
+        boolean youtubeUpdate = currentYoutube != null
+                && compareVersions(latestYoutube, currentYoutube) > 0;
+        // Package visibility differs between Android builds. A missing/invisible Music package is
+        // not treated as outdated; it is simply omitted from this check rather than causing a
+        // false positive or requiring broad package-query permissions.
+        boolean musicUpdate = currentMusic != null
+                && compareVersions(latestMusic, currentMusic) > 0;
+        if (!eternalUpdate && !youtubeUpdate && !musicUpdate) {
             markChecked(prefs);
             return;
         }
@@ -108,6 +122,11 @@ final class EternalUpdateChecker {
                 latestEternal,
                 currentYoutube,
                 latestYoutube,
+                currentMusic,
+                latestMusic,
+                eternalUpdate,
+                youtubeUpdate,
+                musicUpdate,
                 releaseUrl
         );
     }
@@ -134,12 +153,14 @@ final class EternalUpdateChecker {
         }
     }
 
-    private static String installedVersion(Context context) {
+    private static String installedVersion(Context context, String packageName) {
         try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            return info.versionName == null ? "0" : info.versionName;
+            PackageInfo info = context.getPackageManager().getPackageInfo(packageName, 0);
+            return info.versionName == null || info.versionName.trim().isEmpty()
+                    ? null
+                    : info.versionName.trim();
         } catch (Throwable ignored) {
-            return "0";
+            return null;
         }
     }
 
@@ -160,6 +181,11 @@ final class EternalUpdateChecker {
                                          String latestEternal,
                                          String currentYoutube,
                                          String latestYoutube,
+                                         String currentMusic,
+                                         String latestMusic,
+                                         boolean eternalUpdate,
+                                         boolean youtubeUpdate,
+                                         boolean musicUpdate,
                                          String releaseUrl) {
         Utils.runOnMainThread(() -> {
             Activity activity = Utils.getActivity();
@@ -169,14 +195,25 @@ final class EternalUpdateChecker {
                 return;
             }
 
-            String message = "검증·서명된 새 Eternal YouTube 빌드가 있습니다.\n\n"
-                    + "Eternal: " + currentEternal + " → " + latestEternal + "\n"
-                    + "YouTube: " + currentYoutube + " → " + latestYoutube + "\n\n"
-                    + "기존 앱을 삭제하지 말고 새 APK를 그대로 업데이트 설치하면 됩니다.";
+            StringBuilder message = new StringBuilder(
+                    "검증·서명된 새 Morphe / Eternal 빌드가 있습니다.\n\n");
+            if (eternalUpdate) {
+                message.append("Eternal: ").append(currentEternal)
+                        .append(" → ").append(latestEternal).append('\n');
+            }
+            if (youtubeUpdate) {
+                message.append("YouTube: ").append(currentYoutube)
+                        .append(" → ").append(latestYoutube).append('\n');
+            }
+            if (musicUpdate) {
+                message.append("YouTube Music: ").append(currentMusic)
+                        .append(" → ").append(latestMusic).append('\n');
+            }
+            message.append("\n기존 앱을 삭제하지 말고 필요한 APK를 그대로 업데이트 설치하면 됩니다.");
 
             AlertDialog dialog = new AlertDialog.Builder(activity)
-                    .setTitle("Eternal YouTube 업데이트")
-                    .setMessage(message)
+                    .setTitle("Morphe / Eternal 업데이트")
+                    .setMessage(message.toString())
                     .setNegativeButton("나중에", (ignored, which) -> markChecked(prefs))
                     .setNeutralButton("이번 버전 건너뛰기", (ignored, which) ->
                             markHandled(prefs, fingerprint))

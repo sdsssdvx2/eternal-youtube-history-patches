@@ -12,6 +12,10 @@ import com.android.tools.smali.dexlib2.AccessFlags
 private const val ADD_ON_MANAGER_CLASS_DESCRIPTOR = "Lapp/morphe/extension/youtube/addon/AddOnManager;"
 private const val ADD_ON_MANAGER_REGISTER_METHOD_NAME = "registerAddOns"
 private const val ADD_ON_PREFERENCES_FILE_PATH = "morphe_addon_prefs.xml"
+private val UPDATE_VISIBLE_PACKAGES = arrayOf(
+    "app.morphe.android.apps.youtube.music",
+    "com.google.android.apps.youtube.music",
+)
 
 context(context: BytecodePatchContext)
 internal fun registerAddOn(registrationMethodDescriptor: String) {
@@ -83,6 +87,30 @@ private fun declareAddOnPreferences() {
 }
 
 context(context: ResourcePatchContext)
+private fun declareUpdatePackageVisibility() {
+    context.document("AndroidManifest.xml").use { document ->
+        val manifest = document.getNode("manifest")
+        val existingQueries = document.getElementsByTagName("queries").item(0)
+        val queries = existingQueries ?: document.createElement("queries").also(manifest::appendChild)
+
+        val visible = HashSet<String>()
+        val packageNodes = document.getElementsByTagName("package")
+        for (index in 0 until packageNodes.length) {
+            packageNodes.item(index).attributes?.getNamedItem("android:name")?.nodeValue?.let(visible::add)
+        }
+
+        UPDATE_VISIBLE_PACKAGES.forEach { packageName ->
+            if (visible.add(packageName)) {
+                document.createElement("package").also { node ->
+                    node.setAttribute("android:name", packageName)
+                    queries.appendChild(node)
+                }
+            }
+        }
+    }
+}
+
+context(context: ResourcePatchContext)
 internal fun addEternalResources() {
     // Keep value resource types in their normal Android files. In particular, string-array entries
     // must live in arrays.xml so Morphe's resource table encoder can allocate the array entries.
@@ -92,4 +120,8 @@ internal fun addEternalResources() {
     // morphe_addon_prefs.xml is a shared declaration file. Append instead of replacing it so this
     // add-on can coexist with other third-party Morphe sources in the same patching run.
     declareAddOnPreferences()
+
+    // Android 11+ hides unrelated installed packages unless they are explicitly queryable. The
+    // updater only needs these two narrow Music package names; avoid QUERY_ALL_PACKAGES entirely.
+    declareUpdatePackageVisibility()
 }
