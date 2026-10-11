@@ -99,7 +99,7 @@ private fun installWatchedCardHook() {
         addInstructionsWithLabels(
             0,
             """
-                invoke-static { p0, p1 }, $WATCHED_FILTER->shouldHide($CONTEXT_INTERFACE[B)Z
+                invoke-static { p0, p1, p2, p3 }, $WATCHED_FILTER->shouldHide($CONTEXT_INTERFACE[BLjava/lang/String;Ljava/lang/String;)Z
                 move-result v$free
                 if-eqz v$free, :eternal_history_continue
                 const/4 v$free, 0x1
