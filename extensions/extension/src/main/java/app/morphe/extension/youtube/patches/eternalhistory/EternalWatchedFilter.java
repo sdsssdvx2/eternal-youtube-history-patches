@@ -34,24 +34,38 @@ public final class EternalWatchedFilter {
             "overflow_button.e"
     };
 
-    public static boolean shouldHide(ContextInterface contextInterface, byte[] buffer) {
-        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isFeedVisualEnabled()) return false;
-        if (contextInterface == null || buffer == null || buffer.length == 0) return false;
+    public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer,
+                                     @Nullable String accessibilityId,
+                                     @Nullable String accessibilityText) {
+        try {
+            if (!EternalHistorySettings.ENABLED.get()
+                    || !EternalHistorySettings.isFeedVisualEnabled()) return false;
+            if (contextInterface == null || buffer == null || buffer.length == 0) return false;
 
-        EternalHistoryClient.ensureFeedCacheStarted();
-        String path = contextInterface.patch_getPathBuilder().toString();
-        if (!looksLikeWholeVideoCard(path)) return false;
+            StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
+            if (pathBuilder == null || !looksLikeWholeVideoCard(pathBuilder.toString())) return false;
 
-        String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
-        if (!EternalHistoryClient.isWatchedCached(videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
+            String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
+            if (!EternalHistoryClient.isWatchedCached(
+                    videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
+                return false;
+            }
+
+            // Starting the cache only after a plausible card is encountered keeps normal playback
+            // free of the permanent-history cache when feed visuals are disabled.
+            EternalHistoryClient.ensureFeedCacheStarted();
+
+            if (EternalHistorySettings.isDimMode()) {
+                EternalWatchedDim.markAccessibility(accessibilityId, accessibilityText);
+                return false;
+            }
+            return EternalHistorySettings.isHideMode();
+        } catch (Throwable t) {
+            // Feed rendering must always fail open. A future YouTube/Morphe layout change should
+            // never make the feed disappear or crash just because Eternal could not classify it.
+            Logger.printException(() -> "Eternal watched-card filter failure", t);
             return false;
         }
-
-        if (EternalHistorySettings.isDimMode()) {
-            EternalWatchedDim.markTitle(EternalHistoryClient.cachedTitle(videoId));
-            return false;
-        }
-        return EternalHistorySettings.isHideMode();
     }
 
     private static boolean looksLikeWholeVideoCard(String path) {
