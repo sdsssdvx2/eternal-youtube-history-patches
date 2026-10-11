@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   validate:
+    # Compile Eternal and patch the current stable Morphe YouTube base before merge.
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
