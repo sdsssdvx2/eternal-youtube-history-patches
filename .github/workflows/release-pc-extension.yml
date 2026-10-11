@@ -99,7 +99,15 @@ jobs:
           set -euo pipefail
           tag="pc-v${VERSION}"
           title="Eternal YouTube History PC v${VERSION}"
-          body="Canonical unpacked Chrome extension release.\n\nSHA-256: ${SHA256}\nSize: ${BYTES} bytes\n\nUpdate an existing install by overwriting the current extension directory with the ZIP's extension/ contents, then press Reload in chrome://extensions. Do not remove the extension."
+          body="$(cat <<EOF
+          Canonical unpacked Chrome extension release.
+
+          SHA-256: ${SHA256}
+          Size: ${BYTES} bytes
+
+          Update an existing install by overwriting the current extension directory with the ZIP's extension/ contents, then press Reload in chrome://extensions. Do not remove the extension.
+          EOF
+          )"
 
           if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/pc-release.json 2>/dev/null; then
             release_id="$(jq -r '.id' /tmp/pc-release.json)"
