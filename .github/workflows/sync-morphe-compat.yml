@@ -1,0 +1,48 @@
+name: Sync Morphe compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+concurrency:
+  group: sync-morphe-compatibility
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Eternal patches
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout official Morphe patches
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches
+          ref: dev
+          path: .morphe-official
+          fetch-depth: 1
+
+      - name: Sync stable YouTube targets
+        run: |
+          python3 .github/scripts/sync_morphe_compat.py \
+            .morphe-official/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt \
+            patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
+
+      - name: Commit if compatibility changed
+        shell: bash
+        run: |
+          if git diff --quiet -- patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt; then
+            echo "No compatibility change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
+          git commit -m "fix: sync YouTube compatibility with Morphe"
+          git push
