@@ -1,0 +1,78 @@
+name: Analyze Litho alpha hook
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/analyze-litho-alpha.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: .analysis/morphe-builds
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Acquire validated YouTube base
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.analysis/morphe-builds
+        run: |
+          python -m pip install --disable-pip-version-check requests >/dev/null
+          mkdir -p .analysis/input
+          python - <<'PY'
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=8)
+          out=Path('.analysis/input/youtube.apk'); expected='724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
+          for url,ref in r.iter_candidates(app,'21.16.256'):
+              try:
+                  got=r.download_candidate(url,ref,out)
+                  if got.sha256 == expected: break
+                  out.unlink(missing_ok=True)
+              except Exception: out.unlink(missing_ok=True)
+          else: raise SystemExit('validated base not found')
+          PY
+      - name: Decompile
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '.assets[] | select(.name|startswith("jadx-") and endswith(".zip") and (contains("gui")|not)) | .browser_download_url' | head -1)"
+          curl -fL --retry 3 "$url" -o .analysis/jadx.zip
+          unzip -q .analysis/jadx.zip -d .analysis/jadx
+          mkdir -p .analysis/decompiled
+          .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-alpha.log 2>&1 || true
+          test -d .analysis/decompiled/sources/defpackage
+          rm -f .analysis/input/youtube.apk
+      - name: Inspect Litho mount alpha path
+        shell: bash
+        run: |
+          set -euo pipefail
+          D=.analysis/decompiled/sources/defpackage
+          for cls in ggo gtx guf gho gij gee gfg ghz gjz tri uzc gec; do
+            f="$D/$cls.java"
+            [ -f "$f" ] || continue
+            echo "===== CLASS $cls ====="
+            grep -n -E 'setAlpha|alpha|ComponentHost|View |View\)|float |public |final |void |Object ' "$f" | head -260 || true
+          done
+          echo '===== ComponentHost reset/content allocator ggo full ====='
+          sed -n '1,180p' "$D/ggo.java" 2>/dev/null || true
+          echo '===== parser tri key region ====='
+          grep -n -B50 -A180 -E 'Element missing correct type extension|Element missing type' "$D/tri.java" 2>/dev/null | head -280 || true
+          echo '===== likely generic alpha setter wrappers ====='
+          for cls in bxo epp gki aipe bmyj; do
+            f="$D/$cls.java"; [ -f "$f" ] || continue; echo "--- $cls"; sed -n '1,180p' "$f"; done
+      - name: Cleanup
+        if: always()
+        run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip
