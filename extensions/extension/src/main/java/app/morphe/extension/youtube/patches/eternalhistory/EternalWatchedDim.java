@@ -21,19 +21,22 @@ public final class EternalWatchedDim {
 
     private static final class PendingCard {
         final String videoId;
+        final String cachedTitle;
         final String accessibilityId;
         final String accessibilityText;
         final long markedAt;
 
-        PendingCard(String videoId, String accessibilityId, String accessibilityText, long markedAt) {
+        PendingCard(String videoId, String cachedTitle, String accessibilityId,
+                    String accessibilityText, long markedAt) {
             this.videoId = videoId;
+            this.cachedTitle = cachedTitle;
             this.accessibilityId = accessibilityId;
             this.accessibilityText = accessibilityText;
             this.markedAt = markedAt;
         }
 
-        boolean hasAccessibility() {
-            return !accessibilityId.isEmpty() || !accessibilityText.isEmpty();
+        boolean hasCorrelationHint() {
+            return !cachedTitle.isEmpty() || !accessibilityId.isEmpty() || !accessibilityText.isEmpty();
         }
     }
 
@@ -41,9 +44,9 @@ public final class EternalWatchedDim {
 
     /**
      * Called when Eternal positively identifies a watched whole-card from its protobuf video id.
-     * Accessibility strings are only hints: on some YouTube layouts they are absent or formatted
-     * differently from the final Android View contentDescription, so the video id itself is also
-     * retained to keep one pending decision per card.
+     * The local D1 title cache is the strongest mount-time correlation key because accessibility
+     * id/text formatting differs across YouTube layouts and can be empty even when the final View
+     * exposes a useful contentDescription.
      */
     static void markCard(String videoId, String accessibilityId, String accessibilityText) {
         if (!EternalHistorySettings.isDimMode() || videoId == null || videoId.length() != 11) return;
@@ -54,6 +57,7 @@ public final class EternalWatchedDim {
 
         PENDING.add(new PendingCard(
                 videoId,
+                normalize(EternalHistoryClient.cachedTitle(videoId)),
                 normalize(accessibilityId),
                 normalize(accessibilityText),
                 now
@@ -77,11 +81,17 @@ public final class EternalWatchedDim {
         CharSequence description = view.getContentDescription();
         String text = description == null ? "" : normalize(description.toString());
 
-        // Preferred path: correlate the final mounted accessibility text with the filter's hints.
         if (!text.isEmpty()) {
             for (PendingCard card : PENDING) {
                 if (now - card.markedAt > PENDING_TTL_MS) continue;
-                if (matches(text, card.accessibilityId) || matches(text, card.accessibilityText)) {
+
+                // The watched cache already knows the canonical title for this exact videoId.
+                // Prefer it over layout-specific accessibility fields. YouTube's final content
+                // description commonly contains the title plus channel/badge/duration metadata.
+                boolean titleMatch = matchesTitle(text, card.cachedTitle);
+                boolean accessibilityMatch = matches(text, card.accessibilityId)
+                        || matches(text, card.accessibilityText);
+                if (titleMatch || accessibilityMatch) {
                     if (PENDING.remove(card)) {
                         LAST_MARKED_VIDEO.remove(card.videoId, card.markedAt);
                         return true;
@@ -90,12 +100,11 @@ public final class EternalWatchedDim {
             }
         }
 
-        // Some YouTube cards expose no usable accessibility string at the protobuf-filter stage.
-        // Morphe intentionally serializes Litho layout work to one worker thread, so in that case
-        // the next mounted view carrying a real contentDescription is the safest deterministic
-        // fallback. Do not use this fallback when hints existed but failed to match.
+        // Only use ordering when the watched card had no title or accessibility correlation key.
+        // This avoids dimming an unrelated View merely because a useful hint existed but YouTube
+        // represented it differently at mount time.
         PendingCard first = PENDING.peek();
-        if (first != null && !first.hasAccessibility() && !text.isEmpty()) {
+        if (first != null && !first.hasCorrelationHint() && !text.isEmpty()) {
             PendingCard consumed = PENDING.poll();
             if (consumed != null) {
                 LAST_MARKED_VIDEO.remove(consumed.videoId, consumed.markedAt);
@@ -104,6 +113,16 @@ public final class EternalWatchedDim {
         }
 
         return false;
+    }
+
+    private static boolean matchesTitle(String description, String title) {
+        if (title == null || title.isEmpty()) return false;
+        if (description.equals(title)) return true;
+        // A cached title is tied to the authoritative protobuf videoId, so it can safely be a
+        // slightly shorter substring than generic accessibility hints. For very short titles only
+        // accept a prefix match to avoid accidental matches inside unrelated descriptions.
+        if (title.length() >= 4) return description.contains(title);
+        return description.startsWith(title);
     }
 
     private static boolean matches(String description, String marker) {
