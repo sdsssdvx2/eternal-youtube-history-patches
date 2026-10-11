@@ -16,10 +16,12 @@
   <string name="morphe_eternal_history_sync_cache_summary">처음 한 번 전체 원장을 받고 이후 revision 변경분만 받아 피드 판정에 사용합니다.</string>
   <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>
   <string name="morphe_eternal_history_feed_mode_summary">변경 없음 / 썸네일 흐리게 / 숨기기 중 선택합니다.</string>
-  <string name="morphe_eternal_history_thumbnail_opacity_title">시청한 썸네일 불투명도 (%)</string>
-  <string name="morphe_eternal_history_thumbnail_opacity_summary">10~100, 기본 65. 낮을수록 썸네일만 더 희미해집니다. 실제 blur 효과는 사용하지 않으며 제목·채널명은 그대로 표시합니다.</string>
-  <string name="morphe_eternal_history_thumbnail_grayscale_title">시청한 썸네일 흑백 필터</string>
-  <string name="morphe_eternal_history_thumbnail_grayscale_summary">켜면 시청한 영상의 썸네일만 흑백으로 표시합니다. 끄면 원래 색상을 유지합니다.</string>
+  <string name="morphe_eternal_history_thumbnail_opacity_title">시청한 영상 불투명도 (%)</string>
+  <string name="morphe_eternal_history_thumbnail_opacity_summary">10~100, 기본 65. 실제 blur 효과는 사용하지 않고 불투명도만 조절합니다.</string>
+  <string name="morphe_eternal_history_thumbnail_grayscale_title">시청한 영상 흑백 필터</string>
+  <string name="morphe_eternal_history_thumbnail_grayscale_summary">켜면 흐리게 표시되는 영역을 흑백으로 표시합니다. 기본은 썸네일만 대상입니다.</string>
+  <string name="morphe_eternal_history_dim_card_info_title">썸네일 아래 영상 정보도 함께 흐리게</string>
+  <string name="morphe_eternal_history_dim_card_info_summary">켜면 채널 이미지·영상 제목·채널명·조회수·업로드 시점·메뉴까지 썸네일과 같은 불투명도/흑백 설정에 연동합니다.</string>
   <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>
   <string name="morphe_eternal_history_visual_min_progress_summary">0이면 진행률을 모르는 과거 기록도 흐리게/숨김 대상으로 봅니다.</string>
   <string name="morphe_eternal_history_hide_watched_title">시청한 피드 카드 숨기기</string>
@@ -27,5 +29,5 @@
   <string name="morphe_eternal_history_hide_min_progress_title">숨김 최소 진행률(%)</string>
   <string name="morphe_eternal_history_hide_min_progress_summary">0이면 시청 기록만 있으면 숨깁니다. 1~100이면 실제 진행률을 아는 영상 중 기준 이상만 숨깁니다.</string>
   <string name="morphe_eternal_history_feed_note_title">피드 표시 방식</string>
-  <string name="morphe_eternal_history_feed_note_summary">흐리게 모드는 썸네일에만 불투명도와 선택적 흑백을 적용하고 텍스트는 유지합니다. 숨기기는 카드 전체를 제거합니다.</string>
+  <string name="morphe_eternal_history_feed_note_summary">흐리게는 blur가 아니라 opacity입니다. 기본은 썸네일만 표시를 바꾸고, 위 옵션을 켜면 카드 정보까지 같은 강도로 연동합니다. 숨기기는 카드 전체를 제거합니다.</string>
 </resources>

@@ -32,11 +32,17 @@ public final class EternalHistorySettings {
     public static final IntegerSetting HIDE_MIN_PROGRESS =
             new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));
 
-    /** Opacity of watched thumbnails in dim mode. Text and metadata stay untouched. */
+    /** Opacity used by watched visual components in dim mode. */
     public static final IntegerSetting THUMBNAIL_OPACITY =
             new IntegerSetting("morphe_eternal_history_thumbnail_opacity", 65, false, parent(ENABLED));
     public static final BooleanSetting THUMBNAIL_GRAYSCALE =
             new BooleanSetting("morphe_eternal_history_thumbnail_grayscale", FALSE, false, parent(ENABLED));
+    /**
+     * False: dim only the thumbnail. True: dim the whole card so channel avatar, title and metadata
+     * inherit the exact same opacity/grayscale as the thumbnail.
+     */
+    public static final BooleanSetting DIM_CARD_INFO =
+            new BooleanSetting("morphe_eternal_history_dim_card_info", FALSE, false, parent(ENABLED));
 
     public static String feedMode() {
         String mode = FEED_MODE.get();
