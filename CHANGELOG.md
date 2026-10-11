@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.0.1...v1.1.0) (2026-10-11)
+
+### ✨ New Features
+
+* auto-sync Morphe YouTube compatibility ([0618896](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/0618896514d172c251b819d51a76aa3a61ce4681))
+
 ## [1.0.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.0.0...v1.0.1) (2026-10-11)
 
 ### 🐛 Bug Fixes
