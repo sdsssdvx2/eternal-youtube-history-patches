@@ -55,7 +55,9 @@ public final class EternalWatchedFilter {
             }
 
             if (EternalHistorySettings.isDimMode()) {
-                EternalWatchedDim.markAccessibility(accessibilityId, accessibilityText);
+                // The protobuf video id is the authoritative watched decision. Accessibility is
+                // merely a mount-time correlation hint and can be null/differently formatted.
+                EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
                 return false;
             }
             return EternalHistorySettings.isHideMode();
