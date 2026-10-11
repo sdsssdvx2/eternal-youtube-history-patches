@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.0.0...v1.0.1) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* declare supported YouTube version ([cdac119](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/cdac1197566861f7418d2c4edf20333ce050560c))
+
 ## 1.0.0 (2026-10-11)
 
 ### 🐛 Bug Fixes
