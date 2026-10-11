@@ -23,11 +23,11 @@ jobs:
           path: eternal-youtube-history-patches
           fetch-depth: 0
 
-      - name: Checkout official Morphe stable patches
+      - name: Checkout official Morphe patches
         uses: actions/checkout@v7
         with:
           repository: MorpheApp/morphe-patches
-          ref: v1.47.0
+          ref: dev
           path: morphe-patches
           fetch-depth: 1
 
