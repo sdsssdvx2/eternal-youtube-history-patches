@@ -1,0 +1,29 @@
+.eyh-watched:not(.eyh-watched-linked) ytd-thumbnail,
+.eyh-watched:not(.eyh-watched-linked) yt-thumbnail-view-model,
+.eyh-watched:not(.eyh-watched-linked) .yt-lockup-view-model__content-image,
+.eyh-watched:not(.eyh-watched-linked) #thumbnail,
+ytd-thumbnail.eyh-watched:not(.eyh-watched-linked) {
+  opacity: var(--eyh-watched-opacity, 0.65) !important;
+  transition: opacity 120ms ease;
+}
+
+/* Optional linked mode: fade the complete card once so thumbnail/text never get double opacity. */
+.eyh-watched.eyh-watched-linked {
+  opacity: var(--eyh-watched-opacity, 0.65) !important;
+  transition: opacity 120ms ease;
+}
+
+/* Grayscale exists only when the user explicitly enables it. No blur/brightness filter is used. */
+.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) ytd-thumbnail,
+.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) yt-thumbnail-view-model,
+.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) .yt-lockup-view-model__content-image,
+.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) #thumbnail,
+ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
+.eyh-watched.eyh-watched-linked.eyh-watched-grayscale {
+  filter: grayscale(1) !important;
+}
+
+/* Hide the whole YouTube card when the user's Eternal watched rule matches. */
+.eyh-hidden {
+  display: none !important;
+}

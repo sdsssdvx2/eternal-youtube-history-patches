@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Eternal YouTube History",
+  "version": "0.7.3",
+  "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger. Runs only while YouTube is in use, records PC playback, caches watched IDs for dim/hide, and keeps Google History as a manual fallback.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "page-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Eternal YouTube History"
+  },
+  "options_page": "options.html"
+}
