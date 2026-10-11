@@ -30,11 +30,11 @@ private val YOUTUBE = Compatibility(
     targets = listOf(
         // MORPHE_COMPAT_START
         AppTarget(
-            version = "21.20.405",
+            version = "21.16.256",
             minSdk = 28
         ),
         AppTarget(
-            version = "21.16.256",
+            version = "21.13.164",
             minSdk = 28
         ),
         AppTarget(
