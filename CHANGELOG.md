@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.1.1...v1.2.0) (2026-10-11)
+
+### ✨ New Features
+
+* add watched-card dim renderer hook ([3fbe073](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/3fbe0736f5e0a8209ed0954c4072ca093ca87089))
+
 ## [1.1.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.1.0...v1.1.1) (2026-10-11)
 
 ### 🐛 Bug Fixes

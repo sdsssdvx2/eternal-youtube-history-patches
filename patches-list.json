@@ -1,10 +1,10 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "patches": [
     {
       "name": "Eternal YouTube History",
-      "description": "Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can hide watched feed cards from the local cache.",
+      "description": "Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can dim or hide watched feed cards from the local cache.",
       "default": false,
       "category": null,
       "compatiblePackages": [
