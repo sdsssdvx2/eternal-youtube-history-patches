@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "morphe_patches": "v1.46.0",
+  "eternal_patches": "v1.1.0",
+  "youtube": {
+    "version": "21.16.256",
+    "min_sdk": 28
+  },
+  "youtube_music": {
+    "version": "9.20.53",
+    "min_sdk": 26
+  },
+  "microg_re": {
+    "version": "7.2.1",
+    "arm64_asset": "https://github.com/MorpheApp/MicroG-RE/releases/download/7.2.1/microg-7.2.1-icon-arm64-v8a.apk",
+    "arm64_sha256": "3425e46e95cd45012892cfaa23061b70db0a25affffcfcb84e3df4511d63eb82"
+  }
+}
