@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<morphe-add-on-preferences xmlns:android="http://schemas.android.com/apk/res/android">
+  <screen key="morphe_settings_screen_12_video">
+    <PreferenceScreen android:key="morphe_eternal_history_screen_sort_by_key" android:title="@string/morphe_eternal_history_screen_title" android:summary="@string/morphe_eternal_history_screen_summary">
+      <SwitchPreference android:key="morphe_eternal_history_enabled" android:title="@string/morphe_eternal_history_enabled_title" android:summary="@string/morphe_eternal_history_enabled_summary" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_worker_url" android:title="@string/morphe_eternal_history_worker_url_title" android:summary="@string/morphe_eternal_history_worker_url_summary" android:inputType="textUri" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_api_token" android:title="@string/morphe_eternal_history_api_token_title" android:summary="@string/morphe_eternal_history_api_token_summary" android:inputType="textPassword" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_min_seconds" android:title="@string/morphe_eternal_history_min_seconds_title" android:summary="@string/morphe_eternal_history_min_seconds_summary" android:inputType="number" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_progress_step" android:title="@string/morphe_eternal_history_progress_step_title" android:summary="@string/morphe_eternal_history_progress_step_summary" android:inputType="number" />
+      <SwitchPreference android:key="morphe_eternal_history_sync_cache" android:title="@string/morphe_eternal_history_sync_cache_title" android:summary="@string/morphe_eternal_history_sync_cache_summary" />
+      <ListPreference android:key="morphe_eternal_history_feed_mode" android:title="@string/morphe_eternal_history_feed_mode_title" android:summary="@string/morphe_eternal_history_feed_mode_summary" android:entries="@array/morphe_eternal_history_feed_mode_entries" android:entryValues="@array/morphe_eternal_history_feed_mode_values" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_hide_min_progress" android:title="@string/morphe_eternal_history_visual_min_progress_title" android:summary="@string/morphe_eternal_history_visual_min_progress_summary" android:inputType="number" />
+      <Preference android:key="morphe_eternal_history_feed_note" android:title="@string/morphe_eternal_history_feed_note_title" android:summary="@string/morphe_eternal_history_feed_note_summary" android:selectable="false" />
+    </PreferenceScreen>
+  </screen>
+</morphe-add-on-preferences>
