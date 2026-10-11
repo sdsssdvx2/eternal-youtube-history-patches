@@ -3,6 +3,11 @@
 This source overlay is the Android client for the Eternal D1 central ledger.
 It targets the current Morphe third-party add-on API instead of maintaining a full RVX/YouTube fork.
 
+## Available patch
+
+<!-- PATCHES_START [EXPANDED] -->
+<!-- PATCHES_END -->
+
 ## Implemented
 
 ### Direct Android recording
