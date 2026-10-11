@@ -3,7 +3,7 @@ name: Sync Morphe compatibility
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '12 */6 * * *'
 
 concurrency:
   group: sync-morphe-compatibility
