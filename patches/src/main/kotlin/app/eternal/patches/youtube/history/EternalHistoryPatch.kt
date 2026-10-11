@@ -1,6 +1,7 @@
 package app.eternal.patches.youtube.history
 
 import app.morphe.patcher.Fingerprint
+import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.morphe.patcher.extensions.InstructionExtensions.getInstruction
 import app.morphe.patcher.methodCall
@@ -15,8 +16,10 @@ import app.morphe.patcher.util.smali.ExternalLabel
 import app.morphe.util.findFreeRegister
 import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.Opcode
+import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.RegisterRangeInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
@@ -44,11 +47,11 @@ private val YOUTUBE = Compatibility(
     targets = listOf(
         // MORPHE_COMPAT_START
         AppTarget(
-            version = "21.16.256",
+            version = "21.20.405",
             minSdk = 28
         ),
         AppTarget(
-            version = "21.13.164",
+            version = "21.16.256",
             minSdk = 28
         ),
         AppTarget(
@@ -65,8 +68,8 @@ private val YOUTUBE = Compatibility(
 
 /**
  * YouTube's Litho mount helper applies node properties such as content description and alpha.
- * We use it only as an obfuscation-safe structural anchor to discover NodeInfo's alpha field and
- * setter. Eternal no longer executes any code from the hot View mount path.
+ * We use it as an obfuscation-safe structural anchor to discover NodeInfo's alpha field/setter and
+ * to synchronize optional grayscale only when Litho itself changes alpha.
  */
 private object LithoMountPropertiesFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.STATIC),
@@ -124,8 +127,7 @@ private fun installWatchedCardHook() {
 }
 
 /**
- * Resolves Litho's NodeInfo alpha setter from the actual mount implementation. This is patch-time
- * discovery only; no Eternal code is executed for every mounted View.
+ * Resolves Litho's NodeInfo alpha setter from the actual mount implementation.
  */
 context(context: BytecodePatchContext)
 private fun resolveLithoAlphaSetter(): Pair<FieldReference, MethodReference> {
@@ -181,16 +183,54 @@ private fun resolveLithoAlphaSetter(): Pair<FieldReference, MethodReference> {
 }
 
 /**
- * Applies dimming to the exact component that Eternal just classified as watched.
+ * Optional grayscale is deliberately synchronized from Litho's own setAlpha calls instead of from
+ * every mounted View. Eternal encodes a visually negligible marker into the watched-thumbnail
+ * alpha only while grayscale is enabled, so unrelated YouTube alpha nodes are ignored. The hook is
+ * also reached when Litho restores alpha during reuse/unmount, allowing the extension to clear the
+ * temporary hardware layer and preventing style leakage into recycled views.
+ */
+context(context: BytecodePatchContext)
+private fun installWatchedGrayscaleHook() {
+    val mountClass = context.mutableClassDefByOrNull(LithoMountPropertiesFingerprint.method.definingClass)
+        ?: throw PatchException("Eternal grayscale: Litho mount helper class was not found")
+
+    for (method in mountClass.methods) {
+        val implementation = method.implementation ?: continue
+        val matches = implementation.instructions.mapIndexedNotNull { index, instruction ->
+            val ref = (instruction as? ReferenceInstruction)?.reference as? MethodReference
+                ?: return@mapIndexedNotNull null
+            if (
+                ref.definingClass != "Landroid/view/View;" ||
+                ref.name != "setAlpha" ||
+                ref.parameterTypes.size != 1 ||
+                ref.parameterTypes.first().toString() != "F"
+            ) return@mapIndexedNotNull null
+
+            val viewRegister = when (instruction) {
+                is FiveRegisterInstruction -> instruction.registerC
+                is RegisterRangeInstruction -> instruction.startRegister
+                else -> return@mapIndexedNotNull null
+            }
+            index to viewRegister
+        }
+
+        // Insert backwards so earlier instruction indexes stay stable.
+        for ((index, viewRegister) in matches.asReversed()) {
+            method.addInstruction(
+                index + 1,
+                "invoke-static { v$viewRegister }, $WATCHED_DIM->syncThumbnailGrayscale(Landroid/view/View;)V"
+            )
+        }
+    }
+}
+
+/**
+ * Applies opacity to the exact thumbnail component that Eternal just classified as watched.
  *
  * Morphe invokes its extension filter immediately before returning this component. Eternal stores
  * only a per-layout-thread boolean for that tiny hand-off. We consume it at the original return,
- * then write alpha through the component's own CommonProps -> NodeInfo path. This completely
- * removes the old global FIFO, accessibility/contentDescription matching and mount-order guesses.
- *
- * The CommonProps byte flag is also set exactly like Litho's normal builder alpha method. This is
- * important because it tells Litho that this component carries a view-affecting common property,
- * allowing the whole card to receive the alpha rather than relying on a random child mount node.
+ * then write alpha through the component's own CommonProps -> NodeInfo path. Since classification
+ * now happens only on thumbnail child components, title/channel/metadata remain at full opacity.
  */
 context(context: BytecodePatchContext)
 private fun installWatchedDimHook() {
@@ -215,7 +255,7 @@ private fun installWatchedDimHook() {
         ?: throw PatchException("Eternal dim: component class was not found")
 
     // The CommonProps type is the component field whose class owns both a NodeInfo field and the
-    // byte property-mask field. On 21.16.256 this resolves gec -> gdy without hard-coded names.
+    // byte property-mask field. This is discovered structurally rather than by obfuscated names.
     val commonPropsTypes = componentClass.fields.map { it.type }.distinct().filter { candidateType ->
         if (!candidateType.startsWith("L")) return@filter false
         val candidateClass = context.mutableClassDefByOrNull(candidateType) ?: return@filter false
@@ -279,7 +319,8 @@ private fun installWatchedDimHook() {
                 invoke-virtual { v$commonPropsRegister }, $commonPropsType->${nodeInfoAccessor.name}()$nodeInfoType
                 move-result-object v$nodeInfoRegister
 
-                const v$alphaRegister, 0x3ec28f5c
+                invoke-static {}, $WATCHED_DIM->getThumbnailAlpha()F
+                move-result v$alphaRegister
                 invoke-virtual { v$nodeInfoRegister, v$alphaRegister }, $nodeInfoType->${alphaSetter.name}(F)V
 
                 iget-byte v$decisionRegister, v$commonPropsRegister, $commonPropsFlagRef
@@ -297,6 +338,7 @@ private val eternalHistoryBytecodePatch = bytecodePatch {
     finalize {
         registerAddOn(REGISTER_METHOD)
         installWatchedCardHook()
+        installWatchedGrayscaleHook()
         installWatchedDimHook()
     }
 }
@@ -308,7 +350,7 @@ private val eternalHistoryResourcePatch = resourcePatch {
 @Suppress("unused")
 val eternalHistoryPatch = bytecodePatch(
     name = "Eternal YouTube History",
-    description = "Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can dim or hide watched feed cards from the local cache.",
+    description = "Writes Android YouTube watch/progress directly to your private Eternal D1 ledger and can style watched thumbnails or hide watched feed cards from the local cache.",
     default = false
 ) {
     compatibleWith(YOUTUBE)
