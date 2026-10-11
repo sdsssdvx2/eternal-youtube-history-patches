@@ -1,3 +1,9 @@
+## [1.2.2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.1...v1.2.2) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* bind watched dimming to card accessibility data ([eee4429](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/eee44299fb54d0a8a9748e153e314c9d1f33d56b))
+
 ## [1.2.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.0...v1.2.1) (2026-10-11)
 
 ### 🐛 Bug Fixes

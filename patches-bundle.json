@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-11T11:54:23",
-  "description": "## [1.2.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.0...v1.2.1) (2026-10-11)\n\n### 🐛 Bug Fixes\n\n* register Eternal feed mode resources safely ([c7ec666](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c7ec66629c78f8e915d6a52814ecba3d88f5f79c))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.2.1/patches-1.2.1.mpp",
+  "created_at": "2026-10-11T12:02:57",
+  "description": "## [1.2.2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.2.1...v1.2.2) (2026-10-11)\n\n### 🐛 Bug Fixes\n\n* bind watched dimming to card accessibility data ([eee4429](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/eee44299fb54d0a8a9748e153e314c9d1f33d56b))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.2.2/patches-1.2.2.mpp",
   "signature_download_url": "",
-  "version": "1.2.1"
+  "version": "1.2.2"
 }
