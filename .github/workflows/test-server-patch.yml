@@ -86,7 +86,7 @@ jobs:
         run: |
           mkdir -p .server-test/out
           # This validates the currently released Eternal source against the exact clean base the phone uses.
-          # Validation marker: Eternal v1.2.1 resource-table fix.
+          # Validation marker: Eternal v1.2.2 accessibility-bound dimming.
           java -Xmx5g -jar .server-test/tools/morphe-desktop.jar patch \
             -p .server-test/tools/morphe.mpp \
             -p .server-test/tools/eternal.mpp -e 'Eternal YouTube History' \
