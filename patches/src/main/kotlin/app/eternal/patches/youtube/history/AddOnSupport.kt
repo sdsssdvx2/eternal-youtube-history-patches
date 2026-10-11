@@ -25,46 +25,71 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
 }
 
 context(context: ResourcePatchContext)
-internal fun addEternalResources() {
-    val source = inputStreamFromBundledResource("addresources", "values/youtube/strings.xml")
-        ?: throw PatchException("Eternal History strings are missing")
-    val destinationPath = "res/values/strings.xml"
+private fun appendBundledValues(resourceName: String) {
+    val source = inputStreamFromBundledResource("addresources", "values/youtube/$resourceName")
+        ?: throw PatchException("Eternal History resource is missing: $resourceName")
+    val destinationPath = "res/values/$resourceName"
     val destination = context[destinationPath]
     if (!destination.exists()) {
         destination.parentFile?.mkdirs()
         destination.writeText("<?xml version=\"1.0\" encoding=\"utf-8\"?><resources></resources>")
     }
+
     source.use { stream ->
         context.document(destinationPath).use { dst ->
             val root = dst.getNode("resources")
+            val existing = HashSet<String>()
+            root.forEachChildElement { node ->
+                val name = node.attributes?.getNamedItem("name")?.nodeValue
+                if (!name.isNullOrBlank()) existing.add("${node.nodeName}:$name")
+            }
             context.document(stream).use { src ->
-                src.getNode("resources").forEachChildElement { root.appendChild(dst.importNode(it, true)) }
+                src.getNode("resources").forEachChildElement { node ->
+                    val name = node.attributes?.getNamedItem("name")?.nodeValue
+                    val key = if (name.isNullOrBlank()) null else "${node.nodeName}:$name"
+                    if (key == null || existing.add(key)) {
+                        root.appendChild(dst.importNode(node, true))
+                    }
+                }
             }
         }
     }
+}
 
-    val prefs = context[ADD_ON_PREFERENCES_FILE_PATH]
-    if (!prefs.exists()) {
-        prefs.parentFile?.mkdirs()
-        prefs.writeText(
-            """
-            <?xml version="1.0" encoding="utf-8"?>
-            <morphe-add-on-preferences xmlns:android="http://schemas.android.com/apk/res/android">
-              <screen key="morphe_settings_screen_12_video">
-                <PreferenceScreen android:key="morphe_eternal_history_screen_sort_by_key" android:title="@string/morphe_eternal_history_screen_title" android:summary="@string/morphe_eternal_history_screen_summary">
-                  <SwitchPreference android:key="morphe_eternal_history_enabled" android:title="@string/morphe_eternal_history_enabled_title" android:summary="@string/morphe_eternal_history_enabled_summary" />
-                  <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_worker_url" android:title="@string/morphe_eternal_history_worker_url_title" android:summary="@string/morphe_eternal_history_worker_url_summary" android:inputType="textUri" />
-                  <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_api_token" android:title="@string/morphe_eternal_history_api_token_title" android:summary="@string/morphe_eternal_history_api_token_summary" android:inputType="textPassword" />
-                  <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_min_seconds" android:title="@string/morphe_eternal_history_min_seconds_title" android:summary="@string/morphe_eternal_history_min_seconds_summary" android:inputType="number" />
-                  <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_progress_step" android:title="@string/morphe_eternal_history_progress_step_title" android:summary="@string/morphe_eternal_history_progress_step_summary" android:inputType="number" />
-                  <SwitchPreference android:key="morphe_eternal_history_sync_cache" android:title="@string/morphe_eternal_history_sync_cache_title" android:summary="@string/morphe_eternal_history_sync_cache_summary" />
-                  <ListPreference android:key="morphe_eternal_history_feed_mode" android:title="@string/morphe_eternal_history_feed_mode_title" android:summary="@string/morphe_eternal_history_feed_mode_summary" android:entries="@array/morphe_eternal_history_feed_mode_entries" android:entryValues="@array/morphe_eternal_history_feed_mode_values" android:defaultValue="none" />
-                  <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_hide_min_progress" android:title="@string/morphe_eternal_history_visual_min_progress_title" android:summary="@string/morphe_eternal_history_visual_min_progress_summary" android:inputType="number" />
-                  <Preference android:key="morphe_eternal_history_feed_note" android:title="@string/morphe_eternal_history_feed_note_title" android:summary="@string/morphe_eternal_history_feed_note_summary" android:selectable="false" />
-                </PreferenceScreen>
-              </screen>
-            </morphe-add-on-preferences>
-            """.trimIndent()
+context(context: ResourcePatchContext)
+private fun declareAddOnPreferences() {
+    val source = inputStreamFromBundledResource("addresources", "youtube/addon_prefs.xml")
+        ?: throw PatchException("Eternal History add-on preferences are missing")
+
+    val declarationFile = context[ADD_ON_PREFERENCES_FILE_PATH]
+    if (!declarationFile.exists()) {
+        declarationFile.parentFile?.mkdirs()
+        declarationFile.writeText(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                "<morphe-add-on-preferences xmlns:android=\"http://schemas.android.com/apk/res/android\"/>"
         )
     }
+
+    source.use { stream ->
+        context.document(ADD_ON_PREFERENCES_FILE_PATH).use { dst ->
+            val root = dst.getNode("morphe-add-on-preferences")
+            context.document(stream).use { src ->
+                src.getNode("morphe-add-on-preferences").forEachChildElement { screen ->
+                    root.appendChild(dst.importNode(screen, true))
+                }
+            }
+        }
+    }
+}
+
+context(context: ResourcePatchContext)
+internal fun addEternalResources() {
+    // Keep value resource types in their normal Android files. In particular, string-array entries
+    // must live in arrays.xml so Morphe's resource table encoder can allocate the array entries.
+    appendBundledValues("strings.xml")
+    appendBundledValues("arrays.xml")
+
+    // morphe_addon_prefs.xml is a shared declaration file. Append instead of replacing it so this
+    // add-on can coexist with other third-party Morphe sources in the same patching run.
+    declareAddOnPreferences()
 }
