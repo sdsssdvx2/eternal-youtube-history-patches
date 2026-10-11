@@ -28,8 +28,8 @@ import app.morphe.extension.shared.Utils;
  *
  * It reads only the tiny public target-status JSON generated after the private build window. No
  * GitHub credential or signing material is stored in the app. If a newer validated target exists,
- * one dialog is shown for that exact target and the user can open the private GitHub release page.
- * Android still performs the normal user-approved package update; this class never installs APKs.
+ * a dialog is shown and the user can open the private GitHub release page. Android still performs
+ * the normal user-approved package update; this class never installs APKs.
  */
 final class EternalUpdateChecker {
     private static final String STATUS_URL =
@@ -74,10 +74,6 @@ final class EternalUpdateChecker {
         if (lastCheck > 0L && now - lastCheck < CHECK_INTERVAL_MS) return;
 
         JSONObject status = fetchStatus();
-        // Mark a successful check only after valid JSON arrived. Temporary network failures therefore
-        // do not suppress the next app start, while normal use causes at most two tiny requests/day.
-        prefs.edit().putLong(PREF_LAST_CHECK, now).apply();
-
         String latestEternal = status.optString("eternal_patches", "").trim();
         JSONObject youtube = status.optJSONObject("youtube");
         JSONObject music = status.optJSONObject("youtube_music");
@@ -91,10 +87,16 @@ final class EternalUpdateChecker {
         String currentYoutube = installedVersion(context);
         boolean eternalUpdate = compareVersions(latestEternal, currentEternal) > 0;
         boolean youtubeUpdate = compareVersions(latestYoutube, currentYoutube) > 0;
-        if (!eternalUpdate && !youtubeUpdate) return;
+        if (!eternalUpdate && !youtubeUpdate) {
+            markChecked(prefs);
+            return;
+        }
 
         String fingerprint = latestEternal + "|yt:" + latestYoutube + "|music:" + latestMusic;
-        if (fingerprint.equals(prefs.getString(PREF_LAST_NOTIFIED, ""))) return;
+        if (fingerprint.equals(prefs.getString(PREF_LAST_NOTIFIED, ""))) {
+            markChecked(prefs);
+            return;
+        }
 
         String releaseTag = "android-" + latestYoutube + "-" + latestMusic + "-"
                 + latestEternal.replaceFirst("^[vV]", "");
@@ -141,6 +143,17 @@ final class EternalUpdateChecker {
         }
     }
 
+    private static void markChecked(SharedPreferences prefs) {
+        prefs.edit().putLong(PREF_LAST_CHECK, System.currentTimeMillis()).apply();
+    }
+
+    private static void markHandled(SharedPreferences prefs, String fingerprint) {
+        prefs.edit()
+                .putLong(PREF_LAST_CHECK, System.currentTimeMillis())
+                .putString(PREF_LAST_NOTIFIED, fingerprint)
+                .apply();
+    }
+
     private static void showUpdateDialog(SharedPreferences prefs,
                                          String fingerprint,
                                          String currentEternal,
@@ -150,29 +163,34 @@ final class EternalUpdateChecker {
                                          String releaseUrl) {
         Utils.runOnMainThread(() -> {
             Activity activity = Utils.getActivity();
-            if (activity == null || activity.isFinishing() || activity.isDestroyed()) return;
-
-            // Store only once we actually have an Activity and are about to show the dialog. If the
-            // app started too early for an Activity, the next start is allowed to try again.
-            prefs.edit().putString(PREF_LAST_NOTIFIED, fingerprint).apply();
+            if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+                // Do not advance PREF_LAST_CHECK here. A later app start may then retry once an
+                // Activity actually exists instead of silently postponing the notice for 12 hours.
+                return;
+            }
 
             String message = "검증·서명된 새 Eternal YouTube 빌드가 있습니다.\n\n"
                     + "Eternal: " + currentEternal + " → " + latestEternal + "\n"
                     + "YouTube: " + currentYoutube + " → " + latestYoutube + "\n\n"
                     + "기존 앱을 삭제하지 말고 새 APK를 그대로 업데이트 설치하면 됩니다.";
 
-            new AlertDialog.Builder(activity)
+            AlertDialog dialog = new AlertDialog.Builder(activity)
                     .setTitle("Eternal YouTube 업데이트")
                     .setMessage(message)
-                    .setNegativeButton("나중에", null)
-                    .setPositiveButton("업데이트 페이지 열기", (dialog, which) -> {
+                    .setNegativeButton("나중에", (ignored, which) -> markChecked(prefs))
+                    .setNeutralButton("이번 버전 건너뛰기", (ignored, which) ->
+                            markHandled(prefs, fingerprint))
+                    .setPositiveButton("업데이트 페이지 열기", (ignored, which) -> {
+                        markHandled(prefs, fingerprint);
                         try {
                             activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl)));
                         } catch (Throwable t) {
                             Logger.printException(() -> "Could not open Eternal update page", t);
                         }
                     })
-                    .show();
+                    .create();
+            dialog.setOnCancelListener(ignored -> markChecked(prefs));
+            dialog.show();
         });
     }
 
