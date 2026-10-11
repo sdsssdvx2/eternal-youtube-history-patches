@@ -18,6 +18,7 @@ public final class EternalHistoryAddOn {
         AddOnApi.addVideoIdListener(EternalHistoryClient::onVideoIdChanged);
         AddOnApi.addVideoTimeListener(EternalHistoryClient::onVideoTimeChanged);
         EternalHistoryClient.initialize();
+        EternalUpdateChecker.schedule();
     }
 
     private EternalHistoryAddOn() { }
