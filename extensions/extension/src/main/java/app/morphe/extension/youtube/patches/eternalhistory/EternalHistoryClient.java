@@ -50,6 +50,7 @@ final class EternalHistoryClient {
     private static final AtomicBoolean initialized = new AtomicBoolean();
     private static final AtomicBoolean cacheLoadScheduled = new AtomicBoolean();
     private static final ConcurrentHashMap<String, Float> WATCHED_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, String> TITLE_CACHE = new ConcurrentHashMap<>();
 
     private static final String SOURCE = "android-morphe-direct";
     private static final String META_REV = "cloud_rev";
@@ -71,7 +72,7 @@ final class EternalHistoryClient {
 
         // The large permanent-history cache exists only to support watched-card visuals. Do not
         // download/touch tens of thousands of historical rows when that feature is disabled.
-        if (EternalHistorySettings.HIDE_WATCHED.get()) {
+        if (EternalHistorySettings.isFeedVisualEnabled()) {
             scheduleCacheLoadAndMaintenance(true);
         } else {
             IO.execute(() -> {
@@ -86,7 +87,7 @@ final class EternalHistoryClient {
 
     /** Called by the feed filter when watched-card visuals are actually enabled. */
     static void ensureFeedCacheStarted() {
-        if (!EternalHistorySettings.HIDE_WATCHED.get()) return;
+        if (!EternalHistorySettings.isFeedVisualEnabled()) return;
         initialized.compareAndSet(false, true);
         if (WATCHED_CACHE.isEmpty()) {
             scheduleCacheLoadAndMaintenance(true);
@@ -109,7 +110,9 @@ final class EternalHistoryClient {
     }
 
     private static void loadLocalCache() {
-        WATCHED_CACHE.putAll(EternalHistoryDb.get().loadProgressSnapshot());
+        EternalHistoryDb db = EternalHistoryDb.get();
+        WATCHED_CACHE.putAll(db.loadProgressSnapshot());
+        TITLE_CACHE.putAll(db.loadTitleSnapshot());
     }
 
     static void onNewVideoStarted() {
@@ -183,10 +186,17 @@ final class EternalHistoryClient {
         return pct >= 0 && pct >= minimumProgress;
     }
 
+    static String cachedTitle(String videoId) {
+        if (videoId == null || videoId.length() != 11) return null;
+        return TITLE_CACHE.get(videoId);
+    }
+
     private static void cacheVideo(JSONObject r) {
         if (r == null) return;
         String id = r.optString("videoId", "");
         if (id.length() != 11) return;
+        String title = r.optString("title", "").trim();
+        if (!title.isEmpty()) TITLE_CACHE.put(id, title);
         float incoming = r.isNull("maxProgressPct") ? -1f : (float)r.optDouble("maxProgressPct", -1);
         WATCHED_CACHE.merge(id, incoming, (oldValue, newValue) -> {
             if (oldValue == null) return newValue;
@@ -301,7 +311,7 @@ final class EternalHistoryClient {
     private static void syncCacheIfDue(boolean force) {
         if (!configured()
                 || !EternalHistorySettings.SYNC_CACHE.get()
-                || !EternalHistorySettings.HIDE_WATCHED.get()) return;
+                || !EternalHistorySettings.isFeedVisualEnabled()) return;
         EternalHistoryDb db = EternalHistoryDb.get();
         long now = System.currentTimeMillis();
         long last = db.getMetaLong(META_PULL_AT, 0);

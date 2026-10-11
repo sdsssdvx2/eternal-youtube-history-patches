@@ -24,10 +24,25 @@ public final class EternalHistorySettings {
             new BooleanSetting("morphe_eternal_history_sync_cache", TRUE, false, parent(ENABLED));
 
     /** Stable first mobile visual mode: remove watched feed cards using the local D1 cache. */
+    /** Empty default lets existing installs migrate from the legacy hide toggle. */
+    public static final StringSetting FEED_MODE =
+            new StringSetting("morphe_eternal_history_feed_mode", "", false, parent(ENABLED));
+    /** Kept only so existing installs that enabled hide keep their previous behavior. */
     public static final BooleanSetting HIDE_WATCHED =
             new BooleanSetting("morphe_eternal_history_hide_watched", FALSE, false, parent(ENABLED));
     public static final IntegerSetting HIDE_MIN_PROGRESS =
-            new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(HIDE_WATCHED));
+            new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));
+
+    public static String feedMode() {
+        String mode = FEED_MODE.get();
+        if (mode == null || mode.isEmpty()) return HIDE_WATCHED.get() ? "hide" : "none";
+        if ("dim".equals(mode) || "hide".equals(mode)) return mode;
+        return "none";
+    }
+
+    public static boolean isFeedVisualEnabled() { return !"none".equals(feedMode()); }
+    public static boolean isDimMode() { return "dim".equals(feedMode()); }
+    public static boolean isHideMode() { return "hide".equals(feedMode()); }
 
     private EternalHistorySettings() { }
 }

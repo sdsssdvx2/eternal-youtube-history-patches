@@ -34,25 +34,24 @@ public final class EternalWatchedFilter {
             "overflow_button.e"
     };
 
-    public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer) {
-        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.HIDE_WATCHED.get()) return false;
-        EternalHistoryClient.ensureFeedCacheStarted();
+    public static boolean shouldHide(ContextInterface contextInterface, byte[] buffer) {
+        if (!EternalHistorySettings.ENABLED.get() || !EternalHistorySettings.isFeedVisualEnabled()) return false;
         if (contextInterface == null || buffer == null || buffer.length == 0) return false;
 
-        try {
-            StringBuilder pb = contextInterface.patch_getPathBuilder();
-            if (pb == null || pb.length() == 0) return false;
-            String path = pb.toString();
-            if (!looksLikeWholeVideoCard(path)) return false;
+        EternalHistoryClient.ensureFeedCacheStarted();
+        String path = contextInterface.patch_getPathBuilder().toString();
+        if (!looksLikeWholeVideoCard(path)) return false;
 
-            String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
-            if (videoId == null || videoId.length() != 11) return false;
-            int minProgress = Math.max(0, Math.min(100, EternalHistorySettings.HIDE_MIN_PROGRESS.get()));
-            return EternalHistoryClient.isWatchedCached(videoId, minProgress);
-        } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal watched-card filter skipped: " + t.getMessage());
+        String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
+        if (!EternalHistoryClient.isWatchedCached(videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
             return false;
         }
+
+        if (EternalHistorySettings.isDimMode()) {
+            EternalWatchedDim.markTitle(EternalHistoryClient.cachedTitle(videoId));
+            return false;
+        }
+        return EternalHistorySettings.isHideMode();
     }
 
     private static boolean looksLikeWholeVideoCard(String path) {

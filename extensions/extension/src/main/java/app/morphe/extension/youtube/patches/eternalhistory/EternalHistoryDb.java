@@ -152,6 +152,15 @@ final class EternalHistoryDb extends SQLiteOpenHelper {
         return out;
     }
 
+    /** Titles are used only for the dim renderer bridge; loaded in one background snapshot. */
+    synchronized Map<String, String> loadTitleSnapshot() {
+        Map<String, String> out = new HashMap<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT video_id,title FROM videos WHERE title IS NOT NULL AND title <> ''", null)) {
+            while (c.moveToNext()) out.put(c.getString(0), c.getString(1));
+        }
+        return out;
+    }
+
     synchronized long getMetaLong(String key, long fallback) {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT meta_value FROM meta WHERE meta_key=?", new String[]{key})) {
             if (!c.moveToFirst()) return fallback;
