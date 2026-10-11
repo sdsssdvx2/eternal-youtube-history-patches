@@ -1,3 +1,16 @@
+## [1.1.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.1.0...v1.1.1) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* authenticate release asset downloads ([b4f27f6](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/b4f27f6ffe7fb64d31f3f41bfb7cf92d86c34677))
+* continue render analysis after partial JADX errors ([9026f63](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/9026f63562a8f2791f2aa10cc2793b8c52c3da13))
+* follow stable Morphe release compatibility ([c4c53bd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c4c53bd1381e861bc72317d44a7b9a2996764727))
+* reduce Android playback overhead ([16b8dcd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/16b8dcd9ce15a7a1d9946e15f264c96922739e29))
+* reject bundle containers when selecting patch bases ([7249826](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/724982650ca946d1b79c1d5b710245139ad72960))
+* resolve release assets without regex escaping ([fdf5e0a](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/fdf5e0a1614c29a767ae6a6a6ff90892cde78998))
+* select validated universal YouTube APK for server patching ([e717913](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/e717913cc0a49fad6f677555576c2a950ccac4e5))
+* sync against latest stable Morphe release ([b75b9b9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/b75b9b98bc59e614c0232190895b22148a512f44))
+
 ## [1.1.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.0.1...v1.1.0) (2026-10-11)
 
 ### ✨ New Features
