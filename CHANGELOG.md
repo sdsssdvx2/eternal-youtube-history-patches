@@ -1,3 +1,14 @@
+## [1.5.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.4.0...v1.5.0) (2026-10-11)
+
+### 🐛 Bug Fixes
+
+* align Android update monitor with validated targets ([b7c7ebf](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/b7c7ebfd23347b797b4b5e7d22dca74e9efcd06f))
+* delay update metadata until signed build window ([1922733](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/19227331c7a2da3feae622f3a7b68533601b0888))
+
+### ✨ New Features
+
+* notify when validated Android build is available ([f730251](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/f7302516ca9d49a67b024e447decf670e42b3363))
+
 ## [1.4.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.3.0...v1.4.0) (2026-10-11)
 
 ### ✨ New Features
