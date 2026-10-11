@@ -5,7 +5,7 @@ It targets the current Morphe third-party add-on API instead of maintaining a fu
 
 ## Available patch
 
-<!-- PATCHES_START [EXPANDED] -->
+<!-- PATCHES_START EXPANDED -->
 <!-- PATCHES_END -->
 
 ## Implemented
