@@ -1,3 +1,9 @@
+## [1.7.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.6.0...v1.7.0) (2026-10-12)
+
+### ✨ New Features
+
+* add signature-protected dedicated updater bridge ([1926ea6](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/1926ea62b1070044770c3b1e74010fd27b7d4c88))
+
 ## [1.6.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.5.0...v1.6.0) (2026-10-11)
 
 ### 🐛 Bug Fixes
