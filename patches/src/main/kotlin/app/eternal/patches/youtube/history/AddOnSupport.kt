@@ -12,6 +12,10 @@ import com.android.tools.smali.dexlib2.AccessFlags
 private const val ADD_ON_MANAGER_CLASS_DESCRIPTOR = "Lapp/morphe/extension/youtube/addon/AddOnManager;"
 private const val ADD_ON_MANAGER_REGISTER_METHOD_NAME = "registerAddOns"
 private const val ADD_ON_PREFERENCES_FILE_PATH = "morphe_addon_prefs.xml"
+private const val UPDATER_PERMISSION = "app.morphe.android.youtube.permission.ETERNAL_UPDATER_CONFIG"
+private const val UPDATER_PROVIDER_CLASS =
+    "app.morphe.extension.youtube.patches.eternalhistory.EternalUpdaterConfigProvider"
+private const val UPDATER_PROVIDER_AUTHORITY = "app.morphe.android.youtube.eternal.updaterconfig"
 private val UPDATE_VISIBLE_PACKAGES = arrayOf(
     "app.morphe.android.apps.youtube.music",
     "com.google.android.apps.youtube.music",
@@ -110,6 +114,56 @@ private fun declareUpdatePackageVisibility() {
     }
 }
 
+/**
+ * The extension manifest belongs to the extension build itself and is not automatically merged
+ * into the patched YouTube host manifest. Declare the secure updater bridge explicitly in the
+ * target APK so the separately installed Eternal Updater can resolve and call it.
+ */
+context(context: ResourcePatchContext)
+private fun declareUpdaterBridge() {
+    context.document("AndroidManifest.xml").use { document ->
+        val manifest = document.getNode("manifest")
+        val application = document.getElementsByTagName("application").item(0)
+            ?: throw PatchException("Eternal History could not find the YouTube application manifest node")
+
+        var permissionPresent = false
+        val permissions = document.getElementsByTagName("permission")
+        for (index in 0 until permissions.length) {
+            val node = permissions.item(index)
+            if (node.attributes?.getNamedItem("android:name")?.nodeValue == UPDATER_PERMISSION) {
+                permissionPresent = true
+                break
+            }
+        }
+        if (!permissionPresent) {
+            document.createElement("permission").also { node ->
+                node.setAttribute("android:name", UPDATER_PERMISSION)
+                node.setAttribute("android:protectionLevel", "signature")
+                manifest.insertBefore(node, application)
+            }
+        }
+
+        var providerPresent = false
+        val providers = document.getElementsByTagName("provider")
+        for (index in 0 until providers.length) {
+            val node = providers.item(index)
+            if (node.attributes?.getNamedItem("android:authorities")?.nodeValue == UPDATER_PROVIDER_AUTHORITY) {
+                providerPresent = true
+                break
+            }
+        }
+        if (!providerPresent) {
+            document.createElement("provider").also { node ->
+                node.setAttribute("android:name", UPDATER_PROVIDER_CLASS)
+                node.setAttribute("android:authorities", UPDATER_PROVIDER_AUTHORITY)
+                node.setAttribute("android:exported", "true")
+                node.setAttribute("android:readPermission", UPDATER_PERMISSION)
+                application.appendChild(node)
+            }
+        }
+    }
+}
+
 context(context: ResourcePatchContext)
 internal fun addEternalResources() {
     // Keep value resource types in their normal Android files. In particular, string-array entries
@@ -124,4 +178,8 @@ internal fun addEternalResources() {
     // Android 11+ hides unrelated installed packages unless they are explicitly queryable. The
     // updater only needs these two narrow Music package names; avoid QUERY_ALL_PACKAGES entirely.
     declareUpdatePackageVisibility()
+
+    // Keep the separately installed updater bridge in the final patched YouTube manifest. The
+    // extension's own AndroidManifest.xml is not a host-manifest merge source during patching.
+    declareUpdaterBridge()
 }
