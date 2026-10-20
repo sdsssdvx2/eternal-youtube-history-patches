@@ -1,3 +1,9 @@
+## [1.7.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.7.0...v1.7.1) (2026-10-20)
+
+### 🐛 Bug Fixes
+
+* declare updater bridge in patched YouTube manifest ([fe47137](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/fe47137edecb0a8136ce14a0d0230a7e7901f6f3))
+
 ## [1.7.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.6.0...v1.7.0) (2026-10-12)
 
 ### ✨ New Features
