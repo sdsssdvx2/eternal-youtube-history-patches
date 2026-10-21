@@ -11,8 +11,8 @@
     "min_sdk": 26
   },
   "microg_re": {
-    "version": "7.2.1",
-    "arm64_asset": "https://github.com/MorpheApp/MicroG-RE/releases/download/7.2.1/microg-7.2.1-icon-arm64-v8a.apk",
-    "arm64_sha256": "3425e46e95cd45012892cfaa23061b70db0a25affffcfcb84e3df4511d63eb82"
+    "version": "7.2.2",
+    "arm64_asset": "https://github.com/MorpheApp/MicroG-RE/releases/download/7.2.2/microg-7.2.2-icon-arm64-v8a.apk",
+    "arm64_sha256": "18e51027c52b0a32c3e37ec1b88b46ff5b79f848f472e93f912f38bda3951e89"
   }
 }
