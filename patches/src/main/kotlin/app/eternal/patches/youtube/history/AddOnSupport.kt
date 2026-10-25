@@ -1,13 +1,27 @@
 package app.eternal.patches.youtube.history
 
+import app.morphe.patcher.Fingerprint
+import app.morphe.patcher.InstructionLocation.MatchAfterImmediately
+import app.morphe.patcher.InstructionLocation.MatchAfterWithin
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
+import app.morphe.patcher.extensions.InstructionExtensions.getInstruction
+import app.morphe.patcher.fieldAccess
+import app.morphe.patcher.methodCall
+import app.morphe.patcher.opcode
 import app.morphe.patcher.patch.BytecodePatchContext
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.ResourcePatchContext
+import app.morphe.patcher.resource.ResourceType
+import app.morphe.patcher.resourceLiteral
+import app.morphe.util.addInstructionsAtControlFlowLabel
 import app.morphe.util.forEachChildElement
 import app.morphe.util.getNode
 import app.morphe.util.inputStreamFromBundledResource
 import com.android.tools.smali.dexlib2.AccessFlags
+import com.android.tools.smali.dexlib2.Opcode
+import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
+import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 
 private const val ADD_ON_MANAGER_CLASS_DESCRIPTOR = "Lapp/morphe/extension/youtube/addon/AddOnManager;"
 private const val ADD_ON_MANAGER_REGISTER_METHOD_NAME = "registerAddOns"
@@ -16,10 +30,72 @@ private const val UPDATER_PERMISSION = "app.morphe.android.youtube.permission.ET
 private const val UPDATER_PROVIDER_CLASS =
     "app.morphe.extension.youtube.patches.eternalhistory.EternalUpdaterConfigProvider"
 private const val UPDATER_PROVIDER_AUTHORITY = "app.morphe.android.youtube.eternal.updaterconfig"
+private const val ETERNAL_TOOLBAR_CLASS =
+    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar;"
 private val UPDATE_VISIBLE_PACKAGES = arrayOf(
     "app.morphe.android.apps.youtube.music",
     "com.google.android.apps.youtube.music",
 )
+
+/**
+ * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. Keeping this independent
+ * avoids assuming that another optional Morphe toolbar patch happened to be enabled.
+ */
+private object EternalToolbarButtonFingerprint : Fingerprint(
+    accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
+    returnType = "V",
+    filters = listOf(
+        resourceLiteral(ResourceType.ID, "menu_item_view"),
+        methodCall(smali = "Landroid/view/MenuItem;->setShowAsAction(I)V"),
+        methodCall(
+            opcode = Opcode.INVOKE_STATIC,
+            returnType = "L",
+            parameters = listOf("I")
+        ),
+        opcode(Opcode.MOVE_RESULT_OBJECT, MatchAfterImmediately()),
+        methodCall(
+            opcode = Opcode.INVOKE_INTERFACE,
+            returnType = "I",
+            parameters = listOf("L")
+        ),
+        opcode(Opcode.MOVE_RESULT, MatchAfterImmediately()),
+        fieldAccess(
+            opcode = Opcode.IGET_OBJECT,
+            type = "Landroid/widget/ImageView;",
+            location = MatchAfterWithin(6)
+        ),
+        methodCall(
+            definingClass = "Landroid/content/res/Resources;",
+            name = "getDrawable",
+            location = MatchAfterWithin(8)
+        ),
+        methodCall(
+            definingClass = "Landroid/widget/ImageView;",
+            name = "setImageDrawable",
+            location = MatchAfterWithin(4)
+        )
+    )
+)
+
+context(context: BytecodePatchContext)
+private fun installEternalToolbarHook() {
+    EternalToolbarButtonFingerprint.apply {
+        val mutableMethod = method
+        val alreadyInstalled = mutableMethod.implementation?.instructions?.any { instruction ->
+            val ref = (instruction as? ReferenceInstruction)?.reference as? MethodReference
+            ref?.definingClass == ETERNAL_TOOLBAR_CLASS && ref.name == "onToolbarImageView"
+        } == true
+        if (alreadyInstalled) return
+
+        val imageViewIndex = instructionMatches[6].index
+        val imageViewRegister = mutableMethod
+            .getInstruction<OneRegisterInstruction>(imageViewIndex).registerA
+        mutableMethod.addInstructionsAtControlFlowLabel(
+            imageViewIndex + 1,
+            "invoke-static { v$imageViewRegister }, $ETERNAL_TOOLBAR_CLASS->onToolbarImageView(Landroid/widget/ImageView;)V"
+        )
+    }
+}
 
 context(context: BytecodePatchContext)
 internal fun registerAddOn(registrationMethodDescriptor: String) {
@@ -30,6 +106,7 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
             it.parameters.isEmpty() && AccessFlags.PUBLIC.isSet(it.accessFlags) && AccessFlags.STATIC.isSet(it.accessFlags)
     } ?: throw PatchException("Eternal History could not find AddOnManager.registerAddOns()")
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
+    installEternalToolbarHook()
 }
 
 context(context: ResourcePatchContext)
