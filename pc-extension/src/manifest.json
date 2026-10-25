@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Eternal YouTube History",
-  "version": "0.7.3",
-  "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger. Runs only while YouTube is in use, records PC playback, caches watched IDs for dim/hide, and keeps Google History as a manual fallback.",
+  "version": "0.8.0",
+  "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger, watched-card display controls, and safe Watch Later cleanup.",
   "permissions": [
     "storage",
     "tabs"
@@ -23,6 +23,7 @@
         "https://www.youtube.com/*"
       ],
       "js": [
+        "watch-later-core.js",
         "page-bridge.js"
       ],
       "run_at": "document_start",
@@ -33,6 +34,7 @@
         "https://www.youtube.com/*"
       ],
       "js": [
+        "watch-later-core.js",
         "content.js"
       ],
       "css": [
