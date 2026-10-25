@@ -1,0 +1,96 @@
+name: Validate Watch Later controls
+
+on:
+  pull_request:
+    paths:
+      - 'pc-extension/**'
+      - 'patches/**'
+      - 'extensions/**'
+      - '.github/workflows/validate-feature.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pc-extension:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+      - name: Watch Later unit and integration self-tests
+        working-directory: pc-extension/src
+        run: |
+          set -euo pipefail
+          node tests/watch-later-selftest.mjs
+          node tests/static-integration-selftest.mjs
+          for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('PASS manifest JSON')"
+
+  android-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Eternal patches
+        uses: actions/checkout@v7
+        with:
+          path: eternal-youtube-history-patches
+      - name: Checkout official Morphe patches
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches
+          ref: dev
+          path: morphe-patches
+      - name: Checkout Morphe patcher
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patcher
+          path: morphe-patcher
+      - name: Checkout Morphe patch library
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches-library
+          ref: dev
+          path: morphe-patches-library
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Precompile official Morphe extension API
+        working-directory: morphe-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:youtube:compileReleaseKotlin \
+                    :extensions:youtube:compileReleaseJavaWithJavac \
+                    --no-daemon --stacktrace
+      - name: Compile Eternal Android extension and patch
+        working-directory: eternal-youtube-history-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
+                    :patches:compileKotlin \
+                    --no-daemon --stacktrace
+      - name: Static destructive-action safety assertions
+        working-directory: eternal-youtube-history-patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleaner='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterCleaner.java'
+          settings='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistorySettings.java'
+          toolbar='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar.java'
+          grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
+          grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
+          grep -F 'validSetVideoId(entry.setVideoId)' "$cleaner"
+          grep -F 'PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER)' "$cleaner"
+          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
+          grep -F 'resolveEntry(entry.videoId) == null' "$cleaner"
+          grep -F 'new AlertDialog.Builder(activity)' "$cleaner"
+          grep -F 'previewAndConfirmCleanup' "$toolbar"
+          echo 'PASS Android destructive-action safety assertions'
