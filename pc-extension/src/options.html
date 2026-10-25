@@ -11,6 +11,15 @@
 <label>PC에서 시청으로 확정할 최소 재생 초 <input id="directWatchSeconds" type="number" min="1" max="120"></label>
 <p class="note">옅게 표시 모드는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 채널 이미지·제목·채널명·조회수·업로드 시점·메뉴까지 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 <strong>CSS blur는 전혀 사용하지 않습니다.</strong> <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. 1~100%는 실제 진행률을 알고 있는 영상만 기준 이상일 때 적용합니다.</p>
 </section>
+<section><h2>나중에 볼 동영상 자동 정리</h2>
+<label><input id="watchLaterAutoCleanupEnabled" type="checkbox"> Eternal 진행률이 기준 이상이면 Watch Later에서 자동 제거</label>
+<label>자동/수동 정리 기준 진행률 (%) <input id="watchLaterCleanupMinProgressPct" type="number" min="1" max="100" step="5"></label>
+<p class="note">기본값은 <strong>자동 정리 꺼짐 / 60%</strong>입니다. 진행률을 모르는 영상은 절대 자동 제거하지 않습니다. 자동 정리를 켜면 재생 중 기준에 도달한 영상의 Watch Later 소속 여부를 확인해 제거하고, Watch Later 페이지를 열 때 D1과 동기화한 뒤 기준 이상 항목을 한 번 정리합니다. 헤더의 <strong>60%+ 정리</strong> 버튼은 제거 전 대상 수를 보여주고 확인을 받습니다.</p>
+</section>
+<section><h2>자가 진단</h2>
+<div class="row"><button id="runDiagnostics" type="button" class="secondary">현재 YouTube 탭 진단</button></div>
+<pre id="diagnostics" class="note" style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
+</section>
 <section><h2>Cloudflare D1 중앙 원장</h2>
 <p class="note"><strong>D1이 본체</strong>이고 PC IndexedDB는 YouTube 카드 표시를 위한 로컬 캐시입니다. v0.7은 Chrome 시작 시 동기화, 15분 polling, 자동 History 탭 생성 같은 백그라운드 작업을 하지 않습니다. YouTube 페이지를 실제로 열거나 이동할 때만 필요한 변경분을 확인합니다.</p>
 <label><input id="cloudEnabled" type="checkbox"> D1 중앙 원장 사용</label>
