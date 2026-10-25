@@ -133,6 +133,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Precompile official Morphe extension API for bundle build
+        working-directory: morphe-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
+                    --no-daemon --stacktrace
       - name: Build feature-branch Eternal patch bundle
         working-directory: eternal-youtube-history-patches
         env:
