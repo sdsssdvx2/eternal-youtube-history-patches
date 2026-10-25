@@ -59,15 +59,17 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew :extensions:youtube:compileReleaseKotlin \
-                    :extensions:youtube:compileReleaseJavaWithJavac \
+          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
                     --no-daemon --stacktrace
       - name: Compile Eternal patches directly
         working-directory: eternal-youtube-history-patches
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew :patches:compileKotlin --no-daemon --stacktrace
+        run: |
+          ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
+                    :patches:compileKotlin \
+                    --no-daemon --stacktrace
       - name: Release
         working-directory: eternal-youtube-history-patches
         env:
