@@ -67,7 +67,7 @@ public final class EternalHistoryToolbar {
             host.addView(control, 0);
             ViewGroup.LayoutParams params = control.getLayoutParams();
             if (params != null) {
-                params.width = Dim.dp64;
+                params.width = Dim.dp(64);
                 params.height = Dim.dp36;
                 control.setLayoutParams(params);
             }
