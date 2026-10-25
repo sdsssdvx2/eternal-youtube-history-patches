@@ -65,8 +65,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew :extensions:youtube:compileReleaseKotlin \
-                    :extensions:youtube:compileReleaseJavaWithJavac \
+          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
                     --no-daemon --stacktrace
       - name: Compile Eternal Android extension and patch
         working-directory: eternal-youtube-history-patches
