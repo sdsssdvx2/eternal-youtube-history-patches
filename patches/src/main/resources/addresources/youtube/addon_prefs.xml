@@ -15,6 +15,9 @@
       <SwitchPreference android:key="morphe_eternal_history_dim_card_info" android:title="@string/morphe_eternal_history_dim_card_info_title" android:summary="@string/morphe_eternal_history_dim_card_info_summary" />
       <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_hide_min_progress" android:title="@string/morphe_eternal_history_visual_min_progress_title" android:summary="@string/morphe_eternal_history_visual_min_progress_summary" android:inputType="number" />
       <Preference android:key="morphe_eternal_history_feed_note" android:title="@string/morphe_eternal_history_feed_note_title" android:summary="@string/morphe_eternal_history_feed_note_summary" android:selectable="false" />
+      <SwitchPreference android:key="morphe_eternal_history_watch_later_auto_cleanup" android:title="@string/morphe_eternal_history_watch_later_auto_cleanup_title" android:summary="@string/morphe_eternal_history_watch_later_auto_cleanup_summary" />
+      <app.morphe.extension.shared.settings.preference.ResettableEditTextPreference android:key="morphe_eternal_history_watch_later_cleanup_min_progress" android:title="@string/morphe_eternal_history_watch_later_cleanup_min_progress_title" android:summary="@string/morphe_eternal_history_watch_later_cleanup_min_progress_summary" android:inputType="number" />
+      <Preference android:key="morphe_eternal_history_watch_later_note" android:title="@string/morphe_eternal_history_watch_later_note_title" android:summary="@string/morphe_eternal_history_watch_later_note_summary" android:selectable="false" />
     </PreferenceScreen>
   </screen>
 </morphe-add-on-preferences>
