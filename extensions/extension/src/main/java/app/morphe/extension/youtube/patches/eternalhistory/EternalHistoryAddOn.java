@@ -14,9 +14,18 @@ public final class EternalHistoryAddOn {
         if (!registered.compareAndSet(false, true)) return;
         Logger.printDebug(() -> "Registering Eternal YouTube History add-on");
         EternalHistorySettings.ENABLED.get();
-        AddOnApi.addNewVideoStartedListener(EternalHistoryClient::onNewVideoStarted);
-        AddOnApi.addVideoIdListener(EternalHistoryClient::onVideoIdChanged);
-        AddOnApi.addVideoTimeListener(EternalHistoryClient::onVideoTimeChanged);
+        AddOnApi.addNewVideoStartedListener(() -> {
+            EternalHistoryClient.onNewVideoStarted();
+            EternalWatchLaterCleaner.onNewVideoStarted();
+        });
+        AddOnApi.addVideoIdListener(videoId -> {
+            EternalHistoryClient.onVideoIdChanged(videoId);
+            EternalWatchLaterCleaner.onVideoIdChanged(videoId);
+        });
+        AddOnApi.addVideoTimeListener(videoTimeMs -> {
+            EternalHistoryClient.onVideoTimeChanged(videoTimeMs);
+            EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
+        });
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
     }
