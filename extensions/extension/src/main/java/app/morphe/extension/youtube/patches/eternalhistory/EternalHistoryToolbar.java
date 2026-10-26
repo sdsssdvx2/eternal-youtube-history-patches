@@ -29,35 +29,47 @@ public final class EternalHistoryToolbar {
     private static final int MENU_AUTO = 201;
     private static final int MENU_CLEAN = 202;
     private static final int MENU_DIAGNOSTICS = 301;
+    private static final String CONTROL_TAG = "eternal-history-toolbar-control";
     private static final AtomicBoolean mountPending = new AtomicBoolean();
+    private static WeakReference<ViewGroup> hostRef = new WeakReference<>(null);
     private static WeakReference<TextView> controlRef = new WeakReference<>(null);
 
     /** Injection point: called when YouTube materializes native toolbar ImageViews. */
     public static void onToolbarImageView(ImageView imageView) {
         if (imageView == null || !EternalHistorySettings.ENABLED.get()) return;
-        TextView existing = controlRef.get();
-        if (existing != null && existing.getParent() != null) {
-            refreshLabel(existing);
-            return;
-        }
         if (!mountPending.compareAndSet(false, true)) return;
         imageView.post(() -> {
-            try { mountOnce(imageView); }
+            try { mountOnVisibleToolbar(imageView); }
             finally { mountPending.set(false); }
         });
     }
 
-    private static void mountOnce(ImageView imageView) {
+    private static void mountOnVisibleToolbar(ImageView imageView) {
         try {
+            ViewGroup host = findVisibleToolbarHost(imageView);
+            if (host == null) return;
+
             TextView existing = controlRef.get();
-            if (existing != null && existing.getParent() != null) {
+            ViewGroup existingHost = hostRef.get();
+            if (existing != null
+                    && existingHost == host
+                    && existing.getParent() == host
+                    && existing.isAttachedToWindow()
+                    && existing.isShown()) {
                 refreshLabel(existing);
                 return;
             }
-            ViewGroup host = findToolbarHost(imageView);
-            if (host == null) return;
+
+            // v1.9.0 could latch onto an attached but hidden/transient YouTube toolbar and then
+            // refuse every later mount. Detach that stale control so a currently visible toolbar
+            // can take ownership. This also guarantees that only one Eternal control survives.
+            if (existing != null && existing.getParent() instanceof ViewGroup oldHost) {
+                oldHost.removeView(existing);
+            }
+            removeTaggedControls(host);
 
             TextView control = new TextView(host.getContext());
+            control.setTag(CONTROL_TAG);
             control.setGravity(Gravity.CENTER);
             control.setTextSize(11);
             control.setSingleLine(true);
@@ -77,6 +89,8 @@ public final class EternalHistoryToolbar {
             control.setOnClickListener(v -> showMenu(control));
             control.setOnLongClickListener(v -> { showDiagnostics(); return true; });
 
+            // The direct item-parent host is the placement that was runtime-visible in v1.8.x.
+            // Let that concrete host create its own LayoutParams subtype before sizing it.
             host.addView(control, 0);
             ViewGroup.LayoutParams params = control.getLayoutParams();
             if (params != null) {
@@ -84,27 +98,54 @@ public final class EternalHistoryToolbar {
                 params.height = Dim.dp36;
                 control.setLayoutParams(params);
             }
+            hostRef = new WeakReference<>(host);
             controlRef = new WeakReference<>(control);
         } catch (Throwable t) {
             Logger.printDebug(() -> "Eternal toolbar mount deferred: " + t.getMessage());
         }
     }
 
-    private static ViewGroup findToolbarHost(ImageView imageView) {
+    private static ViewGroup findVisibleToolbarHost(ImageView imageView) {
+        if (!isVisibleAndAttached(imageView)) return null;
+
+        // Prefer the exact hierarchy that was proven visible before the v1.9.0 dedupe change:
+        // ImageView -> menu item view -> shared toolbar/action host.
+        ViewParent itemParent = imageView.getParent();
+        if (itemParent instanceof View itemView && isVisibleAndAttached(itemView)) {
+            ViewParent hostParent = itemView.getParent();
+            if (hostParent instanceof ViewGroup host && isVisibleAndAttached(host)) {
+                return host;
+            }
+        }
+
+        // Conservative compatibility fallback for a future YouTube hierarchy change. Do not use
+        // arbitrary outer containers: only a visible named ActionMenu/Toolbar ancestor is safe.
         View current = imageView;
-        ViewGroup fallback = null;
-        for (int depth = 0; depth < 7; depth++) {
+        for (int depth = 0; depth < 6; depth++) {
             ViewParent parent = current.getParent();
             if (!(parent instanceof ViewGroup group)) break;
+            if (!isVisibleAndAttached(group)) {
+                current = group;
+                continue;
+            }
             String name = group.getClass().getName();
             if (name.contains("ActionMenu") || name.contains("Toolbar")) return group;
-            // Prefer the outermost plausible multi-action container if YouTube's obfuscated class
-            // name no longer exposes Toolbar/ActionMenu. An icon-local wrapper is usually the first
-            // such ancestor; replacing the fallback while walking upward avoids mounting there.
-            if (group.getChildCount() >= 2) fallback = group;
             current = group;
         }
-        return fallback;
+        return null;
+    }
+
+    private static boolean isVisibleAndAttached(View view) {
+        return view.isAttachedToWindow()
+                && view.isShown()
+                && view.getWindowVisibility() == View.VISIBLE;
+    }
+
+    private static void removeTaggedControls(ViewGroup host) {
+        for (int i = host.getChildCount() - 1; i >= 0; i--) {
+            View child = host.getChildAt(i);
+            if (CONTROL_TAG.equals(child.getTag())) host.removeViewAt(i);
+        }
     }
 
     private static void showMenu(TextView anchor) {
