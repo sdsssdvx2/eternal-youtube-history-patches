@@ -11,7 +11,7 @@ const bridge = text('page-bridge.js');
 const core = text('watch-later-core.js');
 const options = text('options.js');
 
-assert.equal(manifest.version, '0.8.0');
+assert.match(manifest.version, /^\d+\.\d+\.\d+$/, 'manifest version must be release semver');
 for (const cs of manifest.content_scripts) assert.equal(cs.js[0], 'watch-later-core.js', `core must load first in ${cs.world}`);
 assert.match(content, /watchLaterAutoCleanupEnabled = false/);
 assert.match(content, /watchLaterCleanupMinProgressPct = 60/);
