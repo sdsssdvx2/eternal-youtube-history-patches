@@ -1,3 +1,9 @@
+## [1.10.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.0...v1.10.1) (2026-10-26)
+
+### 🐛 Bug Fixes
+
+* stabilize page profiles and live display controls ([fa1e8b8](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/fa1e8b8e39dcabe2f5f0f282ba3a24b26a34c598))
+
 ## [1.10.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.9.1...v1.10.0) (2026-10-26)
 
 ### ✨ New Features
