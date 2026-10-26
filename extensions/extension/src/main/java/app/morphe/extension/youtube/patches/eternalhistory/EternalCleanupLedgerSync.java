@@ -78,6 +78,7 @@ final class EternalCleanupLedgerSync {
     private static void deltaSync(EternalHistoryDb db, int maxPages) throws Exception {
         long cursor = db.getMetaLong(META_REV, 0);
         for (int page = 0; page < maxPages; page++) {
+            long previousCursor = cursor;
             JSONObject result = requestJson("GET", "/v1/changes?limit=500&after=" + cursor, null);
             JSONArray records = result.optJSONArray("records");
             if (records != null && records.length() > 0) db.upsertVideos(records);
@@ -89,7 +90,7 @@ final class EternalCleanupLedgerSync {
                 db.setMetaLong(META_REV, cursor);
             }
             if (!hasMore) return;
-            if (next <= 0 || next <= db.getMetaLong(META_REV, 0) && records != null && records.length() == 0) {
+            if (next <= previousCursor) {
                 throw new IllegalStateException("D1 change cursor did not advance");
             }
             Thread.yield();
