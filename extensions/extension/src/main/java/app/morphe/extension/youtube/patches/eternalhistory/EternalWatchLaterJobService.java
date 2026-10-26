@@ -18,15 +18,26 @@ public final class EternalWatchLaterJobService extends JobService {
     static final int JOB_ID = 0x45594857;
     private static final long PERIOD_MS = 6L * 60L * 60L * 1000L;
     private static final AtomicBoolean running = new AtomicBoolean();
+    private static volatile Boolean scheduledEnabled;
 
-    static void refreshSchedule() {
+    /**
+     * Called at add-on startup, after the user toggles auto cleanup, and on video starts so a
+     * setting changed through Morphe preferences is noticed. Repeated calls with the same state are
+     * no-ops; they must not continually replace the periodic job and push its next window away.
+     */
+    static synchronized void refreshSchedule() {
         Context context = Utils.getContext();
         if (context == null) return;
         JobScheduler scheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (scheduler == null) return;
-        if (!EternalHistorySettings.ENABLED.get()
-                || !EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get()) {
+
+        boolean enabled = EternalHistorySettings.ENABLED.get()
+                && EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get();
+        if (scheduledEnabled != null && scheduledEnabled == enabled) return;
+
+        if (!enabled) {
             scheduler.cancel(JOB_ID);
+            scheduledEnabled = Boolean.FALSE;
             return;
         }
         try {
@@ -36,9 +47,16 @@ public final class EternalWatchLaterJobService extends JobService {
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                     .setPeriodic(PERIOD_MS)
                     .build();
-            scheduler.schedule(info);
-            EternalWatchLaterAutoSweep.runAsync(false, null);
+            int result = scheduler.schedule(info);
+            if (result == JobScheduler.RESULT_SUCCESS) {
+                scheduledEnabled = Boolean.TRUE;
+                EternalWatchLaterAutoSweep.runAsync(false, null);
+            } else {
+                scheduledEnabled = null;
+                Logger.printDebug(() -> "Eternal Watch Later JobScheduler rejected the periodic job");
+            }
         } catch (Throwable t) {
+            scheduledEnabled = null;
             Logger.printDebug(() -> "Eternal Watch Later job scheduling deferred: " + t.getMessage());
         }
     }
