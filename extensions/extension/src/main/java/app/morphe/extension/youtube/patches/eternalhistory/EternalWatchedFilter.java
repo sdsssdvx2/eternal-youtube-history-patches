@@ -29,10 +29,13 @@ public final class EternalWatchedFilter {
             "video_lockup"
     };
     private static final String[] CHILD_EXCEPTIONS = {
-            "metadata.e",
-            "thumbnail.e",
-            "avatar.e",
-            "overflow_button.e"
+            "metadata",
+            "thumbnail",
+            "avatar",
+            "overflow",
+            "menu_button",
+            "badge",
+            "button.e"
     };
     private static final String[] THUMBNAIL_COMPONENTS = {
             "thumbnail.e",
@@ -68,15 +71,15 @@ public final class EternalWatchedFilter {
             // Hiding has precedence when both rules match. It is evaluated only on a whole-card
             // component so a watched thumbnail can never accidentally remove only a child view.
             if (profile.hideEnabled
-                    && looksLikeWholeVideoCard(path)
+                    && looksLikeWholeVideoCard(path, surface)
                     && EternalHistoryClient.isWatchedCached(videoId, profile.effectiveHideThreshold())) {
                 return true;
             }
 
             if (!profile.dimEnabled) return false;
             if (EternalHistorySettings.DIM_CARD_INFO.get()) {
-                if (!looksLikeWholeVideoCard(path)) return false;
-            } else if (!looksLikeThumbnailComponent(path)) {
+                if (!looksLikeWholeVideoCard(path, surface)) return false;
+            } else if (!looksLikeThumbnailComponent(path, surface)) {
                 return false;
             }
 
@@ -94,29 +97,50 @@ public final class EternalWatchedFilter {
 
     private static boolean looksLikeVideoContext(String path) {
         if (path == null || path.isEmpty()) return false;
+        String lower = path.toLowerCase();
         for (String root : ROOT_CARD_PATHS) {
-            if (path.startsWith(root) || path.contains(root)) return true;
+            if (lower.startsWith(root) || lower.contains(root)) return true;
         }
         for (String nested : NESTED_CARD_PATHS) {
-            if (path.contains(nested)) return true;
+            if (lower.contains(nested)) return true;
         }
         return false;
     }
 
-    private static boolean looksLikeWholeVideoCard(String path) {
-        if (!looksLikeVideoContext(path)) return false;
+    private static boolean looksLikeWholeVideoCard(String path, EternalSurfaceSettings.Surface surface) {
+        if (path == null || path.isEmpty()) return false;
+        String lower = path.toLowerCase();
+        boolean known = looksLikeVideoContext(lower);
+        if (!known && isPlaylistLikeSurface(surface)) {
+            // New YouTube playlist pages increasingly use generic lockup view-model names instead
+            // of the old playlist_video renderer names. On these already-known video-list surfaces,
+            // a component carrying an extracted video id is accepted as a card only when its path
+            // looks like a video/lockup root and not one of the child-view paths below.
+            known = lower.contains("video") || lower.contains("lockup");
+        }
+        if (!known) return false;
         for (String child : CHILD_EXCEPTIONS) {
-            if (path.contains(child)) return false;
+            if (lower.contains(child)) return false;
         }
         return true;
     }
 
-    private static boolean looksLikeThumbnailComponent(String path) {
+    private static boolean looksLikeThumbnailComponent(String path, EternalSurfaceSettings.Surface surface) {
         if (path == null) return false;
+        String lower = path.toLowerCase();
         for (String thumbnail : THUMBNAIL_COMPONENTS) {
-            if (path.contains(thumbnail)) return true;
+            if (lower.contains(thumbnail)) return true;
         }
-        return false;
+        return isPlaylistLikeSurface(surface)
+                && (lower.contains("thumbnail") || lower.contains("content_image") || lower.contains("lockup_image"));
+    }
+
+    private static boolean isPlaylistLikeSurface(EternalSurfaceSettings.Surface surface) {
+        return surface == EternalSurfaceSettings.Surface.WATCH_LATER
+                || surface == EternalSurfaceSettings.Surface.LIKED
+                || surface == EternalSurfaceSettings.Surface.PLAYLIST_DETAIL
+                || surface == EternalSurfaceSettings.Surface.HISTORY
+                || surface == EternalSurfaceSettings.Surface.PLAYLISTS;
     }
 
     private EternalWatchedFilter() { }
