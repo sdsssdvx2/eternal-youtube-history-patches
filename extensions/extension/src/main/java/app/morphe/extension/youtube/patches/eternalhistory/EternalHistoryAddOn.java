@@ -15,6 +15,7 @@ public final class EternalHistoryAddOn {
         if (!registered.compareAndSet(false, true)) return;
         Logger.printDebug(() -> "Registering Eternal YouTube History add-on");
         EternalHistorySettings.ENABLED.get();
+        EternalSurfaceSettings.ensureDefaultProfileMigrated();
         AddOnApi.addNewVideoStartedListener(() -> {
             EternalHistoryClient.onNewVideoStarted();
             EternalWatchLaterCleaner.onNewVideoStarted();
@@ -33,9 +34,6 @@ public final class EternalHistoryAddOn {
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
         EternalWatchLaterStateMigration.migrate();
-        // refreshSchedule() immediately starts one throttled sweep when auto-cleanup is enabled.
-        // After the one-time parser migration above, a stale v1.9.1 zero-row "success" can no
-        // longer postpone the first safe modern-payload check for another six hours.
         EternalWatchLaterJobService.refreshSchedule();
         EternalHistoryToolbar.ensureControlSoon();
     }
