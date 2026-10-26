@@ -37,16 +37,27 @@
     else p.reject(new Error(msg.error || `${msg.type} failed`));
   });
 
+  function nextAtFromLease(raw) {
+    if (raw && typeof raw === 'object') return Number(raw.nextAt || 0);
+    return Number(raw || 0);
+  }
+
   async function claimDue(key, intervalMs) {
     const now = Date.now();
     const state = await chrome.storage.local.get({ [key]: 0 });
-    if (Number(state[key] || 0) > now) return false;
-    await chrome.storage.local.set({ [key]: now + intervalMs });
-    return true;
+    if (nextAtFromLease(state[key]) > now) return false;
+    const token = crypto.randomUUID();
+    await chrome.storage.local.set({ [key]: { nextAt: now + intervalMs, token } });
+    // Chrome storage writes are serialized but multiple visible windows can race between get/set.
+    // Re-read the lease so only the last writer owns the maintenance run.
+    const verify = await chrome.storage.local.get({ [key]: null });
+    return verify[key]?.token === token;
   }
 
   async function retrySoon(key) {
-    await chrome.storage.local.set({ [key]: Date.now() + RETRY_MS }).catch(() => {});
+    await chrome.storage.local.set({
+      [key]: { nextAt: Date.now() + RETRY_MS, token: `retry:${crypto.randomUUID()}` }
+    }).catch(() => {});
   }
 
   function normalizeProgress(value) {
