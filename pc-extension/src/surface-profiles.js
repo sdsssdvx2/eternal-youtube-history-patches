@@ -5,9 +5,15 @@
     playlists: '재생목록', playlist_detail: '재생목록 상세', history: '시청 기록',
     library: '내 페이지 · 라이브러리', other: '기타'
   };
+  const CLASSES = [
+    'eyh-surface-watched', 'eyh-surface-hidden',
+    'eyh-surface-watched-linked', 'eyh-surface-watched-grayscale'
+  ];
   let settings = null;
   let scanTimer = null;
+  let scanGeneration = 0;
   let panel = null;
+  let panelRestoreProfile = null;
   const watched = new Map();
   const progress = new Map();
 
@@ -21,6 +27,25 @@
     hideThreshold: clamp(p?.hideThreshold)
   });
 
+  function extensionAlive() {
+    try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
+  }
+
+  async function storageGet(defaults) {
+    if (!extensionAlive()) return defaults;
+    try { return await chrome.storage.local.get(defaults); } catch { return defaults; }
+  }
+
+  async function storageSet(values) {
+    if (!extensionAlive()) return false;
+    try { await chrome.storage.local.set(values); return true; } catch { return false; }
+  }
+
+  async function runtimeMessage(message) {
+    if (!extensionAlive()) return null;
+    try { return await chrome.runtime.sendMessage(message); } catch { return null; }
+  }
+
   function legacyProfile(v) {
     const mode = ['dim', 'hide', 'none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
     const threshold = clamp(v.watchedMinProgressPct);
@@ -31,19 +56,20 @@
   }
 
   async function loadSettings() {
-    const v = await chrome.storage.local.get({
+    const defaults = {
       watchedDisplayMode: 'dim', watchedMinProgressPct: 0,
       watchedThumbnailOpacityPct: 65, watchedThumbnailGrayscale: false, watchedLinkCardInfo: false,
       watchedSurfaceDefaultProfile: null, watchedSurfaceProfiles: {}
-    });
+    };
+    const v = await storageGet(defaults);
     let defaultProfile = v.watchedSurfaceDefaultProfile ? normalizeProfile(v.watchedSurfaceDefaultProfile) : null;
     if (!defaultProfile) {
       defaultProfile = legacyProfile(v);
-      await chrome.storage.local.set({ watchedSurfaceDefaultProfile: defaultProfile });
+      await storageSet({ watchedSurfaceDefaultProfile: defaultProfile });
     }
-    // The legacy content script still owns sync/Watch Later/History. Disable only its old global
-    // card styling after preserving that styling as the default profile above.
-    if (v.watchedDisplayMode !== 'none') await chrome.storage.local.set({ watchedDisplayMode: 'none' });
+    // Keep the stable legacy content script for History/Watch Later/sync duties, but disable only
+    // its old card renderer. surface-profiles.js owns presentation with its own CSS class namespace.
+    if (v.watchedDisplayMode !== 'none') await storageSet({ watchedDisplayMode: 'none' });
     settings = {
       defaultProfile,
       profiles: v.watchedSurfaceProfiles && typeof v.watchedSurfaceProfiles === 'object' ? v.watchedSurfaceProfiles : {},
@@ -75,9 +101,12 @@
     return 'other';
   }
 
-  function currentProfile() {
-    const key = surfaceKey();
-    return normalizeProfile(settings?.profiles?.[key] || settings?.defaultProfile || {});
+  function hasOverride(key = surfaceKey()) {
+    return Boolean(settings?.profiles && Object.prototype.hasOwnProperty.call(settings.profiles, key));
+  }
+
+  function currentProfile(key = surfaceKey()) {
+    return normalizeProfile(hasOverride(key) ? settings.profiles[key] : settings?.defaultProfile || {});
   }
 
   function effectiveThresholds(profile) {
@@ -114,22 +143,34 @@
       if (Number.isFinite(value) && Number.isFinite(max) && max > 0) return clamp(value / max * 100);
     }
     const m = (el.getAttribute?.('style') || '').match(/width\s*:\s*([0-9.]+)%/i);
-    if (m) return clamp(m[1]);
-    return null;
+    return m ? clamp(m[1]) : null;
   }
 
   function matchesThreshold(isWatched, pct, threshold) {
-    if (!isWatched) return false;
-    return threshold <= 0 || (pct != null && pct >= threshold);
+    return isWatched && (threshold <= 0 || (pct != null && pct >= threshold));
+  }
+
+  function clearManagedElement(el) {
+    for (const cls of CLASSES) el.classList.remove(cls);
+    delete el.dataset.eyhSurfaceManaged;
+    delete el.dataset.eyhSurface;
+  }
+
+  function clearAllManaged() {
+    for (const el of document.querySelectorAll('[data-eyh-surface-managed="1"]')) clearManagedElement(el);
   }
 
   async function scan() {
     scanTimer = null;
+    const generation = ++scanGeneration;
     if (!settings) await loadSettings().catch(() => {});
-    if (!settings) return;
-    const profile = currentProfile();
+    if (!settings || generation !== scanGeneration) return;
+
+    const key = surfaceKey();
+    const profile = currentProfile(key);
     const thresholds = effectiveThresholds(profile);
     const map = new Map();
+    const managedNow = new Set();
     for (const a of document.querySelectorAll('a[href*="watch?v="], a[href^="/shorts/"]')) {
       const id = videoIdFromHref(a.getAttribute('href')); if (!id) continue;
       if (!map.has(id)) map.set(id, []); map.get(id).push(a);
@@ -137,36 +178,43 @@
     const missing = [...map.keys()].filter(id => !watched.has(id));
     for (let i = 0; i < missing.length; i += 400) {
       const ids = missing.slice(i, i + 400);
-      try {
-        const r = await chrome.runtime.sendMessage({ type: 'CHECK_WATCHED', ids });
-        for (const id of ids) {
-          watched.set(id, Boolean(r?.watched?.[id]));
-          const n = Number(r?.progress?.[id]); progress.set(id, Number.isFinite(n) ? clamp(n) : null);
-        }
-      } catch {}
+      const r = await runtimeMessage({ type: 'CHECK_WATCHED', ids });
+      if (generation !== scanGeneration || key !== surfaceKey()) { scheduleScan(0); return; }
+      for (const id of ids) {
+        watched.set(id, Boolean(r?.watched?.[id]));
+        const n = Number(r?.progress?.[id]); progress.set(id, Number.isFinite(n) ? clamp(n) : null);
+      }
     }
+
+    if (generation !== scanGeneration || key !== surfaceKey()) return;
     for (const [id, anchors] of map) {
       for (const a of anchors) {
         const c = containerFor(a); if (!c) continue;
+        managedNow.add(c);
         const stored = progress.get(id); const native = nativeProgressPct(c);
         const pct = stored == null ? native : native == null ? stored : Math.max(stored, native);
         const isWatched = watched.get(id) === true;
         const hide = profile.hideEnabled && matchesThreshold(isWatched, pct, thresholds.hide);
         const dim = !hide && profile.dimEnabled && matchesThreshold(isWatched, pct, thresholds.dim);
-        c.classList.toggle('eyh-hidden', hide);
-        c.classList.toggle('eyh-watched', dim);
-        c.classList.toggle('eyh-watched-linked', dim && settings.linkedCardInfo);
-        c.classList.toggle('eyh-watched-grayscale', dim && settings.grayscale);
-        c.dataset.eyhSurface = surfaceKey();
+        c.classList.toggle('eyh-surface-hidden', hide);
+        c.classList.toggle('eyh-surface-watched', dim);
+        c.classList.toggle('eyh-surface-watched-linked', dim && settings.linkedCardInfo);
+        c.classList.toggle('eyh-surface-watched-grayscale', dim && settings.grayscale);
+        c.dataset.eyhSurfaceManaged = '1';
+        c.dataset.eyhSurface = key;
         c.dataset.eyhVideoId = id;
         if (pct != null) c.dataset.eyhProgressPct = String(Math.round(pct)); else delete c.dataset.eyhProgressPct;
       }
     }
+    for (const old of document.querySelectorAll('[data-eyh-surface-managed="1"]')) {
+      if (!managedNow.has(old)) clearManagedElement(old);
+    }
     decorateHeader();
   }
 
-  function scheduleScan(delay = 120) {
-    if (scanTimer) return;
+  function scheduleScan(delay = 80) {
+    if (document.visibilityState === 'hidden') return;
+    if (scanTimer) clearTimeout(scanTimer);
     scanTimer = setTimeout(scan, delay);
   }
 
@@ -174,20 +222,24 @@
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return;
     for (const b of root.querySelectorAll('button[data-eyh-mode]')) b.hidden = true;
-    const key = surfaceKey();
-    const brand = root.querySelector('.eyh-header-brand'); if (brand) brand.textContent = `Eternal · ${LABELS[key] || LABELS.other}`;
+    const brand = root.querySelector('.eyh-header-brand'); if (brand) brand.hidden = true;
     let button = root.querySelector('#eyh-surface-settings');
     if (!button) {
-      button = document.createElement('button'); button.id = 'eyh-surface-settings'; button.type = 'button';
-      button.className = 'eyh-header-button eyh-active'; button.addEventListener('click', openPanel);
+      button = document.createElement('button');
+      button.id = 'eyh-surface-settings'; button.type = 'button';
+      button.className = 'eyh-header-button eyh-active eyh-surface-compact';
+      button.textContent = '⚙';
+      button.addEventListener('click', () => { if (extensionAlive()) openPanel(); });
       root.insertBefore(button, root.querySelector('.eyh-wl-only') || root.querySelector('#eyh-header-status'));
     }
-    const p = currentProfile(), t = effectiveThresholds(p);
+    const key = surfaceKey();
+    const p = currentProfile(key), t = effectiveThresholds(p);
     const states = [];
     if (p.dimEnabled) states.push(`흐림 ${t.dim}%`);
     if (p.hideEnabled) states.push(`숨김 ${t.hide}%`);
-    button.textContent = states.length ? states.join(' · ') : '표시 변경 없음';
-    button.title = `${LABELS[key] || LABELS.other} 페이지 표시 설정`;
+    button.textContent = '⚙';
+    button.title = `${LABELS[key] || LABELS.other} 설정 · ${hasOverride(key) ? '개별 설정' : '공통 기본값 사용'} · ${states.join(' / ') || '표시 변경 없음'}`;
+    button.setAttribute('aria-label', button.title);
   }
 
   function field(label, input) {
@@ -195,51 +247,95 @@
     const span = document.createElement('span'); span.textContent = label; row.append(span, input); return row;
   }
   function checkbox(checked) { const x = document.createElement('input'); x.type = 'checkbox'; x.checked = checked; return x; }
-  function number(value) { const x = document.createElement('input'); x.type = 'number'; x.min = '0'; x.max = '100'; x.step = '5'; x.value = String(clamp(value)); return x; }
+  function number(value) { const x = document.createElement('input'); x.type = 'number'; x.min = '0'; x.max = '100'; x.step = '1'; x.value = String(clamp(value)); return x; }
 
-  function closePanel() { panel?.remove(); panel = null; }
+  function closePanel({ restorePreview = false } = {}) {
+    if (restorePreview && panelRestoreProfile && settings) {
+      const { key, hadOverride, profile } = panelRestoreProfile;
+      const profiles = { ...(settings.profiles || {}) };
+      if (hadOverride) profiles[key] = profile; else delete profiles[key];
+      settings.profiles = profiles;
+      scanGeneration++;
+      scheduleScan(0);
+    }
+    panel?.remove(); panel = null; panelRestoreProfile = null;
+  }
+
+  function previewProfile(key, profile) {
+    settings.profiles = { ...(settings.profiles || {}), [key]: normalizeProfile(profile) };
+    scanGeneration++;
+    scheduleScan(0);
+  }
+
   function openPanel() {
-    closePanel();
-    const key = surfaceKey(), p = currentProfile();
+    closePanel({ restorePreview: true });
+    if (!settings) return;
+    const key = surfaceKey(), initial = currentProfile(key), hadOverride = hasOverride(key);
+    panelRestoreProfile = { key, hadOverride, profile: initial };
     panel = document.createElement('div'); panel.id = 'eyh-surface-panel';
-    const title = document.createElement('strong'); title.textContent = `Eternal · ${LABELS[key] || LABELS.other}`; panel.append(title);
-    const note = document.createElement('div'); note.className = 'eyh-surface-note'; note.textContent = '이 PC의 이 페이지에만 저장됩니다. 두 조건을 모두 만족하면 숨김이 우선합니다.'; panel.append(note);
-    const dim = checkbox(p.dimEnabled), hide = checkbox(p.hideEnabled), linked = checkbox(p.linkedThresholds);
-    const shared = number(p.sharedThreshold), dimPct = number(p.dimThreshold), hidePct = number(p.hideThreshold);
+    const title = document.createElement('strong'); title.textContent = LABELS[key] || LABELS.other; panel.append(title);
+    const note = document.createElement('div'); note.className = 'eyh-surface-note';
+    note.textContent = hadOverride
+      ? '이 페이지의 개별 설정입니다. 두 조건을 모두 만족하면 숨김이 우선합니다.'
+      : '현재 공통 기본값을 미리 보여줍니다. 적용하면 이 페이지의 개별 설정이 됩니다.';
+    panel.append(note);
+
+    const dim = checkbox(initial.dimEnabled), hide = checkbox(initial.hideEnabled), linked = checkbox(initial.linkedThresholds);
+    const shared = number(initial.sharedThreshold), dimPct = number(initial.dimThreshold), hidePct = number(initial.hideThreshold);
     panel.append(field('흐리게', dim), field('숨기기', hide), field('진행률 기준 같이 사용', linked));
     const sharedRow = field('공통 최소 진행률 (%)', shared), dimRow = field('흐림 최소 진행률 (%)', dimPct), hideRow = field('숨김 최소 진행률 (%)', hidePct);
     panel.append(sharedRow, dimRow, hideRow);
     const refreshRows = () => { sharedRow.hidden = !linked.checked; dimRow.hidden = linked.checked; hideRow.hidden = linked.checked; };
-    linked.addEventListener('change', refreshRows); refreshRows();
+    const readForm = () => normalizeProfile({
+      dimEnabled: dim.checked, hideEnabled: hide.checked, linkedThresholds: linked.checked,
+      sharedThreshold: shared.value, dimThreshold: dimPct.value, hideThreshold: hidePct.value
+    });
+    const preview = () => { refreshRows(); previewProfile(key, readForm()); };
+    linked.addEventListener('change', preview); dim.addEventListener('change', preview); hide.addEventListener('change', preview);
+    for (const input of [shared, dimPct, hidePct]) input.addEventListener('input', preview);
+    refreshRows();
+
     const actions = document.createElement('div'); actions.className = 'eyh-surface-actions';
-    const reset = document.createElement('button'); reset.textContent = '기본값';
+    const reset = document.createElement('button'); reset.textContent = '기본값 사용';
     const cancel = document.createElement('button'); cancel.textContent = '취소';
     const save = document.createElement('button'); save.textContent = '적용'; save.className = 'primary';
     actions.append(reset, cancel, save); panel.append(actions); document.body.append(panel);
-    cancel.addEventListener('click', closePanel);
+    cancel.addEventListener('click', () => closePanel({ restorePreview: true }));
     reset.addEventListener('click', async () => {
       const profiles = { ...(settings.profiles || {}) }; delete profiles[key];
-      await chrome.storage.local.set({ watchedSurfaceProfiles: profiles }); settings.profiles = profiles; closePanel(); watched.clear(); progress.clear(); scheduleScan(0);
+      if (await storageSet({ watchedSurfaceProfiles: profiles })) settings.profiles = profiles;
+      closePanel(); watched.clear(); progress.clear(); scanGeneration++; scheduleScan(0);
     });
     save.addEventListener('click', async () => {
-      const profile = normalizeProfile({ dimEnabled: dim.checked, hideEnabled: hide.checked, linkedThresholds: linked.checked, sharedThreshold: shared.value, dimThreshold: dimPct.value, hideThreshold: hidePct.value });
+      const profile = readForm();
       const profiles = { ...(settings.profiles || {}), [key]: profile };
-      await chrome.storage.local.set({ watchedSurfaceProfiles: profiles }); settings.profiles = profiles; closePanel(); watched.clear(); progress.clear(); scheduleScan(0);
+      if (await storageSet({ watchedSurfaceProfiles: profiles })) settings.profiles = profiles;
+      closePanel(); watched.clear(); progress.clear(); scanGeneration++; scheduleScan(0);
     });
   }
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
-    if (changes.watchedSurfaceProfiles || changes.watchedSurfaceDefaultProfile || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo) {
-      loadSettings().then(() => { watched.clear(); progress.clear(); scheduleScan(0); }).catch(() => {});
-    }
-  });
+  if (extensionAlive()) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (changes.watchedSurfaceProfiles || changes.watchedSurfaceDefaultProfile || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo) {
+        loadSettings().then(() => { watched.clear(); progress.clear(); scanGeneration++; scheduleScan(0); }).catch(() => {});
+      }
+    });
+  }
+
   const observer = new MutationObserver(mutations => {
     if (mutations.some(m => m.type === 'childList' && m.addedNodes.length)) scheduleScan();
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
-  const nav = () => { closePanel(); watched.clear(); progress.clear(); scheduleScan(0); setTimeout(decorateHeader, 350); };
-  window.addEventListener('yt-navigate-finish', nav, true); window.addEventListener('popstate', nav, true);
-  document.addEventListener('click', e => { if (panel && !panel.contains(e.target) && e.target?.id !== 'eyh-surface-settings') closePanel(); }, true);
+  const nav = () => {
+    closePanel({ restorePreview: true });
+    clearAllManaged(); watched.clear(); progress.clear(); scanGeneration++;
+    scheduleScan(0); setTimeout(decorateHeader, 250);
+  };
+  window.addEventListener('yt-navigate-finish', nav, true);
+  window.addEventListener('popstate', nav, true);
+  document.addEventListener('click', e => {
+    if (panel && !panel.contains(e.target) && e.target?.id !== 'eyh-surface-settings') closePanel({ restorePreview: true });
+  }, true);
   loadSettings().then(() => scheduleScan(0)).catch(() => {});
 })();
