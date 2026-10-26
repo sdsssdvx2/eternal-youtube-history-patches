@@ -1,3 +1,9 @@
+## [1.8.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.8.0...v1.8.1) (2026-10-26)
+
+### 🐛 Bug Fixes
+
+* sync central ledger before Android Watch Later cleanup ([466118d](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/466118d7a0e0d69b66229f131cddc1f4c35508e7))
+
 ## [1.8.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.7.1...v1.8.0) (2026-10-26)
 
 ### ✨ New Features
