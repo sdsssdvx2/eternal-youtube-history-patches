@@ -91,6 +91,7 @@ jobs:
           cleaner="$base/EternalWatchLaterCleaner.java"
           sweep="$base/EternalWatchLaterAutoSweep.java"
           payload="$base/EternalWatchLaterPayload.java"
+          migration="$base/EternalWatchLaterStateMigration.java"
           settings="$base/EternalHistorySettings.java"
           surface="$base/EternalSurfaceSettings.java"
           tracker="$base/EternalSurfaceTracker.java"
@@ -116,11 +117,13 @@ jobs:
           grep -F 'if (next <= previousCursor)' "$ledger"
           grep -F 'if (current >= value) return;' "$db"
 
-          # Modern Watch Later payloads must fail closed and zero-row parser drift cannot be cached as success.
+          # Modern Watch Later payloads fail closed and old zero-row false-success state is invalidated once.
           grep -F '"lockupViewModel"' "$payload"
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
           grep -F 'if (result.scanned == 0)' "$sweep"
           grep -F '0개 파싱은 성공으로 저장하지 않음' "$sweep"
+          grep -F 'CURRENT_PARSER_STATE_VERSION = 2' "$migration"
+          grep -F '.remove(PREF_LAST_SUCCESS)' "$migration"
 
           # Per-surface profiles support simultaneous dim/hide with hide precedence and independent thresholds.
           grep -F 'WATCH_LATER("watch_later"' "$surface"
@@ -129,11 +132,12 @@ jobs:
           grep -F 'effectiveHideThreshold()' "$surface"
           grep -F 'profile.hideEnabled' "$filter"
           grep -F 'profile.dimEnabled' "$filter"
+          grep -F 'isPlaylistLikeSurface(surface)' "$filter"
           grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
 
           # Exact subpage classification and final host manifest JobService registration are patch-time locked.
           grep -F 'EternalBrowseIdFingerprint' "$addon"
-          grep -F 'EternalSurfaceTracker;->onBrowseId(Ljava/lang/String;)V' "$addon"
+          grep -F 'onBrowseId(Ljava/lang/String;)V' "$addon"
           grep -F 'declareWatchLaterJobService()' "$addon"
           grep -F 'android.permission.BIND_JOB_SERVICE' "$addon"
           grep -F 'case "VLWL"' "$tracker"
