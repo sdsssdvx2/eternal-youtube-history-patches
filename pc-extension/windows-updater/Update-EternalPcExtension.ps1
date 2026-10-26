@@ -55,6 +55,9 @@ function Mirror-Directory {
     if ($code -gt 7) {
         throw "robocopy failed with exit code $code"
     }
+    # robocopy uses 1-7 for successful copy outcomes. Normalize those accepted codes so
+    # PowerShell hosts / CI do not propagate a false non-zero process exit after success.
+    $global:LASTEXITCODE = 0
 }
 
 function Get-PcRelease {
