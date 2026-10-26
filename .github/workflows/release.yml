@@ -100,13 +100,21 @@ jobs:
           fi
 
           version="${latest_tag#v}"
-          gradle_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*(.+)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')"
-          if [[ "$gradle_version" != "$version" ]]; then
-            echo "Refusing recovery: latest tag is $latest_tag but gradle.properties is $gradle_version" >&2
+          main_gradle_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*(.+)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')"
+          if [[ "$main_gradle_version" != "$version" ]]; then
+            echo "Refusing recovery: latest tag is $latest_tag but gradle.properties is $main_gradle_version" >&2
             exit 1
           fi
 
-          echo "Recovering missing GitHub Release for $latest_tag without creating a new version."
+          echo "Recovering missing GitHub Release for $latest_tag from the exact tagged source."
+          git checkout --detach "$latest_tag"
+
+          tagged_gradle_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*(.+)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')"
+          if [[ "$tagged_gradle_version" != "$version" ]]; then
+            echo "Refusing recovery: tagged source $latest_tag contains Gradle version $tagged_gradle_version" >&2
+            exit 1
+          fi
+
           ./gradlew :patches:generatePatchesList --no-daemon --stacktrace
 
           asset="$(find patches/build/libs -maxdepth 1 -type f -name "patches-${version}.mpp" -print -quit)"
@@ -125,4 +133,4 @@ jobs:
 
           gh release view "$latest_tag" --json tagName,assets --jq \
             '.tagName + " " + (.assets | map(.name) | join(","))'
-          echo "Recovered GitHub Release $latest_tag with $(basename "$asset")."
+          echo "Recovered GitHub Release $latest_tag with $(basename "$asset") built from the tagged source."
