@@ -1,3 +1,9 @@
+## [1.8.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.7.1...v1.8.0) (2026-10-26)
+
+### ✨ New Features
+
+* add Watch Later cleanup and YouTube header controls ([298c203](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/298c203afd301b85ad0e5ac3507a399a6645822a))
+
 ## [1.7.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.7.0...v1.7.1) (2026-10-20)
 
 ### 🐛 Bug Fixes
