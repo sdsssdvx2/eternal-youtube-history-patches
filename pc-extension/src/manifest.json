@@ -35,7 +35,8 @@
       ],
       "js": [
         "watch-later-core.js",
-        "content.js"
+        "content.js",
+        "maintenance.js"
       ],
       "css": [
         "content.css"
