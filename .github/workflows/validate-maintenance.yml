@@ -1,0 +1,64 @@
+name: Validate Eternal maintenance
+
+on:
+  pull_request:
+    paths:
+      - 'pc-extension/**'
+      - 'extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/**'
+      - 'patches/src/main/kotlin/app/eternal/patches/youtube/history/**'
+      - '.github/workflows/validate-maintenance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'lts/*'
+      - name: PC maintenance safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pc-extension/src
+          node tests/watch-later-selftest.mjs
+          node tests/static-integration-selftest.mjs
+          node --check maintenance.js
+          grep -F "document.visibilityState !== 'visible'" maintenance.js
+          grep -F "watchLaterAutoCleanupEnabled: false" maintenance.js
+          grep -F "EYH_WL_LIST_REQUEST" maintenance.js
+          grep -F "EYH_WL_REMOVE_REQUEST" maintenance.js
+          grep -F "ACTIVE_YOUTUBE_SYNC" maintenance.js
+          grep -F "maxPages: 100" maintenance.js
+          ! grep -F 'chrome.alarms' maintenance.js
+          echo 'PASS PC low-frequency maintenance safety'
+      - name: Android background cleanup safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
+          settings="$base/EternalHistorySettings.java"
+          sweep="$base/EternalWatchLaterAutoSweep.java"
+          job="$base/EternalWatchLaterJobService.java"
+          addon="$base/EternalHistoryAddOn.java"
+          toolbar="$base/EternalHistoryToolbar.java"
+          support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
+          grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
+          grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
+          grep -F 'pct != null && pct >= 0f && pct >= threshold' "$sweep"
+          grep -F 'validSetVideoId(entry.setVideoId)' "$sweep"
+          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$sweep"
+          grep -F 'resolveEntry(entry.videoId) == null' "$sweep"
+          ! grep -F 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID' "$sweep"
+          grep -F 'setPeriodic(PERIOD_MS)' "$job"
+          grep -F 'scheduler.cancel(JOB_ID)' "$job"
+          grep -F 'WATCH_LATER_AUTO_CLEANUP.get()' "$job"
+          grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
+          grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
+          grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
+          grep -F 'node.setAttribute("android:exported", "false")' "$support"
+          echo 'PASS Android opt-in/device-auth background cleanup safety'
