@@ -2,11 +2,20 @@ name: Release PC extension
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'pc-extension/src/**'
+      - 'pc-extension/windows-updater/**'
+      - 'pc-extension/README.md'
+      - '.github/workflows/release-pc-extension.yml'
   push:
     branches:
       - main
     paths:
       - 'pc-extension/src/**'
+      - 'pc-extension/windows-updater/**'
       - 'pc-extension/README.md'
       - '.github/workflows/release-pc-extension.yml'
 
@@ -18,7 +27,123 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  windows-updater-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Parse PowerShell helpers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = Get-ChildItem pc-extension/windows-updater -Filter '*.ps1'
+          if ($scripts.Count -lt 3) { throw 'Expected updater/install/uninstall PowerShell helpers.' }
+          foreach ($script in $scripts) {
+            [void][scriptblock]::Create((Get-Content -LiteralPath $script.FullName -Raw -Encoding UTF8))
+          }
+
+      - name: Offline verified update and fail-closed digest smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content pc-extension/src/manifest.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '0.9.0') { throw "Unexpected fixture version: $version" }
+
+          $testRoot = Join-Path $env:RUNNER_TEMP 'eternal-pc-updater-smoke'
+          Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $testRoot | Out-Null
+
+          $installed = Join-Path $testRoot 'installed-extension'
+          New-Item -ItemType Directory -Path $installed | Out-Null
+          @{
+            manifest_version = 3
+            name = 'Eternal YouTube History'
+            version = '0.8.0'
+          } | ConvertTo-Json | Set-Content (Join-Path $installed 'manifest.json') -Encoding UTF8
+          Set-Content (Join-Path $installed 'stale-file.txt') 'must be removed' -Encoding UTF8
+
+          $fixture = Join-Path $testRoot "eternal-youtube-history-v$version"
+          $fixtureExtension = Join-Path $fixture 'extension'
+          $fixtureUpdater = Join-Path $fixture 'windows-updater'
+          New-Item -ItemType Directory -Path $fixtureExtension,$fixtureUpdater | Out-Null
+          Copy-Item pc-extension/src/* $fixtureExtension -Recurse -Force
+          Copy-Item pc-extension/windows-updater/* $fixtureUpdater -Recurse -Force
+          Set-Content (Join-Path $fixtureExtension 'new-file.txt') 'new release' -Encoding UTF8
+
+          $zip = Join-Path $testRoot "eternal-youtube-history-pc-v$version.zip"
+          Compress-Archive -Path $fixture -DestinationPath $zip -CompressionLevel Optimal
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $metadata = Join-Path $testRoot 'releases.json'
+          @([pscustomobject]@{
+            tag_name = "pc-v$version"
+            draft = $false
+            prerelease = $false
+            assets = @([pscustomobject]@{
+              name = "eternal-youtube-history-pc-v$version.zip"
+              digest = "sha256:$sha"
+              browser_download_url = 'https://github.com/example/fixture.zip'
+            })
+          }) | ConvertTo-Json -Depth 8 | Set-Content $metadata -Encoding UTF8
+
+          $config = Join-Path $testRoot 'updater/config.json'
+          & pc-extension/windows-updater/Update-EternalPcExtension.ps1 `
+            -ExtensionDir $installed `
+            -ConfigPath $config `
+            -ReleaseMetadataFile $metadata `
+            -AssetOverridePath $zip
+
+          $updated = Get-Content (Join-Path $installed 'manifest.json') -Raw | ConvertFrom-Json
+          if ($updated.version -ne $version) { throw 'Fixture update did not install the target manifest.' }
+          if (Test-Path (Join-Path $installed 'stale-file.txt')) { throw 'Mirror update failed to remove stale source file.' }
+          if (-not (Test-Path (Join-Path $installed 'new-file.txt'))) { throw 'Mirror update missed a new source file.' }
+          if (-not (Test-Path (Join-Path $testRoot 'updater/state.json'))) { throw 'Updater state was not persisted.' }
+
+          # A second run at the same version must be a harmless no-op.
+          & pc-extension/windows-updater/Update-EternalPcExtension.ps1 `
+            -ExtensionDir $installed `
+            -ConfigPath $config `
+            -ReleaseMetadataFile $metadata `
+            -AssetOverridePath $zip
+
+          $badInstalled = Join-Path $testRoot 'bad-digest-extension'
+          New-Item -ItemType Directory -Path $badInstalled | Out-Null
+          @{
+            manifest_version = 3
+            name = 'Eternal YouTube History'
+            version = '0.8.0'
+          } | ConvertTo-Json | Set-Content (Join-Path $badInstalled 'manifest.json') -Encoding UTF8
+
+          $badMetadata = Join-Path $testRoot 'bad-releases.json'
+          @([pscustomobject]@{
+            tag_name = "pc-v$version"
+            draft = $false
+            prerelease = $false
+            assets = @([pscustomobject]@{
+              name = "eternal-youtube-history-pc-v$version.zip"
+              digest = ('sha256:' + ('0' * 64))
+              browser_download_url = 'https://github.com/example/fixture.zip'
+            })
+          }) | ConvertTo-Json -Depth 8 | Set-Content $badMetadata -Encoding UTF8
+
+          $failedClosed = $false
+          try {
+            & pc-extension/windows-updater/Update-EternalPcExtension.ps1 `
+              -ExtensionDir $badInstalled `
+              -ConfigPath (Join-Path $testRoot 'bad-updater/config.json') `
+              -ReleaseMetadataFile $badMetadata `
+              -AssetOverridePath $zip
+          } catch {
+            $failedClosed = $true
+          }
+          if (-not $failedClosed) { throw 'Bad release digest was not rejected.' }
+          $badVersion = (Get-Content (Join-Path $badInstalled 'manifest.json') -Raw | ConvertFrom-Json).version
+          if ($badVersion -ne '0.8.0') { throw 'Bad digest changed the installed extension.' }
+
+          Write-Host 'PASS: Windows unpacked-extension updater smoke completed.'
+
   package:
+    needs: windows-updater-smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +172,9 @@ jobs:
           for file in "${required[@]}"; do
             test -f "pc-extension/src/$file"
           done
+          for file in Update-EternalPcExtension.ps1 Install-EternalPcAutoUpdater.ps1 Uninstall-EternalPcAutoUpdater.ps1; do
+            test -f "pc-extension/windows-updater/$file"
+          done
 
           (
             cd pc-extension/src
@@ -70,8 +198,9 @@ jobs:
           root="eternal-youtube-history-v${VERSION}"
           zip_name="eternal-youtube-history-pc-v${VERSION}.zip"
           rm -rf .pc-dist "$zip_name"
-          mkdir -p ".pc-dist/${root}/extension"
+          mkdir -p ".pc-dist/${root}/extension" ".pc-dist/${root}/windows-updater"
           cp -a pc-extension/src/. ".pc-dist/${root}/extension/"
+          cp -a pc-extension/windows-updater/. ".pc-dist/${root}/windows-updater/"
           cp pc-extension/README.md ".pc-dist/${root}/README.md"
 
           find ".pc-dist/${root}" -exec touch -d '2026-01-01 00:00:00 UTC' {} +
@@ -86,6 +215,8 @@ jobs:
           unzip -q "$zip_name" -d .pc-verify
           test "$(jq -r '.version' ".pc-verify/${root}/extension/manifest.json")" = "$VERSION"
           test -s ".pc-verify/${root}/extension/watch-later-core.js"
+          test -s ".pc-verify/${root}/windows-updater/Update-EternalPcExtension.ps1"
+          test -s ".pc-verify/${root}/windows-updater/Install-EternalPcAutoUpdater.ps1"
 
           sha="$(sha256sum "$zip_name" | awk '{print $1}')"
           bytes="$(stat -c %s "$zip_name")"
@@ -108,12 +239,12 @@ jobs:
           tag="pc-v${VERSION}"
           title="Eternal YouTube History PC v${VERSION}"
           body="$(cat <<EOF
-          Canonical unpacked Chrome extension release.
+          Canonical unpacked Chrome extension release with the optional Windows auto-updater.
 
           SHA-256: ${SHA256}
           Size: ${BYTES} bytes
 
-          Update an existing install by overwriting the current extension directory with the ZIP's extension/ contents, then press Reload in chrome://extensions. Do not remove the extension.
+          One-time bootstrap: overwrite the existing extension directory with the ZIP's extension/ contents and press Reload once in chrome://extensions. Do not remove the extension. Then run windows-updater/Install-EternalPcAutoUpdater.ps1 to register the non-resident scheduled updater. Future PC releases are SHA-256 verified and mirrored into the same extension directory automatically. If Chrome is running, replacement is deferred to a later Chrome-closed scheduled check to avoid mixed-version code.
           EOF
           )"
 
