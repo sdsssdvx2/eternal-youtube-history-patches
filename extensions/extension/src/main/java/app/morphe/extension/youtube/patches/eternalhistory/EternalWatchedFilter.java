@@ -16,13 +16,17 @@ public final class EternalWatchedFilter {
             "related_video_with_context.e",
             "video_lockup_with_attachment.e",
             "compact_video.e",
+            "playlist_video",
+            "playlist_lockup",
+            "video_list_entry",
             "inline_shorts",
             "shorts_video_cell",
             "shorts_pivot_item.e"
     };
     private static final String[] NESTED_CARD_PATHS = {
             "shorts_lockup_cell.e",
-            "video_card.e"
+            "video_card.e",
+            "video_lockup"
     };
     private static final String[] CHILD_EXCEPTIONS = {
             "metadata.e",
@@ -35,7 +39,9 @@ public final class EternalWatchedFilter {
             "video_lockup_thumbnail.e",
             "shorts-lockup-image",
             "shorts_thumbnail",
-            "shorts-thumbnail"
+            "shorts-thumbnail",
+            "playlist_video_thumbnail",
+            "lockup_thumbnail"
     };
 
     public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer,
@@ -43,8 +49,7 @@ public final class EternalWatchedFilter {
                                      @Nullable String accessibilityText) {
         EternalWatchedDim.beginCardDecision();
         try {
-            if (!EternalHistorySettings.ENABLED.get()
-                    || !EternalHistorySettings.isFeedVisualEnabled()) return false;
+            if (!EternalHistorySettings.ENABLED.get()) return false;
             if (contextInterface == null || buffer == null || buffer.length == 0) return false;
 
             StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
@@ -54,29 +59,33 @@ public final class EternalWatchedFilter {
             String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
             if (videoId == null) return false;
 
-            if (EternalHistorySettings.isHideMode()) {
-                if (!looksLikeWholeVideoCard(path)) return false;
-            } else if (EternalHistorySettings.isDimMode()) {
-                if (EternalHistorySettings.DIM_CARD_INFO.get()) {
-                    if (!looksLikeWholeVideoCard(path)) return false;
-                } else if (!looksLikeThumbnailComponent(path)) {
-                    return false;
-                }
-            } else {
-                return false;
-            }
+            EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.forComponent(contextInterface, path);
+            EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
+            if (!profile.visualEnabled()) return false;
 
             EternalHistoryClient.ensureFeedCacheStarted();
-            if (!EternalHistoryClient.isWatchedCached(
-                    videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
+
+            // Hiding has precedence when both rules match. It is evaluated only on a whole-card
+            // component so a watched thumbnail can never accidentally remove only a child view.
+            if (profile.hideEnabled
+                    && looksLikeWholeVideoCard(path)
+                    && EternalHistoryClient.isWatchedCached(videoId, profile.effectiveHideThreshold())) {
+                return true;
+            }
+
+            if (!profile.dimEnabled) return false;
+            if (EternalHistorySettings.DIM_CARD_INFO.get()) {
+                if (!looksLikeWholeVideoCard(path)) return false;
+            } else if (!looksLikeThumbnailComponent(path)) {
                 return false;
             }
 
-            if (EternalHistorySettings.isDimMode()) {
-                EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
+            if (!EternalHistoryClient.isWatchedCached(videoId, profile.effectiveDimThreshold())) {
                 return false;
             }
-            return true;
+
+            EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
+            return false;
         } catch (Throwable t) {
             Logger.printException(() -> "Eternal watched-card filter failure", t);
             return false;
@@ -84,8 +93,9 @@ public final class EternalWatchedFilter {
     }
 
     private static boolean looksLikeVideoContext(String path) {
+        if (path == null || path.isEmpty()) return false;
         for (String root : ROOT_CARD_PATHS) {
-            if (path.startsWith(root)) return true;
+            if (path.startsWith(root) || path.contains(root)) return true;
         }
         for (String nested : NESTED_CARD_PATHS) {
             if (path.contains(nested)) return true;
@@ -102,6 +112,7 @@ public final class EternalWatchedFilter {
     }
 
     private static boolean looksLikeThumbnailComponent(String path) {
+        if (path == null) return false;
         for (String thumbnail : THUMBNAIL_COMPONENTS) {
             if (path.contains(thumbnail)) return true;
         }
