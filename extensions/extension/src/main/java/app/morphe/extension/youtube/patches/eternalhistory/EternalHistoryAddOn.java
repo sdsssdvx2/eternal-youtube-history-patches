@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.youtube.addon.AddOnApi;
+import app.morphe.extension.youtube.shared.NavigationBar;
 
 /** Runtime entry point injected into Morphe's AddOnManager. */
 @SuppressWarnings("unused")
@@ -18,6 +19,7 @@ public final class EternalHistoryAddOn {
             EternalHistoryClient.onNewVideoStarted();
             EternalWatchLaterCleaner.onNewVideoStarted();
             EternalWatchLaterJobService.refreshSchedule();
+            EternalHistoryToolbar.onSurfaceChanged();
         });
         AddOnApi.addVideoIdListener(videoId -> {
             EternalHistoryClient.onVideoIdChanged(videoId);
@@ -27,9 +29,11 @@ public final class EternalHistoryAddOn {
             EternalHistoryClient.onVideoTimeChanged(videoTimeMs);
             EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
         });
+        NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
         EternalWatchLaterJobService.refreshSchedule();
+        EternalHistoryToolbar.ensureControlSoon();
     }
 
     private EternalHistoryAddOn() { }
