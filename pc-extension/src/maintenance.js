@@ -5,8 +5,10 @@
   const pending = new Map();
   const HISTORY_INTERVAL_MS = 60 * 60 * 1000;
   const WATCH_LATER_INTERVAL_MS = 30 * 60 * 1000;
+  const WATCH_LATER_PAGE_GRACE_MS = 2 * 60 * 1000;
   const RETRY_MS = 10 * 60 * 1000;
   const TICK_MS = 5 * 60 * 1000;
+  const startedAt = Date.now();
   let runningHistory = false;
   let runningWatchLater = false;
 
@@ -104,7 +106,7 @@
   async function sweepWatchLater() {
     const leaseKey = 'eyhMaintenanceNextWatchLaterAt';
     if (runningWatchLater || document.visibilityState !== 'visible' || !WL) return;
-    if (WL.isWatchLaterUrl?.(location.href)) return;
+    if (WL.isWatchLaterUrl?.(location.href) && Date.now() - startedAt < WATCH_LATER_PAGE_GRACE_MS) return;
     const settings = await chrome.storage.local.get({
       watchLaterAutoCleanupEnabled: false,
       watchLaterCleanupMinProgressPct: 60
