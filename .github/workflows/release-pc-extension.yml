@@ -169,6 +169,7 @@ jobs:
             options.html options.js options.css page-bridge.js watch-later-core.js
             popup.html popup.js popup.css
             tests/watch-later-selftest.mjs tests/static-integration-selftest.mjs
+            tests/page-profile-regression-selftest.mjs
           )
           for file in "${required[@]}"; do
             test -f "pc-extension/src/$file"
@@ -181,6 +182,7 @@ jobs:
             cd pc-extension/src
             node tests/watch-later-selftest.mjs
             node tests/static-integration-selftest.mjs
+            node tests/page-profile-regression-selftest.mjs
           )
 
           while IFS= read -r -d '' file; do
