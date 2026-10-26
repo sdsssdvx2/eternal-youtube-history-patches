@@ -6,10 +6,7 @@ import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.patches.components.BufferPhraseFilter;
 import app.morphe.extension.shared.patches.components.ContextInterface;
 
-/**
- * Fast local feed-card decision. The Worker is never queried per card.
- * This hook is called from Morphe's existing Litho filter path, off the main thread.
- */
+/** Fast local watched-video styling decision for feed/list Litho components. */
 @SuppressWarnings("unused")
 public final class EternalWatchedFilter {
     private static final String[] ROOT_CARD_PATHS = {
@@ -44,9 +41,6 @@ public final class EternalWatchedFilter {
     public static boolean shouldHide(ContextInterface contextInterface, @Nullable byte[] buffer,
                                      @Nullable String accessibilityId,
                                      @Nullable String accessibilityText) {
-        // This method is invoked exactly once for every component through Morphe's filter entry.
-        // Clear any prior hand-off first so a filtered/aborted component can never contaminate the
-        // next one processed by the same Litho worker thread.
         EternalWatchedDim.beginCardDecision();
         try {
             if (!EternalHistorySettings.ENABLED.get()
@@ -57,10 +51,9 @@ public final class EternalWatchedFilter {
             if (pathBuilder == null) return false;
             String path = pathBuilder.toString();
 
-            // Hide mode always removes the whole video card.
-            // Dim mode normally targets only the thumbnail child component. If the user enables
-            // DIM_CARD_INFO, target the card root instead; the exact same alpha/grayscale then
-            // naturally covers the thumbnail, channel avatar, title, views/date metadata and menu.
+            String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
+            if (videoId == null) return false;
+
             if (EternalHistorySettings.isHideMode()) {
                 if (!looksLikeWholeVideoCard(path)) return false;
             } else if (EternalHistorySettings.isDimMode()) {
@@ -73,25 +66,18 @@ public final class EternalWatchedFilter {
                 return false;
             }
 
-            // Lazy-start the local permanent-history cache only when feed visuals actually need it.
             EternalHistoryClient.ensureFeedCacheStarted();
-
-            String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
             if (!EternalHistoryClient.isWatchedCached(
                     videoId, EternalHistorySettings.HIDE_MIN_PROGRESS.get())) {
                 return false;
             }
 
             if (EternalHistorySettings.isDimMode()) {
-                // The protobuf videoId/local cache decision is authoritative. A tiny ThreadLocal
-                // hand-off lets the bytecode patch style this exact thumbnail or card-root component.
                 EternalWatchedDim.markCard(videoId, accessibilityId, accessibilityText);
                 return false;
             }
             return true;
         } catch (Throwable t) {
-            // Feed rendering must always fail open. A future YouTube/Morphe layout change should
-            // never make the feed disappear or crash just because Eternal could not classify it.
             Logger.printException(() -> "Eternal watched-card filter failure", t);
             return false;
         }
@@ -116,7 +102,6 @@ public final class EternalWatchedFilter {
     }
 
     private static boolean looksLikeThumbnailComponent(String path) {
-        if (!looksLikeVideoContext(path)) return false;
         for (String thumbnail : THUMBNAIL_COMPONENTS) {
             if (path.contains(thumbnail)) return true;
         }
