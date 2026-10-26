@@ -131,7 +131,7 @@ public final class EternalHistoryToolbar {
         } catch (Throwable ignored) { }
         control.setX(Math.max(Dim.dp8, root.getWidth() - control.getWidth() - Dim.dp10));
         // Status bar + YouTube app bar. Keep the Eternal control out of the native action row.
-        control.setY(topInset + Dim.dp56);
+        control.setY(topInset + Dim.dp(56));
     }
 
     private static void removeTaggedControls(ViewGroup host) {
@@ -373,8 +373,6 @@ public final class EternalHistoryToolbar {
             Method notifyDataSetChanged = findNoArgMethod(adapter.getClass(), "notifyDataSetChanged");
             if (notifyDataSetChanged != null) notifyDataSetChanged.invoke(adapter);
         } catch (Throwable t) {
-            // Host adapters can reject notifications while computing a layout. The existing screen
-            // remains intact and the next normal YouTube bind will use the new profile.
             Logger.printDebug(() -> "Eternal RecyclerView rebind deferred: " + safeMessage(t));
         }
     }
