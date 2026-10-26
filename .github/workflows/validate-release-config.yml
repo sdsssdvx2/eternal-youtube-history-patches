@@ -62,7 +62,9 @@ jobs:
           cp /tmp/gradle.properties.original gradle.properties
 
           grep -F 'gh release create "$latest_tag" "$asset"' .github/workflows/release.yml
-          grep -F 'Refusing recovery: latest tag is $latest_tag but gradle.properties is $gradle_version' .github/workflows/release.yml
+          grep -F 'Refusing recovery: latest tag is $latest_tag but gradle.properties is $main_gradle_version' .github/workflows/release.yml
+          grep -F 'git checkout --detach "$latest_tag"' .github/workflows/release.yml
+          grep -F 'Refusing recovery: tagged source $latest_tag contains Gradle version $tagged_gradle_version' .github/workflows/release.yml
           grep -F 'python3 .github/scripts/set_gradle_version.py ${nextRelease.version}' .releaserc
           echo 'PASS release configuration safety checks'
       - name: Precompile official Morphe extension API
