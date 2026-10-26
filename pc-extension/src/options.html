@@ -1,16 +1,20 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Eternal YouTube History 설정</title><link rel="stylesheet" href="options.css"></head><body><main>
 <h1>Eternal YouTube History 설정</h1>
 <div class="row"><button id="openCloudHistory" type="button">서버 영구 기록 검색</button></div>
-<section><h2>시청한 영상 표시</h2>
-<label>페이지를 아직 개별 설정하지 않았을 때의 기본 표시 방식
-<select id="watchedDisplayMode"><option value="dim">시청 영상 옅게 표시</option><option value="hide">완전히 숨기기</option><option value="none">표시 변경 안 함</option></select></label>
+<section><h2>시청한 영상 표시 · 공통 기본값</h2>
+<label><input id="watchedDefaultDimEnabled" type="checkbox"> 시청한 영상 흐리게 표시</label>
+<label><input id="watchedDefaultHideEnabled" type="checkbox"> 시청한 영상 숨기기</label>
+<label><input id="watchedDefaultLinkedThresholds" type="checkbox"> 흐림/숨김 진행률 기준 같이 사용</label>
+<label id="watchedDefaultSharedRow">공통 최소 진행률 (%) <input id="watchedDefaultSharedThreshold" type="number" min="0" max="100" step="1"></label>
+<label id="watchedDefaultDimRow">흐림 최소 진행률 (%) <input id="watchedDefaultDimThreshold" type="number" min="0" max="100" step="1"></label>
+<label id="watchedDefaultHideRow">숨김 최소 진행률 (%) <input id="watchedDefaultHideThreshold" type="number" min="0" max="100" step="1"></label>
 <label>시청한 썸네일 불투명도 (%) <input id="watchedThumbnailOpacityPct" type="number" min="10" max="100" step="5"></label>
 <label><input id="watchedThumbnailGrayscale" type="checkbox"> 시청한 영상 이미지 흑백 필터</label>
 <label><input id="watchedLinkCardInfo" type="checkbox"> 채널 이미지·제목·조회수 등 영상 정보도 썸네일과 같은 불투명도로 표시</label>
-<label>기본 최소 진행률 (%) <input id="watchedMinProgressPct" type="number" min="0" max="100" step="5"></label>
 <label>PC에서 시청으로 확정할 최소 재생 초 <input id="directWatchSeconds" type="number" min="1" max="120"></label>
-<p class="note"><strong>홈·Shorts·영상 상세/관련 영상·구독·채널·검색 결과·Watch Later·좋아요·재생목록·재생목록 상세·시청 기록·내 페이지는 각각 독립 설정</strong>을 가질 수 있습니다. YouTube 상단의 <strong>Eternal · 현재 페이지</strong> 버튼에서 그 페이지의 흐림/숨김을 동시에 켜거나 끄고, 두 진행률 기준을 같이 쓰거나 따로 지정할 수 있습니다. 두 조건을 모두 만족하면 숨김이 우선합니다. 여기의 값은 아직 개별 설정하지 않은 페이지의 기본값입니다. PC와 Android 설정은 서로 동기화하지 않습니다.</p>
-<p class="note">옅게 표시는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 카드 정보도 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 <strong>CSS blur는 사용하지 않습니다.</strong> <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다.</p>
+<p class="note">이 값은 <strong>공통 기본값</strong>입니다. 홈·Shorts·영상 상세/관련 영상·구독·채널·검색 결과·Watch Later·좋아요·재생목록·재생목록 상세·시청 기록·내 페이지는 필요할 때 각각 별도 설정할 수 있고, 개별 설정이 공통 기본값보다 우선합니다. 페이지의 ⚙ 버튼에서 <strong>기본값 사용</strong>을 누르면 그 페이지의 개별 설정만 지워지고 현재 공통 기본값을 다시 따릅니다.</p>
+<p class="note">흐림과 숨김은 동시에 켤 수 있으며 두 조건을 모두 만족하면 <strong>숨김이 우선</strong>합니다. 진행률 숫자는 사용자가 직접 지정합니다. <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. PC와 Android 설정은 서로 동기화하지 않습니다.</p>
+<p class="note">흐리게 표시는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 카드 정보도 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 CSS blur는 사용하지 않습니다.</p>
 </section>
 <section><h2>나중에 볼 동영상 자동 정리</h2>
 <label><input id="watchLaterAutoCleanupEnabled" type="checkbox"> Eternal 진행률이 기준 이상이면 Watch Later에서 자동 제거</label>
