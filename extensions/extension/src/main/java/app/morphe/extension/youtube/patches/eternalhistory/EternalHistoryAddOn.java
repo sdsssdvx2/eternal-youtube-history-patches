@@ -32,6 +32,10 @@ public final class EternalHistoryAddOn {
         NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
+        EternalWatchLaterStateMigration.migrate();
+        // refreshSchedule() immediately starts one throttled sweep when auto-cleanup is enabled.
+        // After the one-time parser migration above, a stale v1.9.1 zero-row "success" can no
+        // longer postpone the first safe modern-payload check for another six hours.
         EternalWatchLaterJobService.refreshSchedule();
         EternalHistoryToolbar.ensureControlSoon();
     }
