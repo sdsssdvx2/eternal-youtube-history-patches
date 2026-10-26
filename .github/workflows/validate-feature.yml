@@ -21,14 +21,20 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
-      - name: Watch Later unit and integration self-tests
+      - name: Watch Later and page-profile self-tests
         working-directory: pc-extension/src
         run: |
           set -euo pipefail
           node tests/watch-later-selftest.mjs
           node tests/static-integration-selftest.mjs
           for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
-          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('PASS manifest JSON')"
+          node -e "const m=JSON.parse(require('fs').readFileSync('manifest.json','utf8')); if(!m.content_scripts.some(x => (x.js||[]).includes('surface-profiles.js'))) process.exit(2); console.log('PASS manifest JSON + surface profile controller')"
+          grep -F "watch_later: '나중에 볼 동영상'" surface-profiles.js
+          grep -F "playlist_detail: '재생목록 상세'" surface-profiles.js
+          grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
+          grep -F 'watchedSurfaceProfiles' surface-profiles.js
+          grep -F 'watchedSurfaceDefaultProfile' options.js
+          echo 'PASS PC page-scoped display assertions'
 
   android-compile:
     runs-on: ubuntu-latest
@@ -76,17 +82,26 @@ jobs:
           ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
                     :patches:compileKotlin \
                     --no-daemon --stacktrace
-      - name: Static destructive-action safety assertions
+      - name: Static display and destructive-action safety assertions
         working-directory: eternal-youtube-history-patches
         shell: bash
         run: |
           set -euo pipefail
-          cleaner='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterCleaner.java'
-          settings='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistorySettings.java'
-          toolbar='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar.java'
-          coordinator='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalCleanupCoordinator.java'
-          ledger='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalCleanupLedgerSync.java'
-          db='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryDb.java'
+          base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
+          cleaner="$base/EternalWatchLaterCleaner.java"
+          sweep="$base/EternalWatchLaterAutoSweep.java"
+          payload="$base/EternalWatchLaterPayload.java"
+          settings="$base/EternalHistorySettings.java"
+          surface="$base/EternalSurfaceSettings.java"
+          tracker="$base/EternalSurfaceTracker.java"
+          filter="$base/EternalWatchedFilter.java"
+          toolbar="$base/EternalHistoryToolbar.java"
+          coordinator="$base/EternalCleanupCoordinator.java"
+          ledger="$base/EternalCleanupLedgerSync.java"
+          db="$base/EternalHistoryDb.java"
+          addon='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
+
+          # Destructive Watch Later automation remains opt-in and exact-entry verified.
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
           grep -F 'validSetVideoId(entry.setVideoId)' "$cleaner"
@@ -94,13 +109,36 @@ jobs:
           grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
           grep -F 'resolveEntry(entry.videoId) == null' "$cleaner"
           grep -F 'new AlertDialog.Builder(activity)' "$cleaner"
-          grep -F 'EternalCleanupCoordinator.previewAndConfirm(Utils.getActivity())' "$toolbar"
+          grep -F 'EternalCleanupCoordinator.previewAndConfirm(activity)' "$toolbar"
           grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
           grep -F 'if (!result.success)' "$coordinator"
           grep -F 'EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
           grep -F 'if (next <= previousCursor)' "$ledger"
           grep -F 'if (current >= value) return;' "$db"
-          echo 'PASS Android destructive-action safety assertions'
+
+          # Modern Watch Later payloads must fail closed and zero-row parser drift cannot be cached as success.
+          grep -F '"lockupViewModel"' "$payload"
+          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
+          grep -F 'if (result.scanned == 0)' "$sweep"
+          grep -F '0개 파싱은 성공으로 저장하지 않음' "$sweep"
+
+          # Per-surface profiles support simultaneous dim/hide with hide precedence and independent thresholds.
+          grep -F 'WATCH_LATER("watch_later"' "$surface"
+          grep -F 'PLAYLIST_DETAIL("playlist_detail"' "$surface"
+          grep -F 'effectiveDimThreshold()' "$surface"
+          grep -F 'effectiveHideThreshold()' "$surface"
+          grep -F 'profile.hideEnabled' "$filter"
+          grep -F 'profile.dimEnabled' "$filter"
+          grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
+
+          # Exact subpage classification and final host manifest JobService registration are patch-time locked.
+          grep -F 'EternalBrowseIdFingerprint' "$addon"
+          grep -F 'EternalSurfaceTracker;->onBrowseId(Ljava/lang/String;)V' "$addon"
+          grep -F 'declareWatchLaterJobService()' "$addon"
+          grep -F 'android.permission.BIND_JOB_SERVICE' "$addon"
+          grep -F 'case "VLWL"' "$tracker"
+          grep -F 'case "VLLL"' "$tracker"
+          echo 'PASS Android display/destructive-action safety assertions'
 
   android-patch-smoke:
     needs: android-compile
