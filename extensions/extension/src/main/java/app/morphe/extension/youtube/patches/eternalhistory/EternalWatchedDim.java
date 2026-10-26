@@ -34,11 +34,9 @@ public final class EternalWatchedDim {
         PREPARED_DIM.remove();
     }
 
-    /** Called only after the protobuf videoId + local cache positively identify a watched thumbnail. */
+    /** Called only after the active page profile positively identifies a thumbnail/card to dim. */
     static void markCard(String videoId, String accessibilityId, String accessibilityText) {
-        if (EternalHistorySettings.isDimMode()) {
-            PREPARED_DIM.set(Boolean.TRUE);
-        }
+        PREPARED_DIM.set(Boolean.TRUE);
     }
 
     /**
