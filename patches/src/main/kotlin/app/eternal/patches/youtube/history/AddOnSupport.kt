@@ -6,6 +6,7 @@ import app.morphe.patcher.InstructionLocation.MatchAfterWithin
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.getInstruction
 import app.morphe.patcher.fieldAccess
+import app.morphe.patcher.literal
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.opcode
 import app.morphe.patcher.patch.BytecodePatchContext
@@ -13,6 +14,7 @@ import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.ResourcePatchContext
 import app.morphe.patcher.resource.ResourceType
 import app.morphe.patcher.resourceLiteral
+import app.morphe.patcher.string
 import app.morphe.util.addInstructionsAtControlFlowLabel
 import app.morphe.util.forEachChildElement
 import app.morphe.util.getNode
@@ -34,6 +36,8 @@ private const val WATCH_LATER_JOB_SERVICE_CLASS =
     "app.morphe.extension.youtube.patches.eternalhistory.EternalWatchLaterJobService"
 private const val ETERNAL_TOOLBAR_CLASS =
     "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar;"
+private const val ETERNAL_SURFACE_TRACKER_CLASS =
+    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalSurfaceTracker;"
 private val UPDATE_VISIBLE_PACKAGES = arrayOf(
     "app.morphe.android.apps.youtube.music",
     "com.google.android.apps.youtube.music",
@@ -79,6 +83,20 @@ private object EternalToolbarButtonFingerprint : Fingerprint(
     )
 )
 
+/**
+ * Same structural browse-id anchor used by Morphe's Change start page patch. Eternal only observes
+ * the value; it never rewrites it. This makes Watch Later/Liked/playlist/channel/history profiles
+ * exact instead of guessing from whichever navigation button is still selected underneath.
+ */
+private object EternalBrowseIdFingerprint : Fingerprint(
+    returnType = "L",
+    filters = listOf(
+        string("FEwhat_to_watch"),
+        literal(512),
+        fieldAccess(opcode = Opcode.IPUT_OBJECT, type = "Ljava/lang/String;")
+    )
+)
+
 context(context: BytecodePatchContext)
 private fun installEternalToolbarHook() {
     EternalToolbarButtonFingerprint.apply {
@@ -100,6 +118,26 @@ private fun installEternalToolbarHook() {
 }
 
 context(context: BytecodePatchContext)
+private fun installEternalBrowseIdHook() {
+    EternalBrowseIdFingerprint.apply {
+        val mutableMethod = method
+        val alreadyInstalled = mutableMethod.implementation?.instructions?.any { instruction ->
+            val ref = (instruction as? ReferenceInstruction)?.reference as? MethodReference
+            ref?.definingClass == ETERNAL_SURFACE_TRACKER_CLASS && ref.name == "onBrowseId"
+        } == true
+        if (alreadyInstalled) return
+
+        val browseIdIndex = instructionMatches.first().index
+        val browseIdRegister = mutableMethod
+            .getInstruction<OneRegisterInstruction>(browseIdIndex).registerA
+        mutableMethod.addInstruction(
+            browseIdIndex + 1,
+            "invoke-static { v$browseIdRegister }, $ETERNAL_SURFACE_TRACKER_CLASS->onBrowseId(Ljava/lang/String;)V"
+        )
+    }
+}
+
+context(context: BytecodePatchContext)
 internal fun registerAddOn(registrationMethodDescriptor: String) {
     val manager = context.mutableClassDefByOrNull(ADD_ON_MANAGER_CLASS_DESCRIPTOR)
         ?: throw PatchException("Eternal History requires Morphe official add-on support")
@@ -108,6 +146,7 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
             it.parameters.isEmpty() && AccessFlags.PUBLIC.isSet(it.accessFlags) && AccessFlags.STATIC.isSet(it.accessFlags)
     } ?: throw PatchException("Eternal History could not find AddOnManager.registerAddOns()")
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
+    installEternalBrowseIdHook()
     installEternalToolbarHook()
 }
 
