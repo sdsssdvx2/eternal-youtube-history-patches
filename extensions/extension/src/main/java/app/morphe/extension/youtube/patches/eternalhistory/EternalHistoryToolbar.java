@@ -98,7 +98,10 @@ public final class EternalHistoryToolbar {
             if (!(parent instanceof ViewGroup group)) break;
             String name = group.getClass().getName();
             if (name.contains("ActionMenu") || name.contains("Toolbar")) return group;
-            if (group.getChildCount() >= 2 && fallback == null) fallback = group;
+            // Prefer the outermost plausible multi-action container if YouTube's obfuscated class
+            // name no longer exposes Toolbar/ActionMenu. An icon-local wrapper is usually the first
+            // such ancestor; replacing the fallback while walking upward avoids mounting there.
+            if (group.getChildCount() >= 2) fallback = group;
             current = group;
         }
         return fallback;
