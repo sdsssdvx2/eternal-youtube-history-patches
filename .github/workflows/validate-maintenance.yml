@@ -27,6 +27,7 @@ jobs:
           cd pc-extension/src
           node tests/watch-later-selftest.mjs
           node tests/static-integration-selftest.mjs
+          node tests/page-profile-regression-selftest.mjs
           node --check maintenance.js
           node --check surface-profiles.js
           grep -F "document.visibilityState !== 'visible'" maintenance.js
@@ -37,7 +38,9 @@ jobs:
           grep -F "maxPages: 100" maintenance.js
           ! grep -F 'chrome.alarms' maintenance.js
           grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
-          echo 'PASS PC low-frequency maintenance safety'
+          grep -F 'eyh-surface-watched' surface-profiles.js
+          ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
+          echo 'PASS PC low-frequency maintenance + isolated renderer safety'
       - name: Android background cleanup safety
         shell: bash
         run: |
@@ -49,6 +52,8 @@ jobs:
           job="$base/EternalWatchLaterJobService.java"
           addon="$base/EternalHistoryAddOn.java"
           toolbar="$base/EternalHistoryToolbar.java"
+          tracker="$base/EternalSurfaceTracker.java"
+          surface="$base/EternalSurfaceSettings.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
@@ -64,9 +69,23 @@ jobs:
           grep -F 'WATCH_LATER_AUTO_CLEANUP.get()' "$job"
           grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
           grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
-          grep -F 'isVisibleAndAttached(imageView)' "$toolbar"
-          grep -F 'removeTaggedControls(host, CONTROL_TAG)' "$toolbar"
-          grep -F 'ensureFallbackControl' "$toolbar"
+
+          # v1.11 runtime safety replaces the crash-prone native toolbar/fallback pair with one
+          # app-content overlay and makes every transient host navigation lookup fail-open.
+          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
+          grep -F 'root.addView(control' "$toolbar"
+          grep -F 'positionControl(root, control)' "$toolbar"
+          grep -F 'schedulePresentationRefresh()' "$toolbar"
+          grep -F 'notifyDataSetChanged' "$toolbar"
+          ! grep -F 'findVisibleToolbarHost' "$toolbar"
+          ! grep -F 'ensureFallbackControl' "$toolbar"
+          grep -F 'safeSearchActive()' "$tracker"
+          grep -F 'safeSelectedNavigationButton()' "$tracker"
+          grep -F 'safeBackButtonVisible()' "$tracker"
+          grep -F 'safePlayerMaximized()' "$tracker"
+          grep -F 'ensureDefaultProfileMigrated()' "$surface"
+          grep -F 'hasExplicitProfile' "$surface"
+
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android opt-in/device-auth background cleanup safety'
+          echo 'PASS Android opt-in/device-auth cleanup + runtime navigation/UI safety'
