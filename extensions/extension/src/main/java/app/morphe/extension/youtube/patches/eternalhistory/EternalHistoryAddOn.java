@@ -17,6 +17,7 @@ public final class EternalHistoryAddOn {
         AddOnApi.addNewVideoStartedListener(() -> {
             EternalHistoryClient.onNewVideoStarted();
             EternalWatchLaterCleaner.onNewVideoStarted();
+            EternalWatchLaterJobService.refreshSchedule();
         });
         AddOnApi.addVideoIdListener(videoId -> {
             EternalHistoryClient.onVideoIdChanged(videoId);
@@ -28,6 +29,7 @@ public final class EternalHistoryAddOn {
         });
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
+        EternalWatchLaterJobService.refreshSchedule();
     }
 
     private EternalHistoryAddOn() { }
