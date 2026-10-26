@@ -40,16 +40,23 @@ jobs:
 
           required=(
             background.js content.js content.css manifest.json
-            options.html options.js options.css page-bridge.js
+            options.html options.js options.css page-bridge.js watch-later-core.js
             popup.html popup.js popup.css
+            tests/watch-later-selftest.mjs tests/static-integration-selftest.mjs
           )
           for file in "${required[@]}"; do
             test -f "pc-extension/src/$file"
           done
 
+          (
+            cd pc-extension/src
+            node tests/watch-later-selftest.mjs
+            node tests/static-integration-selftest.mjs
+          )
+
           while IFS= read -r -d '' file; do
             node --check "$file"
-          done < <(find pc-extension/src -type f -name '*.js' -print0 | sort -z)
+          done < <(find pc-extension/src -type f \( -name '*.js' -o -name '*.mjs' \) -print0 | sort -z)
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -78,6 +85,7 @@ jobs:
           mkdir .pc-verify
           unzip -q "$zip_name" -d .pc-verify
           test "$(jq -r '.version' ".pc-verify/${root}/extension/manifest.json")" = "$VERSION"
+          test -s ".pc-verify/${root}/extension/watch-later-core.js"
 
           sha="$(sha256sum "$zip_name" | awk '{print $1}')"
           bytes="$(stat -c %s "$zip_name")"
