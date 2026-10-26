@@ -165,10 +165,11 @@ jobs:
           test "$version" != '0.0.0'
 
           required=(
-            background.js content.js content.css maintenance.js manifest.json
+            background.js content.js content.css maintenance.js manifest.json surface-profiles.js
             options.html options.js options.css page-bridge.js watch-later-core.js
             popup.html popup.js popup.css
             tests/watch-later-selftest.mjs tests/static-integration-selftest.mjs
+            tests/page-profile-regression-selftest.mjs
           )
           for file in "${required[@]}"; do
             test -f "pc-extension/src/$file"
@@ -181,6 +182,7 @@ jobs:
             cd pc-extension/src
             node tests/watch-later-selftest.mjs
             node tests/static-integration-selftest.mjs
+            node tests/page-profile-regression-selftest.mjs
           )
 
           while IFS= read -r -d '' file; do
@@ -217,6 +219,7 @@ jobs:
           test "$(jq -r '.version' ".pc-verify/${root}/extension/manifest.json")" = "$VERSION"
           test -s ".pc-verify/${root}/extension/watch-later-core.js"
           test -s ".pc-verify/${root}/extension/maintenance.js"
+          test -s ".pc-verify/${root}/extension/surface-profiles.js"
           test -s ".pc-verify/${root}/windows-updater/Update-EternalPcExtension.ps1"
           test -s ".pc-verify/${root}/windows-updater/Install-EternalPcAutoUpdater.ps1"
 
@@ -239,7 +242,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="pc-v${VERSION}"
-          title="Eternal YouTube History PC v${VERSION}"
+          title="PC v${VERSION} · Eternal YouTube History"
           body="$(cat <<EOF
           Canonical unpacked Chrome extension release. The optional Windows updater remains available for users who want automatic source replacement, but is not required.
 

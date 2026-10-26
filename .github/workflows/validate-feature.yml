@@ -27,13 +27,21 @@ jobs:
           set -euo pipefail
           node tests/watch-later-selftest.mjs
           node tests/static-integration-selftest.mjs
+          node tests/page-profile-regression-selftest.mjs
           for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
           node -e "const m=JSON.parse(require('fs').readFileSync('manifest.json','utf8')); if(!m.content_scripts.some(x => (x.js||[]).includes('surface-profiles.js'))) process.exit(2); console.log('PASS manifest JSON + surface profile controller')"
           grep -F "watch_later: '나중에 볼 동영상'" surface-profiles.js
           grep -F "playlist_detail: '재생목록 상세'" surface-profiles.js
           grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
+          grep -F 'eyh-surface-watched' surface-profiles.js
+          grep -F 'eyh-surface-hidden' surface-profiles.js
+          ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
+          ! grep -F "classList.toggle('eyh-hidden'" surface-profiles.js
+          grep -F 'scanGeneration' surface-profiles.js
           grep -F 'watchedSurfaceProfiles' surface-profiles.js
           grep -F 'watchedSurfaceDefaultProfile' options.js
+          grep -F "button.textContent = '⚙'" surface-profiles.js
+          grep -F 'brand.hidden = true' surface-profiles.js
           echo 'PASS PC page-scoped display assertions'
 
   android-compile:
@@ -101,6 +109,7 @@ jobs:
           ledger="$base/EternalCleanupLedgerSync.java"
           db="$base/EternalHistoryDb.java"
           addon='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
+          prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
 
           # Destructive Watch Later automation remains opt-in and exact-entry verified.
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
@@ -125,6 +134,20 @@ jobs:
           grep -F 'CURRENT_PARSER_STATE_VERSION = 2' "$migration"
           grep -F '.remove(PREF_LAST_SUCCESS)' "$migration"
 
+          # Common defaults and per-surface overrides have the same expressive power.
+          grep -F 'DEFAULT_DIM_ENABLED' "$settings"
+          grep -F 'DEFAULT_HIDE_ENABLED' "$settings"
+          grep -F 'DEFAULT_LINKED_THRESHOLDS' "$settings"
+          grep -F 'DEFAULT_SHARED_THRESHOLD' "$settings"
+          grep -F 'DEFAULT_DIM_THRESHOLD' "$settings"
+          grep -F 'DEFAULT_HIDE_THRESHOLD' "$settings"
+          grep -F 'ensureDefaultProfileMigrated()' "$surface"
+          grep -F 'return defaultProfile(false);' "$surface"
+          grep -F 'hasExplicitProfile' "$surface"
+          grep -F 'morphe_eternal_history_default_dim_enabled' "$prefs"
+          grep -F 'morphe_eternal_history_default_hide_enabled' "$prefs"
+          grep -F 'morphe_eternal_history_default_linked_thresholds' "$prefs"
+
           # Per-surface profiles support simultaneous dim/hide with hide precedence and independent thresholds.
           grep -F 'WATCH_LATER("watch_later"' "$surface"
           grep -F 'PLAYLIST_DETAIL("playlist_detail"' "$surface"
@@ -135,6 +158,20 @@ jobs:
           grep -F 'isPlaylistLikeSurface(surface)' "$filter"
           grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
 
+          # Runtime crash/UI regression locks: navigation queries fail open, Eternal never inserts
+          # into YouTube's native action row, and a saved page profile rebinds visible RecyclerViews.
+          grep -F 'safeSearchActive()' "$tracker"
+          grep -F 'safeSelectedNavigationButton()' "$tracker"
+          grep -F 'safeBackButtonVisible()' "$tracker"
+          grep -F 'safePlayerMaximized()' "$tracker"
+          grep -F 'lastUiSurface' "$tracker"
+          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
+          grep -F 'root.addView(control' "$toolbar"
+          grep -F 'schedulePresentationRefresh()' "$toolbar"
+          grep -F 'notifyDataSetChanged' "$toolbar"
+          ! grep -F 'findActionMenu' "$toolbar"
+          ! grep -F 'host.addView(control' "$toolbar"
+
           # Exact subpage classification and final host manifest JobService registration are patch-time locked.
           grep -F 'EternalBrowseIdFingerprint' "$addon"
           grep -F 'onBrowseId(Ljava/lang/String;)V' "$addon"
@@ -142,7 +179,7 @@ jobs:
           grep -F 'android.permission.BIND_JOB_SERVICE' "$addon"
           grep -F 'case "VLWL"' "$tracker"
           grep -F 'case "VLLL"' "$tracker"
-          echo 'PASS Android display/destructive-action safety assertions'
+          echo 'PASS Android display/destructive-action/runtime safety assertions'
 
   android-patch-smoke:
     needs: android-compile

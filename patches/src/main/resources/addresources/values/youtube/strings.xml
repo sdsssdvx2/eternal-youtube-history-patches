@@ -16,26 +16,44 @@
   <string name="morphe_eternal_history_sync_cache_summary">처음 한 번 전체 원장을 받고 이후 revision 변경분만 받아 피드 판정에 사용합니다.</string>
   <string name="morphe_eternal_history_auto_update_check_title">검증된 앱 업데이트 자동 확인</string>
   <string name="morphe_eternal_history_auto_update_check_summary">기본 켜짐. 하루 최대 2회 작은 공개 상태 파일만 확인하고, 새 Morphe/Eternal YouTube 빌드가 있으면 버전당 한 번 알려줍니다. 자동 설치는 하지 않습니다.</string>
+
+  <string name="morphe_eternal_history_default_profile_title">시청한 영상 표시 · 공통 기본값</string>
+  <string name="morphe_eternal_history_default_profile_summary">페이지별 개별 설정이 없을 때 사용합니다. 상단 E에서 페이지 값을 바꾸면 그 페이지가 우선하고, ‘기본값으로 되돌리기’로 다시 이 값을 따릅니다.</string>
+  <string name="morphe_eternal_history_default_dim_enabled_title">기본값: 흐리게 표시</string>
+  <string name="morphe_eternal_history_default_dim_enabled_summary">켜면 Eternal 시청 기록과 아래 진행률 기준을 만족한 영상을 흐리게 표시합니다.</string>
+  <string name="morphe_eternal_history_default_hide_enabled_title">기본값: 숨기기</string>
+  <string name="morphe_eternal_history_default_hide_enabled_summary">켜면 기준을 만족한 카드 전체를 숨깁니다. 흐림과 숨김이 동시에 맞으면 숨김이 우선합니다.</string>
+  <string name="morphe_eternal_history_default_linked_thresholds_title">기본값: 흐림/숨김 진행률 기준 같이 사용</string>
+  <string name="morphe_eternal_history_default_linked_thresholds_summary">켜면 아래 공통 기준을 사용합니다. 끄면 흐림 기준과 숨김 기준을 각각 사용합니다.</string>
+  <string name="morphe_eternal_history_default_shared_threshold_title">기본 공통 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_shared_threshold_summary">진행률 기준 같이 사용을 켰을 때 적용합니다. 0이면 시청 기록만 있으면 조건을 만족합니다.</string>
+  <string name="morphe_eternal_history_default_dim_threshold_title">기본 흐림 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_dim_threshold_summary">진행률 기준 같이 사용을 껐을 때 흐림에 적용합니다. 0~100 중 직접 지정합니다.</string>
+  <string name="morphe_eternal_history_default_hide_threshold_title">기본 숨김 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_hide_threshold_summary">진행률 기준 같이 사용을 껐을 때 숨김에 적용합니다. 0~100 중 직접 지정합니다.</string>
+
+  <!-- Legacy strings remain so upgrades and older preference references keep resolving. -->
   <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>
-  <string name="morphe_eternal_history_feed_mode_summary">변경 없음 / 썸네일 흐리게 / 숨기기 중 선택합니다. 상단 Eternal 버튼에서도 바로 바꿀 수 있습니다.</string>
+  <string name="morphe_eternal_history_feed_mode_summary">v1.10 이전 설정 마이그레이션용 호환 항목입니다.</string>
+  <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_visual_min_progress_summary">v1.10 이전 설정 마이그레이션용 호환 항목입니다.</string>
+  <string name="morphe_eternal_history_hide_watched_title">시청한 피드 카드 숨기기</string>
+  <string name="morphe_eternal_history_hide_watched_summary">v1.10 이전 설정 마이그레이션용 호환 항목입니다.</string>
+  <string name="morphe_eternal_history_hide_min_progress_title">숨김 최소 진행률(%)</string>
+  <string name="morphe_eternal_history_hide_min_progress_summary">v1.10 이전 설정 마이그레이션용 호환 항목입니다.</string>
+
   <string name="morphe_eternal_history_thumbnail_opacity_title">시청한 영상 불투명도 (%)</string>
   <string name="morphe_eternal_history_thumbnail_opacity_summary">10~100, 기본 65. 실제 blur 효과는 사용하지 않고 불투명도만 조절합니다.</string>
   <string name="morphe_eternal_history_thumbnail_grayscale_title">시청한 영상 흑백 필터</string>
   <string name="morphe_eternal_history_thumbnail_grayscale_summary">켜면 흐리게 표시되는 영역을 흑백으로 표시합니다. 기본은 썸네일만 대상입니다.</string>
   <string name="morphe_eternal_history_dim_card_info_title">썸네일 아래 영상 정보도 함께 흐리게</string>
   <string name="morphe_eternal_history_dim_card_info_summary">켜면 채널 이미지·영상 제목·채널명·조회수·업로드 시점·메뉴까지 썸네일과 같은 불투명도/흑백 설정에 연동합니다.</string>
-  <string name="morphe_eternal_history_visual_min_progress_title">표시 변경 최소 진행률 (%)</string>
-  <string name="morphe_eternal_history_visual_min_progress_summary">0이면 진행률을 모르는 과거 기록도 흐리게/숨김 대상으로 봅니다.</string>
-  <string name="morphe_eternal_history_hide_watched_title">시청한 피드 카드 숨기기</string>
-  <string name="morphe_eternal_history_hide_watched_summary">D1 로컬 캐시에 시청 기록이 있는 홈·검색·구독·관련영상·Shorts 카드를 제거합니다.</string>
-  <string name="morphe_eternal_history_hide_min_progress_title">숨김 최소 진행률(%)</string>
-  <string name="morphe_eternal_history_hide_min_progress_summary">0이면 시청 기록만 있으면 숨깁니다. 1~100이면 실제 진행률을 아는 영상 중 기준 이상만 숨깁니다.</string>
-  <string name="morphe_eternal_history_feed_note_title">피드 표시 방식</string>
-  <string name="morphe_eternal_history_feed_note_summary">흐리게는 blur가 아니라 opacity입니다. 기본은 썸네일만 표시를 바꾸고, 위 옵션을 켜면 카드 정보까지 같은 강도로 연동합니다. 숨기기는 카드 전체를 제거합니다.</string>
+  <string name="morphe_eternal_history_feed_note_title">페이지별 표시 설정</string>
+  <string name="morphe_eternal_history_feed_note_summary">공통 기본값은 이 화면에서 정하고, 각 YouTube 페이지의 작은 E 버튼에서 그 페이지만 따로 지정할 수 있습니다. 변경은 현재 화면에 즉시 재바인드하며, 개별 설정은 언제든 공통 기본값으로 되돌릴 수 있습니다.</string>
   <string name="morphe_eternal_history_watch_later_auto_cleanup_title">나중에 볼 자동 정리</string>
   <string name="morphe_eternal_history_watch_later_auto_cleanup_summary">기본 꺼짐. 현재 영상의 진행률이 기준 이상이고 실제 Watch Later setVideoId가 확인된 경우에만 자동 제거합니다.</string>
   <string name="morphe_eternal_history_watch_later_cleanup_min_progress_title">나중에 볼 정리 기준 진행률 (%)</string>
   <string name="morphe_eternal_history_watch_later_cleanup_min_progress_summary">1~100, 기본 60. 진행률을 모르는 영상은 자동/수동 정리 대상에서 항상 제외합니다.</string>
-  <string name="morphe_eternal_history_watch_later_note_title">상단 Eternal 버튼</string>
-  <string name="morphe_eternal_history_watch_later_note_summary">YouTube 상단의 E·표시/흐림/숨김 버튼에서 표시 모드, 자동 정리, 수동 정리와 진단 정보를 바로 사용할 수 있습니다. 수동 정리는 제거 전에 대상 수를 확인받고 삭제 후 서버 목록을 다시 검사합니다.</string>
+  <string name="morphe_eternal_history_watch_later_note_title">페이지 E 버튼</string>
+  <string name="morphe_eternal_history_watch_later_note_summary">작은 E 버튼에서 현재 페이지 표시 설정, Watch Later 자동/수동 정리와 진단 정보를 사용할 수 있습니다. E는 YouTube의 native toolbar 버튼과 겹치지 않는 별도 overlay로 표시됩니다.</string>
 </resources>

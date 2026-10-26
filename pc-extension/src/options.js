@@ -4,14 +4,14 @@ const clampPct = v => Math.max(0, Math.min(100, Number(v) || 0));
 function legacyProfile(v) {
   const mode = ['dim','hide','none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
   const threshold = clampPct(v.watchedMinProgressPct);
-  return {
+  return normalizeProfile({
     dimEnabled: mode === 'dim',
     hideEnabled: mode === 'hide',
     linkedThresholds: true,
     sharedThreshold: threshold,
     dimThreshold: threshold,
     hideThreshold: threshold
-  };
+  });
 }
 
 function normalizeProfile(p) {
@@ -23,6 +23,24 @@ function normalizeProfile(p) {
     dimThreshold: clampPct(p?.dimThreshold),
     hideThreshold: clampPct(p?.hideThreshold)
   };
+}
+
+function refreshDefaultThresholdRows() {
+  const linked = $('#watchedDefaultLinkedThresholds').checked;
+  $('#watchedDefaultSharedRow').hidden = !linked;
+  $('#watchedDefaultDimRow').hidden = linked;
+  $('#watchedDefaultHideRow').hidden = linked;
+}
+
+function readDefaultProfileFromForm() {
+  return normalizeProfile({
+    dimEnabled: $('#watchedDefaultDimEnabled').checked,
+    hideEnabled: $('#watchedDefaultHideEnabled').checked,
+    linkedThresholds: $('#watchedDefaultLinkedThresholds').checked,
+    sharedThreshold: $('#watchedDefaultSharedThreshold').value,
+    dimThreshold: $('#watchedDefaultDimThreshold').value,
+    hideThreshold: $('#watchedDefaultHideThreshold').value
+  });
 }
 
 async function requestWorkerPermission(url) {
@@ -53,15 +71,15 @@ async function load() {
   const profile = v.watchedSurfaceDefaultProfile
     ? normalizeProfile(v.watchedSurfaceDefaultProfile)
     : legacyProfile(v);
-  let mode = 'none';
-  if (profile.hideEnabled && !profile.dimEnabled) mode = 'hide';
-  else if (profile.dimEnabled && !profile.hideEnabled) mode = 'dim';
-  else if (profile.hideEnabled && profile.dimEnabled) mode = 'hide';
+
   $('#directWatchSeconds').value = v.directWatchSeconds;
-  $('#watchedDisplayMode').value = mode;
-  $('#watchedMinProgressPct').value = profile.linkedThresholds
-    ? profile.sharedThreshold
-    : (mode === 'hide' ? profile.hideThreshold : profile.dimThreshold);
+  $('#watchedDefaultDimEnabled').checked = profile.dimEnabled;
+  $('#watchedDefaultHideEnabled').checked = profile.hideEnabled;
+  $('#watchedDefaultLinkedThresholds').checked = profile.linkedThresholds;
+  $('#watchedDefaultSharedThreshold').value = profile.sharedThreshold;
+  $('#watchedDefaultDimThreshold').value = profile.dimThreshold;
+  $('#watchedDefaultHideThreshold').value = profile.hideThreshold;
+  refreshDefaultThresholdRows();
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
@@ -78,21 +96,16 @@ async function save() {
   const workerUrl = $('#workerUrl').value.trim().replace(/\/+$/, '');
   const enabled = $('#cloudEnabled').checked;
   if (enabled && workerUrl && !(await requestWorkerPermission(workerUrl))) throw new Error('Worker 도메인 접근 권한이 필요합니다.');
-  const mode = ['dim','hide','none'].includes($('#watchedDisplayMode').value) ? $('#watchedDisplayMode').value : 'dim';
-  const threshold = clampPct($('#watchedMinProgressPct').value);
-  const defaultProfile = {
-    dimEnabled: mode === 'dim',
-    hideEnabled: mode === 'hide',
-    linkedThresholds: true,
-    sharedThreshold: threshold,
-    dimThreshold: threshold,
-    hideThreshold: threshold
-  };
+  const defaultProfile = readDefaultProfileFromForm();
+  const legacyThreshold = defaultProfile.linkedThresholds
+    ? defaultProfile.sharedThreshold
+    : (defaultProfile.hideEnabled ? defaultProfile.hideThreshold : defaultProfile.dimThreshold);
   await chrome.storage.local.set({
     directWatchSeconds: Math.max(1, Math.min(120, Number($('#directWatchSeconds').value) || 5)),
-    // The legacy renderer remains disabled; surface-profiles.js owns watched-card presentation.
+    // Keep the stable 0.9.x content script's renderer disabled. surface-profiles.js is the single
+    // owner of page/default presentation and uses a separate class namespace.
     watchedDisplayMode: 'none',
-    watchedMinProgressPct: threshold,
+    watchedMinProgressPct: legacyThreshold,
     watchedSurfaceDefaultProfile: defaultProfile,
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
@@ -106,7 +119,7 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#status').textContent = '저장했습니다. 페이지별 설정은 YouTube 상단 Eternal 버튼에서 따로 조절할 수 있습니다.';
+  $('#status').textContent = '공통 기본값을 저장했습니다. 개별 설정한 페이지는 그대로 유지되고, 기본값 사용 페이지에는 즉시 반영됩니다.';
   await refreshStatus();
 }
 
@@ -122,6 +135,7 @@ async function refreshStatus() {
   $('#cloudQueueStatus').textContent = parts.join(' · ');
 }
 
+$('#watchedDefaultLinkedThresholds').addEventListener('change', refreshDefaultThresholdRows);
 $('#save').addEventListener('click', () => save().catch(e => $('#status').textContent = e.message));
 $('#testCloud').addEventListener('click', async () => {
   try {
@@ -149,7 +163,6 @@ $('#openCloudHistory').addEventListener('click', async () => {
   if (!v.cloudEnabled || !v.workerUrl) { $('#status').textContent = 'D1 중앙 원장을 먼저 연결해 주세요.'; return; }
   chrome.tabs.create({ url: v.workerUrl.replace(/\/+$/, '') + '/' });
 });
-load();
 
 $('#runDiagnostics').addEventListener('click', async () => {
   const out = $('#diagnostics');
@@ -167,3 +180,5 @@ $('#runDiagnostics').addEventListener('click', async () => {
     out.textContent = `진단 실패: ${e.message}`;
   }
 });
+
+load();

@@ -2,29 +2,41 @@
 .eyh-watched:not(.eyh-watched-linked) yt-thumbnail-view-model,
 .eyh-watched:not(.eyh-watched-linked) .yt-lockup-view-model__content-image,
 .eyh-watched:not(.eyh-watched-linked) #thumbnail,
-ytd-thumbnail.eyh-watched:not(.eyh-watched-linked) {
+ytd-thumbnail.eyh-watched:not(.eyh-watched-linked),
+.eyh-surface-watched:not(.eyh-surface-watched-linked) ytd-thumbnail,
+.eyh-surface-watched:not(.eyh-surface-watched-linked) yt-thumbnail-view-model,
+.eyh-surface-watched:not(.eyh-surface-watched-linked) .yt-lockup-view-model__content-image,
+.eyh-surface-watched:not(.eyh-surface-watched-linked) #thumbnail,
+ytd-thumbnail.eyh-surface-watched:not(.eyh-surface-watched-linked) {
   opacity: var(--eyh-watched-opacity, 0.65) !important;
   transition: opacity 120ms ease;
 }
 
-/* Optional linked mode: fade the complete card once so thumbnail/text never get double opacity. */
-.eyh-watched.eyh-watched-linked {
+/* Legacy renderer classes remain for 0.9.x-compatible code paths. Page-profile presentation uses
+   a separate namespace so the legacy scanner can never toggle the new renderer's state. */
+.eyh-watched.eyh-watched-linked,
+.eyh-surface-watched.eyh-surface-watched-linked {
   opacity: var(--eyh-watched-opacity, 0.65) !important;
   transition: opacity 120ms ease;
 }
 
-/* Grayscale exists only when the user explicitly enables it. No blur/brightness filter is used. */
 .eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) ytd-thumbnail,
 .eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) yt-thumbnail-view-model,
 .eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) .yt-lockup-view-model__content-image,
 .eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked) #thumbnail,
 ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
-.eyh-watched.eyh-watched-linked.eyh-watched-grayscale {
+.eyh-watched.eyh-watched-linked.eyh-watched-grayscale,
+.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface-watched-linked) ytd-thumbnail,
+.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface-watched-linked) yt-thumbnail-view-model,
+.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface-watched-linked) .yt-lockup-view-model__content-image,
+.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface-watched-linked) #thumbnail,
+ytd-thumbnail.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface-watched-linked),
+.eyh-surface-watched.eyh-surface-watched-linked.eyh-surface-watched-grayscale {
   filter: grayscale(1) !important;
 }
 
-/* Hide the whole YouTube card/list row when the active page's Eternal rule matches. */
-.eyh-hidden {
+.eyh-hidden,
+.eyh-surface-hidden {
   display: none !important;
 }
 
@@ -79,6 +91,13 @@ ytd-app[dark] #eyh-header-controls {
   color: #fff;
   opacity: 1;
 }
+#eyh-header-controls .eyh-header-button.eyh-surface-compact {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 26px;
+}
 #eyh-header-controls .eyh-cleanup-button {
   min-width: 62px;
   font-weight: 600;
@@ -99,8 +118,6 @@ ytd-app[dark] #eyh-header-controls {
   display: none !important;
 }
 
-/* Per-page settings panel. It is intentionally independent from the options page so each YouTube
-   surface can be tuned where the user actually sees it. */
 #eyh-surface-panel {
   position: fixed;
   z-index: 2147483646;
