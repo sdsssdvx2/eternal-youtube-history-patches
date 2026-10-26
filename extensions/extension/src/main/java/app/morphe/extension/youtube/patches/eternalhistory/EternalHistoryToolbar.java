@@ -7,7 +7,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
+import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ImageView;
@@ -17,6 +17,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.morphe.extension.shared.Logger;
@@ -24,86 +25,88 @@ import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.ui.Dim;
 import app.morphe.extension.shared.theme.ThemeUtils;
 
-/** Compact Eternal control with a page-scoped settings dialog. */
+/** Compact Eternal overlay with live page-scoped settings. */
 @SuppressWarnings("unused")
 public final class EternalHistoryToolbar {
-    private static final String CONTROL_TAG = "eternal-history-toolbar-control";
-    private static final String FALLBACK_TAG = "eternal-history-floating-control";
+    private static final String CONTROL_TAG = "eternal-history-floating-control";
     private static final AtomicBoolean mountPending = new AtomicBoolean();
-    private static WeakReference<ViewGroup> hostRef = new WeakReference<>(null);
+    private static final AtomicBoolean refreshPending = new AtomicBoolean();
     private static WeakReference<TextView> controlRef = new WeakReference<>(null);
-    private static WeakReference<TextView> fallbackRef = new WeakReference<>(null);
 
-    /** Injection point: called when YouTube materializes native toolbar ImageViews. */
+    /** Injection point: toolbar activity is only used as a signal that a visible YouTube UI exists. */
     public static void onToolbarImageView(ImageView imageView) {
         if (imageView == null || !EternalHistorySettings.ENABLED.get()) return;
-        if (!mountPending.compareAndSet(false, true)) return;
-        imageView.post(() -> {
-            try { mountOnVisibleToolbar(imageView); }
-            finally { mountPending.set(false); }
-        });
+        scheduleControlMount(80L);
     }
 
     static void onSurfaceChanged() {
-        Activity activity = Utils.getActivity();
-        if (activity == null) return;
-        activity.runOnUiThread(() -> {
-            refreshControls();
-            scheduleFallbackMount();
-        });
-    }
-
-    static void ensureControlSoon() {
-        scheduleFallbackMount();
-    }
-
-    private static void mountOnVisibleToolbar(ImageView imageView) {
         try {
-            ViewGroup host = findVisibleToolbarHost(imageView);
-            if (host == null) return;
-
-            TextView existing = controlRef.get();
-            ViewGroup existingHost = hostRef.get();
-            if (existing != null
-                    && existingHost == host
-                    && existing.getParent() == host
-                    && isVisibleAndAttached(existing)) {
-                refreshLabel(existing);
-                removeFallback();
-                return;
-            }
-
-            if (existing != null && existing.getParent() instanceof ViewGroup oldHost) {
-                oldHost.removeView(existing);
-            }
-            removeTaggedControls(host, CONTROL_TAG);
-
-            TextView control = createControl(host, CONTROL_TAG, false);
-            int insertAt = Math.max(0, host.getChildCount() - 1);
-            host.addView(control, insertAt);
-            ViewGroup.LayoutParams params = control.getLayoutParams();
-            if (params != null) {
-                params.width = Dim.dp(40);
-                params.height = Dim.dp32;
-                control.setLayoutParams(params);
-            }
-            hostRef = new WeakReference<>(host);
-            controlRef = new WeakReference<>(control);
-            removeFallback();
+            Activity activity = Utils.getActivity();
+            if (activity == null) return;
+            activity.runOnUiThread(() -> {
+                try {
+                    refreshControl();
+                    ensureControl();
+                } catch (Throwable t) {
+                    Logger.printDebug(() -> "Eternal surface UI refresh ignored: " + safeMessage(t));
+                }
+            });
         } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal toolbar mount deferred: " + t.getMessage());
-            scheduleFallbackMount();
+            Logger.printDebug(() -> "Eternal surface UI event ignored: " + safeMessage(t));
         }
     }
 
-    private static TextView createControl(ViewGroup host, String tag, boolean floating) {
+    static void ensureControlSoon() {
+        scheduleControlMount(250L);
+    }
+
+    private static void scheduleControlMount(long delayMs) {
+        if (!mountPending.compareAndSet(false, true)) return;
+        Utils.runOnMainThreadDelayed(() -> {
+            try { ensureControl(); }
+            finally { mountPending.set(false); }
+        }, delayMs);
+    }
+
+    /**
+     * Never insert into YouTube's native ActionMenu/Toolbar. Those containers are rebuilt during
+     * Shorts/search/tab transitions and their child positions belong to YouTube. A single overlay
+     * below the app bar avoids both overlap and host-menu lifecycle crashes.
+     */
+    private static void ensureControl() {
+        try {
+            Activity activity = Utils.getActivity();
+            if (activity == null || activity.isFinishing()) return;
+            View content = activity.findViewById(android.R.id.content);
+            if (!(content instanceof ViewGroup root) || root.getWidth() <= 0) {
+                scheduleControlMount(350L);
+                return;
+            }
+
+            TextView existing = controlRef.get();
+            if (existing != null && existing.getParent() == root && existing.isAttachedToWindow()) {
+                refreshLabel(existing);
+                positionControl(root, existing);
+                return;
+            }
+            removeTaggedControls(root);
+            TextView control = createControl(root);
+            root.addView(control, new ViewGroup.LayoutParams(Dim.dp(36), Dim.dp32));
+            controlRef = new WeakReference<>(control);
+            control.post(() -> positionControl(root, control));
+        } catch (Throwable t) {
+            Logger.printDebug(() -> "Eternal overlay mount deferred: " + safeMessage(t));
+        }
+    }
+
+    private static TextView createControl(ViewGroup host) {
         TextView control = new TextView(host.getContext());
-        control.setTag(tag);
+        control.setTag(CONTROL_TAG);
         control.setGravity(Gravity.CENTER);
         control.setTextSize(12);
         control.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         control.setSingleLine(true);
-        control.setPadding(Dim.dp6, 0, Dim.dp6, 0);
+        control.setPadding(Dim.dp4, 0, Dim.dp4, 0);
         control.setClickable(true);
         control.setFocusable(true);
         control.setTextColor(ThemeUtils.getAppForegroundColor());
@@ -112,98 +115,46 @@ public final class EternalHistoryToolbar {
         bg.setCornerRadius(Dim.dp16);
         bg.setColor(ThemeUtils.getEditTextBackground());
         control.setBackground(bg);
-        control.setElevation(Dim.dp(floating ? 8 : 2));
+        control.setElevation(Dim.dp8);
         refreshLabel(control);
-        control.setOnClickListener(v -> showSurfaceDialog());
-        control.setOnLongClickListener(v -> { showDiagnostics(); return true; });
+        control.setOnClickListener(v -> safeShowSurfaceDialog());
+        control.setOnLongClickListener(v -> { safeShowDiagnostics(); return true; });
         return control;
     }
 
-    private static ViewGroup findVisibleToolbarHost(ImageView imageView) {
-        if (!isVisibleAndAttached(imageView)) return null;
-
-        ViewParent itemParent = imageView.getParent();
-        if (itemParent instanceof View itemView && isVisibleAndAttached(itemView)) {
-            ViewParent hostParent = itemView.getParent();
-            if (hostParent instanceof ViewGroup host && isVisibleAndAttached(host)) return host;
-        }
-
-        View current = imageView;
-        for (int depth = 0; depth < 7; depth++) {
-            ViewParent parent = current.getParent();
-            if (!(parent instanceof ViewGroup group)) break;
-            if (!isVisibleAndAttached(group)) {
-                current = group;
-                continue;
-            }
-            String name = group.getClass().getName();
-            if (name.contains("ActionMenu") || name.contains("Toolbar")) return group;
-            current = group;
-        }
-        return null;
-    }
-
-    private static void scheduleFallbackMount() {
-        Utils.runOnMainThreadDelayed(EternalHistoryToolbar::ensureFallbackControl, 900L);
-    }
-
-    private static void ensureFallbackControl() {
-        try {
-            TextView nativeControl = controlRef.get();
-            if (nativeControl != null && isVisibleAndAttached(nativeControl)) {
-                removeFallback();
-                return;
-            }
-            Activity activity = Utils.getActivity();
-            if (activity == null || activity.isFinishing()) return;
-            View content = activity.findViewById(android.R.id.content);
-            if (!(content instanceof ViewGroup root) || root.getWidth() <= 0) return;
-
-            TextView existing = fallbackRef.get();
-            if (existing != null && existing.getParent() == root && existing.isAttachedToWindow()) {
-                refreshLabel(existing);
-                positionFallback(root, existing);
-                return;
-            }
-            removeTaggedControls(root, FALLBACK_TAG);
-            TextView floating = createControl(root, FALLBACK_TAG, true);
-            root.addView(floating, new ViewGroup.LayoutParams(Dim.dp(40), Dim.dp32));
-            fallbackRef = new WeakReference<>(floating);
-            floating.post(() -> positionFallback(root, floating));
-        } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal fallback control deferred: " + t.getMessage());
-        }
-    }
-
-    private static void positionFallback(ViewGroup root, View control) {
+    private static void positionControl(ViewGroup root, View control) {
         if (root.getWidth() <= 0) return;
-        control.setX(Math.max(Dim.dp8, root.getWidth() - control.getWidth() - Dim.dp8));
-        // Below the app bar: avoids YouTube's back/search/overflow actions while remaining easy to reach.
-        control.setY(Dim.dp(58));
+        int topInset = 0;
+        try {
+            WindowInsets insets = root.getRootWindowInsets();
+            if (insets != null) topInset = insets.getSystemWindowInsetTop();
+        } catch (Throwable ignored) { }
+        control.setX(Math.max(Dim.dp8, root.getWidth() - control.getWidth() - Dim.dp10));
+        // Status bar + YouTube app bar. Keep the Eternal control out of the native action row.
+        control.setY(topInset + Dim.dp56);
     }
 
-    private static void removeFallback() {
-        TextView fallback = fallbackRef.get();
-        if (fallback != null && fallback.getParent() instanceof ViewGroup group) group.removeView(fallback);
-        fallbackRef = new WeakReference<>(null);
-    }
-
-    private static boolean isVisibleAndAttached(View view) {
-        return view.isAttachedToWindow() && view.isShown() && view.getWindowVisibility() == View.VISIBLE;
-    }
-
-    private static void removeTaggedControls(ViewGroup host, String tag) {
+    private static void removeTaggedControls(ViewGroup host) {
         for (int i = host.getChildCount() - 1; i >= 0; i--) {
             View child = host.getChildAt(i);
-            if (tag.equals(child.getTag())) host.removeViewAt(i);
+            if (CONTROL_TAG.equals(child.getTag())) host.removeViewAt(i);
+        }
+    }
+
+    private static void safeShowSurfaceDialog() {
+        try { showSurfaceDialog(); }
+        catch (Throwable t) {
+            Logger.printException(() -> "Eternal page settings dialog failure", t);
+            Utils.showToastShort("Eternal 페이지 설정을 열지 못했습니다.");
         }
     }
 
     private static void showSurfaceDialog() {
         Activity activity = Utils.getActivity();
-        if (activity == null) return;
+        if (activity == null || activity.isFinishing()) return;
         EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
         EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
+        boolean inherited = !EternalSurfaceSettings.hasExplicitProfile(surface);
 
         ScrollView scroll = new ScrollView(activity);
         LinearLayout box = new LinearLayout(activity);
@@ -212,8 +163,10 @@ public final class EternalHistoryToolbar {
         scroll.addView(box);
 
         TextView note = text(activity,
-                "이 설정은 이 기기의 ‘" + surface.label + "’ 페이지에만 저장됩니다.\n"
-                        + "흐림과 숨김을 함께 켜면 숨김 조건이 우선합니다.", 13, false);
+                inherited
+                        ? "현재 공통 기본값을 사용 중입니다. 값을 바꾸면 이 페이지의 개별 설정으로 즉시 저장됩니다.\n흐림과 숨김을 함께 켜면 숨김 조건이 우선합니다."
+                        : "이 페이지의 개별 설정입니다. 변경 내용은 화면에 즉시 반영됩니다.\n흐림과 숨김을 함께 켜면 숨김 조건이 우선합니다.",
+                13, false);
         note.setPadding(0, 0, 0, Dim.dp8);
         box.addView(note);
 
@@ -236,7 +189,28 @@ public final class EternalHistoryToolbar {
             dimThreshold.root.setVisibility(linked.isChecked() ? View.GONE : View.VISIBLE);
             hideThreshold.root.setVisibility(linked.isChecked() ? View.GONE : View.VISIBLE);
         };
-        linked.setOnCheckedChangeListener((button, checked) -> refreshThresholdRows.run());
+        Runnable persistVisuals = () -> {
+            EternalSurfaceSettings.save(
+                    surface,
+                    dim.isChecked(),
+                    hide.isChecked(),
+                    linked.isChecked(),
+                    shared.seek.getProgress(),
+                    dimThreshold.seek.getProgress(),
+                    hideThreshold.seek.getProgress());
+            if (dim.isChecked() || hide.isChecked()) EternalHistoryClient.ensureFeedCacheStarted();
+            refreshControl();
+            schedulePresentationRefresh();
+        };
+        dim.setOnCheckedChangeListener((button, checked) -> persistVisuals.run());
+        hide.setOnCheckedChangeListener((button, checked) -> persistVisuals.run());
+        linked.setOnCheckedChangeListener((button, checked) -> {
+            refreshThresholdRows.run();
+            persistVisuals.run();
+        });
+        shared.onUserChange = persistVisuals;
+        dimThreshold.onUserChange = persistVisuals;
+        hideThreshold.onUserChange = persistVisuals;
         refreshThresholdRows.run();
 
         final CheckBox autoCleanup;
@@ -249,6 +223,15 @@ public final class EternalHistoryToolbar {
             cleanupThreshold = threshold(activity, "자동/수동 정리 기준", EternalHistorySettings.watchLaterCleanupProgressPercent());
             box.addView(autoCleanup);
             box.addView(cleanupThreshold.root);
+            autoCleanup.setOnCheckedChangeListener((button, checked) -> {
+                EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(checked);
+                EternalWatchLaterJobService.refreshSchedule();
+                if (checked) EternalWatchLaterJobService.runNow();
+            });
+            cleanupThreshold.onUserChange = () -> {
+                EternalHistorySettings.WATCH_LATER_CLEANUP_MIN_PROGRESS.save(cleanupThreshold.seek.getProgress());
+                EternalWatchLaterJobService.refreshSchedule();
+            };
 
             Button cleanNow = new Button(activity);
             cleanNow.setText("지금 나중에 볼 동영상 정리…");
@@ -268,40 +251,19 @@ public final class EternalHistoryToolbar {
         box.addView(diagnostics);
 
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle("Eternal · " + surface.label)
+                .setTitle(surface.label)
                 .setView(scroll)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("적용", null)
+                .setNegativeButton("닫기", null)
                 .create();
 
         reset.setOnClickListener(v -> {
             EternalSurfaceSettings.reset(surface);
-            Utils.showToastShort(surface.label + " 설정을 기본값으로 되돌렸습니다.");
+            Utils.showToastShort(surface.label + " 페이지가 공통 기본값을 다시 사용합니다.");
             dialog.dismiss();
-            refreshControls();
+            refreshControl();
+            schedulePresentationRefresh();
         });
-        diagnostics.setOnClickListener(v -> showDiagnostics());
-
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            EternalSurfaceSettings.save(
-                    surface,
-                    dim.isChecked(),
-                    hide.isChecked(),
-                    linked.isChecked(),
-                    shared.seek.getProgress(),
-                    dimThreshold.seek.getProgress(),
-                    hideThreshold.seek.getProgress());
-            if (autoCleanup != null && cleanupThreshold != null) {
-                EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(autoCleanup.isChecked());
-                EternalHistorySettings.WATCH_LATER_CLEANUP_MIN_PROGRESS.save(cleanupThreshold.seek.getProgress());
-                EternalWatchLaterJobService.refreshSchedule();
-                if (autoCleanup.isChecked()) EternalWatchLaterJobService.runNow();
-            }
-            if (dim.isChecked() || hide.isChecked()) EternalHistoryClient.ensureFeedCacheStarted();
-            Utils.showToastShort(surface.label + " 표시 설정을 저장했습니다.");
-            dialog.dismiss();
-            refreshControls();
-        }));
+        diagnostics.setOnClickListener(v -> safeShowDiagnostics());
         dialog.show();
     }
 
@@ -313,16 +275,20 @@ public final class EternalHistoryToolbar {
         SeekBar seek = new SeekBar(activity);
         seek.setMax(100);
         seek.setProgress(Math.max(0, Math.min(100, progress)));
+        ThresholdRow row = new ThresholdRow(root, seek);
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int p, boolean fromUser) {
                 value.setText(label + ": " + p + "%");
+                if (fromUser && row.onUserChange != null) row.onUserChange.run();
             }
             @Override public void onStartTrackingTouch(SeekBar bar) { }
-            @Override public void onStopTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) {
+                if (row.onUserChange != null) row.onUserChange.run();
+            }
         });
         root.addView(value);
         root.addView(seek);
-        return new ThresholdRow(root, seek);
+        return row;
     }
 
     private static CheckBox check(Activity activity, String label, boolean checked) {
@@ -342,11 +308,11 @@ public final class EternalHistoryToolbar {
         return view;
     }
 
-    private static void refreshControls() {
+    private static void refreshControl() {
         TextView control = controlRef.get();
-        if (control != null) refreshLabel(control);
-        TextView fallback = fallbackRef.get();
-        if (fallback != null) refreshLabel(fallback);
+        if (control == null) return;
+        try { refreshLabel(control); }
+        catch (Throwable t) { Logger.printDebug(() -> "Eternal control label ignored: " + safeMessage(t)); }
     }
 
     private static void refreshLabel(TextView control) {
@@ -363,18 +329,85 @@ public final class EternalHistoryToolbar {
         } else {
             state = "표시 변경 없음";
         }
-        control.setContentDescription("Eternal · " + surface.label + " · " + state);
+        String scope = p.explicit ? "개별 설정" : "공통 기본값";
+        control.setContentDescription("Eternal · " + surface.label + " · " + scope + " · " + state);
         control.setAlpha(p.visualEnabled() ? 1.0f : 0.72f);
+    }
+
+    /** Debounced live rebind: reruns Litho filtering for visible RecyclerView content without recreating Activity. */
+    private static void schedulePresentationRefresh() {
+        if (!refreshPending.compareAndSet(false, true)) return;
+        Utils.runOnMainThreadDelayed(() -> {
+            refreshPending.set(false);
+            try {
+                Activity activity = Utils.getActivity();
+                if (activity == null || activity.isFinishing()) return;
+                View content = activity.findViewById(android.R.id.content);
+                if (content == null) return;
+                postRecyclerRebinds(content);
+                content.requestLayout();
+                content.invalidate();
+            } catch (Throwable t) {
+                Logger.printDebug(() -> "Eternal live presentation refresh ignored: " + safeMessage(t));
+            }
+        }, 100L);
+    }
+
+    private static void postRecyclerRebinds(View view) {
+        if (view == null) return;
+        String className = view.getClass().getName();
+        if (className.contains("RecyclerView")) {
+            view.post(() -> notifyRecyclerAdapter(view));
+        }
+        if (view instanceof ViewGroup group) {
+            for (int i = 0; i < group.getChildCount(); i++) postRecyclerRebinds(group.getChildAt(i));
+        }
+    }
+
+    private static void notifyRecyclerAdapter(View recycler) {
+        try {
+            Method getAdapter = findNoArgMethod(recycler.getClass(), "getAdapter");
+            if (getAdapter == null) return;
+            Object adapter = getAdapter.invoke(recycler);
+            if (adapter == null) return;
+            Method notifyDataSetChanged = findNoArgMethod(adapter.getClass(), "notifyDataSetChanged");
+            if (notifyDataSetChanged != null) notifyDataSetChanged.invoke(adapter);
+        } catch (Throwable t) {
+            // Host adapters can reject notifications while computing a layout. The existing screen
+            // remains intact and the next normal YouTube bind will use the new profile.
+            Logger.printDebug(() -> "Eternal RecyclerView rebind deferred: " + safeMessage(t));
+        }
+    }
+
+    private static Method findNoArgMethod(Class<?> type, String name) {
+        for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+            try {
+                Method method = current.getDeclaredMethod(name);
+                method.setAccessible(true);
+                return method;
+            } catch (NoSuchMethodException ignored) { }
+            catch (Throwable ignored) { return null; }
+        }
+        return null;
+    }
+
+    private static void safeShowDiagnostics() {
+        try { showDiagnostics(); }
+        catch (Throwable t) {
+            Logger.printException(() -> "Eternal diagnostics dialog failure", t);
+            Utils.showToastShort("Eternal 진단 정보를 열지 못했습니다.");
+        }
     }
 
     private static void showDiagnostics() {
         Activity activity = Utils.getActivity();
-        if (activity == null) return;
+        if (activity == null || activity.isFinishing()) return;
         EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
         EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
         activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                 .setTitle("Eternal 진단")
                 .setMessage("현재 페이지=" + surface.label
+                        + "\n설정 범위=" + (profile.explicit ? "페이지 개별" : "공통 기본값")
                         + "\n흐림=" + profile.dimEnabled + " (" + profile.effectiveDimThreshold() + "%+)"
                         + "\n숨김=" + profile.hideEnabled + " (" + profile.effectiveHideThreshold() + "%+)"
                         + "\n진행률 기준 연동=" + profile.linkedThresholds
@@ -385,7 +418,21 @@ public final class EternalHistoryToolbar {
                 .show());
     }
 
-    private record ThresholdRow(LinearLayout root, SeekBar seek) { }
+    private static String safeMessage(Throwable t) {
+        String message = t == null ? null : t.getMessage();
+        return message == null ? (t == null ? "unknown" : t.getClass().getSimpleName()) : message;
+    }
+
+    private static final class ThresholdRow {
+        final LinearLayout root;
+        final SeekBar seek;
+        Runnable onUserChange;
+
+        ThresholdRow(LinearLayout root, SeekBar seek) {
+            this.root = root;
+            this.seek = seek;
+        }
+    }
 
     private EternalHistoryToolbar() { }
 }
