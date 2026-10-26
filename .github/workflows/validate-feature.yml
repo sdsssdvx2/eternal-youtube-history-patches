@@ -84,6 +84,9 @@ jobs:
           cleaner='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterCleaner.java'
           settings='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistorySettings.java'
           toolbar='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar.java'
+          coordinator='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalCleanupCoordinator.java'
+          ledger='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalCleanupLedgerSync.java'
+          db='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalHistoryDb.java'
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
           grep -F 'validSetVideoId(entry.setVideoId)' "$cleaner"
@@ -91,7 +94,12 @@ jobs:
           grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
           grep -F 'resolveEntry(entry.videoId) == null' "$cleaner"
           grep -F 'new AlertDialog.Builder(activity)' "$cleaner"
-          grep -F 'previewAndConfirmCleanup' "$toolbar"
+          grep -F 'EternalCleanupCoordinator.previewAndConfirm(Utils.getActivity())' "$toolbar"
+          grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
+          grep -F 'if (!result.success)' "$coordinator"
+          grep -F 'EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
+          grep -F 'if (next <= previousCursor)' "$ledger"
+          grep -F 'if (current >= value) return;' "$db"
           echo 'PASS Android destructive-action safety assertions'
 
   android-patch-smoke:
