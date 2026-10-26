@@ -99,7 +99,7 @@ public final class EternalHistoryToolbar {
                     EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(!EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
                     Utils.showToastShort("나중에 볼 자동 정리: " + (EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get() ? "켜짐" : "꺼짐"));
                 }
-                case MENU_CLEAN -> EternalWatchLaterCleaner.previewAndConfirmCleanup(Utils.getActivity());
+                case MENU_CLEAN -> EternalCleanupCoordinator.previewAndConfirm(Utils.getActivity());
                 case MENU_DIAGNOSTICS -> showDiagnostics();
                 default -> { return false; }
             }
@@ -137,7 +137,8 @@ public final class EternalHistoryToolbar {
         if (activity == null) return;
         activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                 .setTitle("Eternal 진단")
-                .setMessage(EternalWatchLaterCleaner.diagnosticSummary())
+                .setMessage(EternalWatchLaterCleaner.diagnosticSummary()
+                        + "\n" + EternalCleanupCoordinator.diagnosticSummary())
                 .setPositiveButton(android.R.string.ok, null)
                 .show());
     }

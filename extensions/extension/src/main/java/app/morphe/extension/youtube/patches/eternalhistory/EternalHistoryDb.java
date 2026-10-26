@@ -168,7 +168,10 @@ final class EternalHistoryDb extends SQLiteOpenHelper {
         }
     }
 
+    /** Revision/timestamp metadata is monotonic; concurrent cache refreshes must never move it back. */
     synchronized void setMetaLong(String key, long value) {
+        long current = getMetaLong(key, Long.MIN_VALUE);
+        if (current >= value) return;
         ContentValues v = new ContentValues();
         v.put("meta_key", key);
         v.put("meta_value", Long.toString(value));
