@@ -30,6 +30,8 @@ private const val UPDATER_PERMISSION = "app.morphe.android.youtube.permission.ET
 private const val UPDATER_PROVIDER_CLASS =
     "app.morphe.extension.youtube.patches.eternalhistory.EternalUpdaterConfigProvider"
 private const val UPDATER_PROVIDER_AUTHORITY = "app.morphe.android.youtube.eternal.updaterconfig"
+private const val WATCH_LATER_JOB_SERVICE_CLASS =
+    "app.morphe.extension.youtube.patches.eternalhistory.EternalWatchLaterJobService"
 private const val ETERNAL_TOOLBAR_CLASS =
     "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar;"
 private val UPDATE_VISIBLE_PACKAGES = arrayOf(
@@ -241,22 +243,33 @@ private fun declareUpdaterBridge() {
     }
 }
 
+/** Declare the opt-in low-frequency JobService used for device-side Watch Later cleanup. */
+context(context: ResourcePatchContext)
+private fun declareWatchLaterJobService() {
+    context.document("AndroidManifest.xml").use { document ->
+        val application = document.getElementsByTagName("application").item(0)
+            ?: throw PatchException("Eternal History could not find the YouTube application manifest node")
+        val services = document.getElementsByTagName("service")
+        for (index in 0 until services.length) {
+            if (services.item(index).attributes?.getNamedItem("android:name")?.nodeValue == WATCH_LATER_JOB_SERVICE_CLASS) {
+                return
+            }
+        }
+        document.createElement("service").also { node ->
+            node.setAttribute("android:name", WATCH_LATER_JOB_SERVICE_CLASS)
+            node.setAttribute("android:permission", "android.permission.BIND_JOB_SERVICE")
+            node.setAttribute("android:exported", "false")
+            application.appendChild(node)
+        }
+    }
+}
+
 context(context: ResourcePatchContext)
 internal fun addEternalResources() {
-    // Keep value resource types in their normal Android files. In particular, string-array entries
-    // must live in arrays.xml so Morphe's resource table encoder can allocate the array entries.
     appendBundledValues("strings.xml")
     appendBundledValues("arrays.xml")
-
-    // morphe_addon_prefs.xml is a shared declaration file. Append instead of replacing it so this
-    // add-on can coexist with other third-party Morphe sources in the same patching run.
     declareAddOnPreferences()
-
-    // Android 11+ hides unrelated installed packages unless they are explicitly queryable. The
-    // updater only needs these two narrow Music package names; avoid QUERY_ALL_PACKAGES entirely.
     declareUpdatePackageVisibility()
-
-    // Keep the separately installed updater bridge in the final patched YouTube manifest. The
-    // extension's own AndroidManifest.xml is not a host-manifest merge source during patching.
     declareUpdaterBridge()
+    declareWatchLaterJobService()
 }
