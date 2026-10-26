@@ -3,11 +3,13 @@ package app.morphe.extension.youtube.patches.eternalhistory;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
 /** Device-local watched-card rules for each YouTube surface. */
 final class EternalSurfaceSettings {
     private static final String PREFS = "eternal_history_surface_profiles_v1";
+    private static final String DEFAULT_V2_MIGRATED = "default_profile_v2_migrated";
 
     enum Surface {
         HOME("home", "홈"),
@@ -67,21 +69,54 @@ final class EternalSurfaceSettings {
         }
     }
 
+    /** Called during add-on startup before the settings screen can be edited. */
+    static void ensureDefaultProfileMigrated() {
+        SharedPreferences p = prefs();
+        if (p == null || p.getBoolean(DEFAULT_V2_MIGRATED, false)) return;
+        try {
+            String legacyMode = EternalHistorySettings.feedMode();
+            int threshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
+            EternalHistorySettings.DEFAULT_DIM_ENABLED.save("dim".equals(legacyMode));
+            EternalHistorySettings.DEFAULT_HIDE_ENABLED.save("hide".equals(legacyMode));
+            EternalHistorySettings.DEFAULT_LINKED_THRESHOLDS.save(true);
+            EternalHistorySettings.DEFAULT_SHARED_THRESHOLD.save(threshold);
+            EternalHistorySettings.DEFAULT_DIM_THRESHOLD.save(threshold);
+            EternalHistorySettings.DEFAULT_HIDE_THRESHOLD.save(threshold);
+            p.edit().putBoolean(DEFAULT_V2_MIGRATED, true).commit();
+        } catch (Throwable t) {
+            Logger.printException(() -> "Eternal default profile migration failed", t);
+        }
+    }
+
+    static Profile defaultProfile(boolean explicit) {
+        ensureDefaultProfileMigrated();
+        return new Profile(
+                EternalHistorySettings.DEFAULT_DIM_ENABLED.get(),
+                EternalHistorySettings.DEFAULT_HIDE_ENABLED.get(),
+                EternalHistorySettings.DEFAULT_LINKED_THRESHOLDS.get(),
+                EternalHistorySettings.defaultSharedThresholdPercent(),
+                EternalHistorySettings.defaultDimThresholdPercent(),
+                EternalHistorySettings.defaultHideThresholdPercent(),
+                explicit
+        );
+    }
+
     static Profile get(Surface surface) {
         if (surface == null) surface = Surface.OTHER;
+        ensureDefaultProfileMigrated();
         SharedPreferences p = prefs();
         if (p == null || !p.getBoolean(prefix(surface) + "set", false)) {
-            return legacyDefault(false);
+            return defaultProfile(false);
         }
         String k = prefix(surface);
-        int legacyThreshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
+        Profile fallback = defaultProfile(false);
         return new Profile(
-                p.getBoolean(k + "dim", false),
-                p.getBoolean(k + "hide", false),
-                p.getBoolean(k + "linked", true),
-                p.getInt(k + "shared", legacyThreshold),
-                p.getInt(k + "dim_threshold", legacyThreshold),
-                p.getInt(k + "hide_threshold", legacyThreshold),
+                p.getBoolean(k + "dim", fallback.dimEnabled),
+                p.getBoolean(k + "hide", fallback.hideEnabled),
+                p.getBoolean(k + "linked", fallback.linkedThresholds),
+                p.getInt(k + "shared", fallback.sharedThreshold),
+                p.getInt(k + "dim_threshold", fallback.dimThreshold),
+                p.getInt(k + "hide_threshold", fallback.hideThreshold),
                 true
         );
     }
@@ -120,26 +155,20 @@ final class EternalSurfaceSettings {
                 .apply();
     }
 
-    /**
-     * The old global mode remains the migration/default profile until a surface is customized.
-     * This preserves every existing user's current behavior after upgrading.
-     */
+    static boolean hasExplicitProfile(Surface surface) {
+        if (surface == null) surface = Surface.OTHER;
+        SharedPreferences p = prefs();
+        return p != null && p.getBoolean(prefix(surface) + "set", false);
+    }
+
+    /** Compatibility helper for code/tests that still refer to the pre-v1.11 global default. */
     static Profile legacyDefault(boolean explicit) {
-        String mode = EternalHistorySettings.feedMode();
-        int threshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
-        return new Profile(
-                "dim".equals(mode),
-                "hide".equals(mode),
-                true,
-                threshold,
-                threshold,
-                threshold,
-                explicit
-        );
+        ensureDefaultProfileMigrated();
+        return defaultProfile(explicit);
     }
 
     static boolean anyVisualEnabled() {
-        if (legacyDefault(false).visualEnabled()) return true;
+        if (defaultProfile(false).visualEnabled()) return true;
         SharedPreferences p = prefs();
         if (p == null) return false;
         for (Surface surface : Surface.values()) {
