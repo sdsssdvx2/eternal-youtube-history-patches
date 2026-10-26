@@ -1,4 +1,29 @@
 const $ = s => document.querySelector(s);
+const clampPct = v => Math.max(0, Math.min(100, Number(v) || 0));
+
+function legacyProfile(v) {
+  const mode = ['dim','hide','none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
+  const threshold = clampPct(v.watchedMinProgressPct);
+  return {
+    dimEnabled: mode === 'dim',
+    hideEnabled: mode === 'hide',
+    linkedThresholds: true,
+    sharedThreshold: threshold,
+    dimThreshold: threshold,
+    hideThreshold: threshold
+  };
+}
+
+function normalizeProfile(p) {
+  return {
+    dimEnabled: Boolean(p?.dimEnabled),
+    hideEnabled: Boolean(p?.hideEnabled),
+    linkedThresholds: p?.linkedThresholds !== false,
+    sharedThreshold: clampPct(p?.sharedThreshold),
+    dimThreshold: clampPct(p?.dimThreshold),
+    hideThreshold: clampPct(p?.hideThreshold)
+  };
+}
 
 async function requestWorkerPermission(url) {
   if (!url) return true;
@@ -14,6 +39,7 @@ async function load() {
     directWatchSeconds: 5,
     watchedDisplayMode: 'dim',
     watchedMinProgressPct: 0,
+    watchedSurfaceDefaultProfile: null,
     watchedThumbnailOpacityPct: 65,
     watchedThumbnailGrayscale: false,
     watchedLinkCardInfo: false,
@@ -24,9 +50,18 @@ async function load() {
     workerUrl: '',
     apiToken: ''
   });
+  const profile = v.watchedSurfaceDefaultProfile
+    ? normalizeProfile(v.watchedSurfaceDefaultProfile)
+    : legacyProfile(v);
+  let mode = 'none';
+  if (profile.hideEnabled && !profile.dimEnabled) mode = 'hide';
+  else if (profile.dimEnabled && !profile.hideEnabled) mode = 'dim';
+  else if (profile.hideEnabled && profile.dimEnabled) mode = 'hide';
   $('#directWatchSeconds').value = v.directWatchSeconds;
-  $('#watchedDisplayMode').value = ['dim','hide','none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
-  $('#watchedMinProgressPct').value = v.watchedMinProgressPct;
+  $('#watchedDisplayMode').value = mode;
+  $('#watchedMinProgressPct').value = profile.linkedThresholds
+    ? profile.sharedThreshold
+    : (mode === 'hide' ? profile.hideThreshold : profile.dimThreshold);
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
@@ -43,10 +78,22 @@ async function save() {
   const workerUrl = $('#workerUrl').value.trim().replace(/\/+$/, '');
   const enabled = $('#cloudEnabled').checked;
   if (enabled && workerUrl && !(await requestWorkerPermission(workerUrl))) throw new Error('Worker 도메인 접근 권한이 필요합니다.');
+  const mode = ['dim','hide','none'].includes($('#watchedDisplayMode').value) ? $('#watchedDisplayMode').value : 'dim';
+  const threshold = clampPct($('#watchedMinProgressPct').value);
+  const defaultProfile = {
+    dimEnabled: mode === 'dim',
+    hideEnabled: mode === 'hide',
+    linkedThresholds: true,
+    sharedThreshold: threshold,
+    dimThreshold: threshold,
+    hideThreshold: threshold
+  };
   await chrome.storage.local.set({
     directWatchSeconds: Math.max(1, Math.min(120, Number($('#directWatchSeconds').value) || 5)),
-    watchedDisplayMode: ['dim','hide','none'].includes($('#watchedDisplayMode').value) ? $('#watchedDisplayMode').value : 'dim',
-    watchedMinProgressPct: Math.max(0, Math.min(100, Number($('#watchedMinProgressPct').value) || 0)),
+    // The legacy renderer remains disabled; surface-profiles.js owns watched-card presentation.
+    watchedDisplayMode: 'none',
+    watchedMinProgressPct: threshold,
+    watchedSurfaceDefaultProfile: defaultProfile,
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
@@ -59,7 +106,7 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#status').textContent = '저장했습니다. v0.7은 백그라운드 주기 동기화를 만들지 않습니다.';
+  $('#status').textContent = '저장했습니다. 페이지별 설정은 YouTube 상단 Eternal 버튼에서 따로 조절할 수 있습니다.';
   await refreshStatus();
 }
 
@@ -104,7 +151,6 @@ $('#openCloudHistory').addEventListener('click', async () => {
 });
 load();
 
-
 $('#runDiagnostics').addEventListener('click', async () => {
   const out = $('#diagnostics');
   out.textContent = '진단 중…';
@@ -115,7 +161,8 @@ $('#runDiagnostics').addEventListener('click', async () => {
     }
     const page = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_DIAGNOSTICS' });
     const client = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
-    out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client }, null, 2);
+    const prefs = await chrome.storage.local.get({ watchedSurfaceDefaultProfile: null, watchedSurfaceProfiles: {} });
+    out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client, pageProfiles: prefs }, null, 2);
   } catch (e) {
     out.textContent = `진단 실패: ${e.message}`;
   }

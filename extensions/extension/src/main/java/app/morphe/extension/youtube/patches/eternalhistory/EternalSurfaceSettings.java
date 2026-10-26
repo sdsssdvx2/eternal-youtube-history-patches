@@ -1,0 +1,169 @@
+package app.morphe.extension.youtube.patches.eternalhistory;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import app.morphe.extension.shared.Utils;
+
+/** Device-local watched-card rules for each YouTube surface. */
+final class EternalSurfaceSettings {
+    private static final String PREFS = "eternal_history_surface_profiles_v1";
+
+    enum Surface {
+        HOME("home", "홈"),
+        SHORTS("shorts", "Shorts"),
+        WATCH("watch", "영상 상세 · 관련 영상"),
+        SUBSCRIPTIONS("subscriptions", "구독"),
+        CHANNEL("channel", "채널"),
+        SEARCH("search", "검색 결과"),
+        WATCH_LATER("watch_later", "나중에 볼 동영상"),
+        LIKED("liked", "좋아요 표시한 동영상"),
+        PLAYLISTS("playlists", "재생목록"),
+        PLAYLIST_DETAIL("playlist_detail", "재생목록 상세"),
+        HISTORY("history", "시청 기록"),
+        LIBRARY("library", "내 페이지 · 라이브러리"),
+        OTHER("other", "기타"),
+        ;
+
+        final String key;
+        final String label;
+
+        Surface(String key, String label) {
+            this.key = key;
+            this.label = label;
+        }
+    }
+
+    static final class Profile {
+        final boolean dimEnabled;
+        final boolean hideEnabled;
+        final boolean linkedThresholds;
+        final int sharedThreshold;
+        final int dimThreshold;
+        final int hideThreshold;
+        final boolean explicit;
+
+        Profile(boolean dimEnabled, boolean hideEnabled, boolean linkedThresholds,
+                int sharedThreshold, int dimThreshold, int hideThreshold, boolean explicit) {
+            this.dimEnabled = dimEnabled;
+            this.hideEnabled = hideEnabled;
+            this.linkedThresholds = linkedThresholds;
+            this.sharedThreshold = clamp(sharedThreshold);
+            this.dimThreshold = clamp(dimThreshold);
+            this.hideThreshold = clamp(hideThreshold);
+            this.explicit = explicit;
+        }
+
+        int effectiveDimThreshold() {
+            return linkedThresholds ? sharedThreshold : dimThreshold;
+        }
+
+        int effectiveHideThreshold() {
+            return linkedThresholds ? sharedThreshold : hideThreshold;
+        }
+
+        boolean visualEnabled() {
+            return dimEnabled || hideEnabled;
+        }
+    }
+
+    static Profile get(Surface surface) {
+        if (surface == null) surface = Surface.OTHER;
+        SharedPreferences p = prefs();
+        if (p == null || !p.getBoolean(prefix(surface) + "set", false)) {
+            return legacyDefault(false);
+        }
+        String k = prefix(surface);
+        int legacyThreshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
+        return new Profile(
+                p.getBoolean(k + "dim", false),
+                p.getBoolean(k + "hide", false),
+                p.getBoolean(k + "linked", true),
+                p.getInt(k + "shared", legacyThreshold),
+                p.getInt(k + "dim_threshold", legacyThreshold),
+                p.getInt(k + "hide_threshold", legacyThreshold),
+                true
+        );
+    }
+
+    static void save(Surface surface, boolean dimEnabled, boolean hideEnabled,
+                     boolean linkedThresholds, int sharedThreshold,
+                     int dimThreshold, int hideThreshold) {
+        if (surface == null) surface = Surface.OTHER;
+        SharedPreferences p = prefs();
+        if (p == null) return;
+        String k = prefix(surface);
+        p.edit()
+                .putBoolean(k + "set", true)
+                .putBoolean(k + "dim", dimEnabled)
+                .putBoolean(k + "hide", hideEnabled)
+                .putBoolean(k + "linked", linkedThresholds)
+                .putInt(k + "shared", clamp(sharedThreshold))
+                .putInt(k + "dim_threshold", clamp(dimThreshold))
+                .putInt(k + "hide_threshold", clamp(hideThreshold))
+                .apply();
+    }
+
+    static void reset(Surface surface) {
+        if (surface == null) surface = Surface.OTHER;
+        SharedPreferences p = prefs();
+        if (p == null) return;
+        String k = prefix(surface);
+        p.edit()
+                .remove(k + "set")
+                .remove(k + "dim")
+                .remove(k + "hide")
+                .remove(k + "linked")
+                .remove(k + "shared")
+                .remove(k + "dim_threshold")
+                .remove(k + "hide_threshold")
+                .apply();
+    }
+
+    /**
+     * The old global mode remains the migration/default profile until a surface is customized.
+     * This preserves every existing user's current behavior after upgrading.
+     */
+    static Profile legacyDefault(boolean explicit) {
+        String mode = EternalHistorySettings.feedMode();
+        int threshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
+        return new Profile(
+                "dim".equals(mode),
+                "hide".equals(mode),
+                true,
+                threshold,
+                threshold,
+                threshold,
+                explicit
+        );
+    }
+
+    static boolean anyVisualEnabled() {
+        if (legacyDefault(false).visualEnabled()) return true;
+        SharedPreferences p = prefs();
+        if (p == null) return false;
+        for (Surface surface : Surface.values()) {
+            String k = prefix(surface);
+            if (p.getBoolean(k + "set", false)
+                    && (p.getBoolean(k + "dim", false) || p.getBoolean(k + "hide", false))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static SharedPreferences prefs() {
+        Context context = Utils.getContext();
+        return context == null ? null : context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static String prefix(Surface surface) {
+        return "surface_" + surface.key + "_";
+    }
+
+    private static int clamp(int value) {
+        return Math.max(0, Math.min(100, value));
+    }
+
+    private EternalSurfaceSettings() { }
+}

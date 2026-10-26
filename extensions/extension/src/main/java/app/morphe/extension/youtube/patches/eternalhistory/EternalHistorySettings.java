@@ -25,7 +25,10 @@ public final class EternalHistorySettings {
     public static final BooleanSetting AUTO_UPDATE_CHECK =
             new BooleanSetting("morphe_eternal_history_auto_update_check", TRUE, false, parent(ENABLED));
 
-    /** Empty default lets existing installs migrate from the legacy hide toggle. */
+    /**
+     * Legacy/default profile. Individual YouTube surfaces inherit these values until the user
+     * customizes that surface through the Eternal control.
+     */
     public static final StringSetting FEED_MODE =
             new StringSetting("morphe_eternal_history_feed_mode", "", false, parent(ENABLED));
     /** Kept only so existing installs that enabled hide keep their previous behavior. */
@@ -69,7 +72,8 @@ public final class EternalHistorySettings {
         return Math.max(1, Math.min(100, value));
     }
 
-    public static boolean isFeedVisualEnabled() { return !"none".equals(feedMode()); }
+    public static boolean isFeedVisualEnabled() { return EternalSurfaceSettings.anyVisualEnabled(); }
+    /** Legacy helpers retained for migration and old call sites. */
     public static boolean isDimMode() { return "dim".equals(feedMode()); }
     public static boolean isHideMode() { return "hide".equals(feedMode()); }
 

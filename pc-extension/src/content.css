@@ -23,13 +23,11 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
   filter: grayscale(1) !important;
 }
 
-/* Hide the whole YouTube card/list row when the user's Eternal watched rule matches. */
+/* Hide the whole YouTube card/list row when the active page's Eternal rule matches. */
 .eyh-hidden {
   display: none !important;
 }
 
-/* Compact Eternal controls injected into the desktop YouTube masthead. Keep our own theme colors:
-   some current YouTube layouts expose --yt-spec-text-secondary as a dark value even in dark mode. */
 #eyh-header-controls {
   display: inline-flex;
   align-items: center;
@@ -100,6 +98,77 @@ ytd-app[dark] #eyh-header-controls {
 #eyh-header-controls [hidden] {
   display: none !important;
 }
+
+/* Per-page settings panel. It is intentionally independent from the options page so each YouTube
+   surface can be tuned where the user actually sees it. */
+#eyh-surface-panel {
+  position: fixed;
+  z-index: 2147483646;
+  top: 64px;
+  right: 18px;
+  width: min(360px, calc(100vw - 36px));
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid rgba(0,0,0,.16);
+  border-radius: 14px;
+  background: #fff;
+  color: #0f0f0f;
+  box-shadow: 0 10px 34px rgba(0,0,0,.28);
+  font: 14px/1.4 Roboto, Arial, sans-serif;
+}
+html[dark] #eyh-surface-panel,
+body[dark] #eyh-surface-panel,
+ytd-app[dark] #eyh-surface-panel {
+  border-color: rgba(255,255,255,.18);
+  background: #212121;
+  color: #f1f1f1;
+}
+#eyh-surface-panel > strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 16px;
+}
+#eyh-surface-panel .eyh-surface-note {
+  margin-bottom: 10px;
+  opacity: .72;
+  font-size: 12px;
+}
+#eyh-surface-panel .eyh-surface-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 34px;
+  margin: 2px 0;
+}
+#eyh-surface-panel .eyh-surface-row input[type="number"] {
+  width: 74px;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid rgba(127,127,127,.45);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+}
+#eyh-surface-panel .eyh-surface-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 12px;
+}
+#eyh-surface-panel .eyh-surface-actions button {
+  border: 0;
+  border-radius: 16px;
+  padding: 7px 12px;
+  cursor: pointer;
+  background: rgba(127,127,127,.18);
+  color: inherit;
+}
+#eyh-surface-panel .eyh-surface-actions button.primary {
+  background: var(--yt-spec-call-to-action, #065fd4);
+  color: #fff;
+}
+
 @media (max-width: 1000px) {
   #eyh-header-controls .eyh-header-brand,
   #eyh-header-controls #eyh-header-status { display: none; }
