@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.Menu;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.ImageView;
@@ -12,6 +13,7 @@ import android.widget.PopupMenu;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
@@ -27,29 +29,42 @@ public final class EternalHistoryToolbar {
     private static final int MENU_AUTO = 201;
     private static final int MENU_CLEAN = 202;
     private static final int MENU_DIAGNOSTICS = 301;
-    private static WeakReference<ViewGroup> hostRef = new WeakReference<>(null);
+    private static final AtomicBoolean mountPending = new AtomicBoolean();
     private static WeakReference<TextView> controlRef = new WeakReference<>(null);
 
-    /** Injection point: called when YouTube materializes any native toolbar ImageView. */
+    /** Injection point: called when YouTube materializes native toolbar ImageViews. */
     public static void onToolbarImageView(ImageView imageView) {
         if (imageView == null || !EternalHistorySettings.ENABLED.get()) return;
-        try {
-            ViewParent itemParent = imageView.getParent();
-            if (!(itemParent instanceof android.view.View itemView)) return;
-            ViewParent hostParent = itemView.getParent();
-            if (!(hostParent instanceof ViewGroup host)) return;
+        TextView existing = controlRef.get();
+        if (existing != null && existing.getParent() != null) {
+            refreshLabel(existing);
+            return;
+        }
+        if (!mountPending.compareAndSet(false, true)) return;
+        imageView.post(() -> {
+            try { mountOnce(imageView); }
+            finally { mountPending.set(false); }
+        });
+    }
 
+    private static void mountOnce(ImageView imageView) {
+        try {
             TextView existing = controlRef.get();
-            if (existing != null && existing.getParent() == host) {
+            if (existing != null && existing.getParent() != null) {
                 refreshLabel(existing);
                 return;
             }
+            ViewGroup host = findToolbarHost(imageView);
+            if (host == null) return;
+
             TextView control = new TextView(host.getContext());
             control.setGravity(Gravity.CENTER);
             control.setTextSize(11);
             control.setSingleLine(true);
             control.setPadding(Dim.dp6, 0, Dim.dp6, 0);
             control.setMinWidth(Dim.dp48);
+            control.setClickable(true);
+            control.setFocusable(true);
             control.setContentDescription("Eternal YouTube History 표시 및 나중에 볼 정리");
             control.setTextColor(ThemeUtils.getAppForegroundColor());
             GradientDrawable bg = new GradientDrawable();
@@ -57,25 +72,39 @@ public final class EternalHistoryToolbar {
             bg.setCornerRadius(Dim.dp16);
             bg.setColor(ThemeUtils.getEditTextBackground());
             control.setBackground(bg);
+            control.setElevation(Dim.dp(2));
             refreshLabel(control);
             control.setOnClickListener(v -> showMenu(control));
             control.setOnLongClickListener(v -> { showDiagnostics(); return true; });
 
-            // Let YouTube's concrete toolbar host create its own LayoutParams subtype first
-            // (ActionMenuView and FrameLayout are both used across supported builds), then size it.
-            // Supplying a generic LayoutParams at insertion time can be rejected by some hosts.
             host.addView(control, 0);
             ViewGroup.LayoutParams params = control.getLayoutParams();
             if (params != null) {
-                params.width = Dim.dp(64);
+                params.width = Dim.dp(62);
                 params.height = Dim.dp36;
                 control.setLayoutParams(params);
             }
-            hostRef = new WeakReference<>(host);
             controlRef = new WeakReference<>(control);
         } catch (Throwable t) {
             Logger.printDebug(() -> "Eternal toolbar mount deferred: " + t.getMessage());
         }
+    }
+
+    private static ViewGroup findToolbarHost(ImageView imageView) {
+        View current = imageView;
+        ViewGroup fallback = null;
+        for (int depth = 0; depth < 7; depth++) {
+            ViewParent parent = current.getParent();
+            if (!(parent instanceof ViewGroup group)) break;
+            String name = group.getClass().getName();
+            if (name.contains("ActionMenu") || name.contains("Toolbar")) return group;
+            // Prefer the outermost plausible multi-action container if YouTube's obfuscated class
+            // name no longer exposes Toolbar/ActionMenu. An icon-local wrapper is usually the first
+            // such ancestor; replacing the fallback while walking upward avoids mounting there.
+            if (group.getChildCount() >= 2) fallback = group;
+            current = group;
+        }
+        return fallback;
     }
 
     private static void showMenu(TextView anchor) {
@@ -85,7 +114,7 @@ public final class EternalHistoryToolbar {
         menu.add(0, MENU_SHOW, 0, mark("표시", "none".equals(mode)));
         menu.add(0, MENU_DIM, 1, mark("흐리게", "dim".equals(mode)));
         menu.add(0, MENU_HIDE, 2, mark("숨기기", "hide".equals(mode)));
-        int threshold = Math.max(1, Math.min(100, EternalHistorySettings.WATCH_LATER_CLEANUP_MIN_PROGRESS.get()));
+        int threshold = EternalHistorySettings.watchLaterCleanupProgressPercent();
         boolean auto = EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get();
         menu.add(1, MENU_AUTO, 10, "나중에 볼 자동 정리: " + (auto ? "켜짐" : "꺼짐") + " (" + threshold + "%+)");
         menu.add(1, MENU_CLEAN, 11, threshold + "%+ 나중에 볼 지금 정리…");
@@ -96,8 +125,11 @@ public final class EternalHistoryToolbar {
                 case MENU_DIM -> setMode("dim");
                 case MENU_HIDE -> setMode("hide");
                 case MENU_AUTO -> {
-                    EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(!EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
-                    Utils.showToastShort("나중에 볼 자동 정리: " + (EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get() ? "켜짐" : "꺼짐"));
+                    boolean enabled = !EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get();
+                    EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(enabled);
+                    EternalWatchLaterJobService.refreshSchedule();
+                    if (enabled) EternalWatchLaterJobService.runNow();
+                    Utils.showToastShort("나중에 볼 자동 정리: " + (enabled ? "켜짐" : "꺼짐"));
                 }
                 case MENU_CLEAN -> EternalCleanupCoordinator.previewAndConfirm(Utils.getActivity());
                 case MENU_DIAGNOSTICS -> showDiagnostics();
@@ -138,7 +170,8 @@ public final class EternalHistoryToolbar {
         activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                 .setTitle("Eternal 진단")
                 .setMessage(EternalWatchLaterCleaner.diagnosticSummary()
-                        + "\n" + EternalCleanupCoordinator.diagnosticSummary())
+                        + "\n" + EternalCleanupCoordinator.diagnosticSummary()
+                        + "\n" + EternalWatchLaterAutoSweep.diagnosticSummary())
                 .setPositiveButton(android.R.string.ok, null)
                 .show());
     }

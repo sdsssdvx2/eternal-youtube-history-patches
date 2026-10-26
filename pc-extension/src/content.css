@@ -23,12 +23,13 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
   filter: grayscale(1) !important;
 }
 
-/* Hide the whole YouTube card when the user's Eternal watched rule matches. */
+/* Hide the whole YouTube card/list row when the user's Eternal watched rule matches. */
 .eyh-hidden {
   display: none !important;
 }
 
-/* Compact Eternal controls injected into the desktop YouTube masthead. */
+/* Compact Eternal controls injected into the desktop YouTube masthead. Keep our own theme colors:
+   some current YouTube layouts expose --yt-spec-text-secondary as a dark value even in dark mode. */
 #eyh-header-controls {
   display: inline-flex;
   align-items: center;
@@ -36,24 +37,35 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
   margin-inline-end: 8px;
   height: 32px;
   padding: 0 4px;
+  border: 1px solid rgba(0, 0, 0, .08);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--yt-spec-badge-chip-background, rgba(0,0,0,.08)) 88%, transparent);
+  background: rgba(0, 0, 0, .07);
+  color: #0f0f0f;
   font-family: Roboto, Arial, sans-serif;
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+  box-sizing: border-box;
+}
+html[dark] #eyh-header-controls,
+body[dark] #eyh-header-controls,
+ytd-app[dark] #eyh-header-controls {
+  border-color: rgba(255, 255, 255, .13);
+  background: rgba(255, 255, 255, .10);
+  color: #f1f1f1;
 }
 #eyh-header-controls .eyh-header-brand {
   padding: 0 4px 0 6px;
   font-weight: 600;
-  color: var(--yt-spec-text-primary, inherit);
+  color: currentColor;
 }
 #eyh-header-controls .eyh-header-button {
   appearance: none;
   border: 0;
   border-radius: 13px;
   background: transparent;
-  color: var(--yt-spec-text-secondary, inherit);
+  color: currentColor;
+  opacity: .82;
   min-width: 36px;
   height: 26px;
   padding: 0 7px;
@@ -61,11 +73,13 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
   cursor: pointer;
 }
 #eyh-header-controls .eyh-header-button:hover {
-  background: var(--yt-spec-button-chip-background-hover, rgba(127,127,127,.18));
+  background: rgba(127,127,127,.20);
+  opacity: 1;
 }
 #eyh-header-controls .eyh-header-button.eyh-active {
   background: var(--yt-spec-call-to-action, #065fd4);
-  color: var(--yt-spec-static-brand-white, #fff);
+  color: #fff;
+  opacity: 1;
 }
 #eyh-header-controls .eyh-cleanup-button {
   min-width: 62px;
@@ -75,11 +89,13 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
   max-width: 170px;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--yt-spec-text-secondary, inherit);
+  color: currentColor;
+  opacity: .82;
   padding: 0 4px;
 }
 #eyh-header-controls #eyh-header-status[data-kind="error"] {
-  color: #d93025;
+  color: #ff6b63;
+  opacity: 1;
 }
 #eyh-header-controls [hidden] {
   display: none !important;

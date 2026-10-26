@@ -47,7 +47,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content pc-extension/src/manifest.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.9.0') { throw "Unexpected fixture version: $version" }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected fixture version: $version" }
+          if ([version]$version -le [version]'0.8.0') { throw "Fixture must be newer than 0.8.0: $version" }
 
           $testRoot = Join-Path $env:RUNNER_TEMP 'eternal-pc-updater-smoke'
           Remove-Item $testRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -164,7 +165,7 @@ jobs:
           test "$version" != '0.0.0'
 
           required=(
-            background.js content.js content.css manifest.json
+            background.js content.js content.css maintenance.js manifest.json
             options.html options.js options.css page-bridge.js watch-later-core.js
             popup.html popup.js popup.css
             tests/watch-later-selftest.mjs tests/static-integration-selftest.mjs
@@ -215,6 +216,7 @@ jobs:
           unzip -q "$zip_name" -d .pc-verify
           test "$(jq -r '.version' ".pc-verify/${root}/extension/manifest.json")" = "$VERSION"
           test -s ".pc-verify/${root}/extension/watch-later-core.js"
+          test -s ".pc-verify/${root}/extension/maintenance.js"
           test -s ".pc-verify/${root}/windows-updater/Update-EternalPcExtension.ps1"
           test -s ".pc-verify/${root}/windows-updater/Install-EternalPcAutoUpdater.ps1"
 
@@ -239,12 +241,12 @@ jobs:
           tag="pc-v${VERSION}"
           title="Eternal YouTube History PC v${VERSION}"
           body="$(cat <<EOF
-          Canonical unpacked Chrome extension release with the optional Windows auto-updater.
+          Canonical unpacked Chrome extension release. The optional Windows updater remains available for users who want automatic source replacement, but is not required.
 
           SHA-256: ${SHA256}
           Size: ${BYTES} bytes
 
-          One-time bootstrap: overwrite the existing extension directory with the ZIP's extension/ contents and press Reload once in chrome://extensions. Do not remove the extension. Then run windows-updater/Install-EternalPcAutoUpdater.ps1 to register the non-resident scheduled updater. Future PC releases are SHA-256 verified and mirrored into the same extension directory automatically. If Chrome is running, replacement is deferred to a later Chrome-closed scheduled check to avoid mixed-version code.
+          Existing unpacked install: close Chrome, overwrite the current extension directory with the ZIP's extension/ contents, then reopen Chrome. Do not remove/re-add the extension; this preserves its ID and storage. If desired, windows-updater/Install-EternalPcAutoUpdater.ps1 can separately register the non-resident updater.
           EOF
           )"
 
