@@ -1,3 +1,9 @@
+## [1.9.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.9.0...v1.9.1) (2026-10-26)
+
+### 🐛 Bug Fixes
+
+* remount Android Eternal control on visible toolbar ([#13](https://github.com/sdsssdvx2/eternal-youtube-history-patches/issues/13)) ([c57555c](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c57555cd5dce8a3ff60eba577002a761169e6ca3))
+
 ## [1.9.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.8.1...v1.9.0) (2026-10-26)
 
 ### ✨ New Features
