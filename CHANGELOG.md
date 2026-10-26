@@ -1,3 +1,9 @@
+## [1.10.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.9.1...v1.10.0) (2026-10-26)
+
+### ✨ New Features
+
+* add page-scoped watched controls and safer Watch Later cleanup ([44e7ca9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/44e7ca980c6ec57c3ae90d73e5147d14fc853e21))
+
 ## [1.9.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.9.0...v1.9.1) (2026-10-26)
 
 ### 🐛 Bug Fixes
