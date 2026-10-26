@@ -14,6 +14,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.releaserc*'
+      - '.github/scripts/set_gradle_version.py'
+      - '.github/workflows/release.yml'
 
 jobs:
   release:
@@ -76,8 +78,59 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          set +e
-          npx semantic-release > /tmp/semantic-release.log 2>&1
-          code=$?
-          cat /tmp/semantic-release.log
-          exit "$code"
+          set -euo pipefail
+          npx semantic-release 2>&1 | tee /tmp/semantic-release.log
+      - name: Recover a tagged release missing its GitHub Release object
+        if: github.ref == 'refs/heads/main'
+        working-directory: eternal-youtube-history-patches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
+          test -n "$latest_tag"
+
+          if gh release view "$latest_tag" >/dev/null 2>&1; then
+            echo "GitHub Release already exists for $latest_tag; recovery is not needed."
+            exit 0
+          fi
+
+          version="${latest_tag#v}"
+          main_gradle_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*(.+)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')"
+          if [[ "$main_gradle_version" != "$version" ]]; then
+            echo "Refusing recovery: latest tag is $latest_tag but gradle.properties is $main_gradle_version" >&2
+            exit 1
+          fi
+
+          echo "Recovering missing GitHub Release for $latest_tag from the exact tagged source."
+          git checkout --detach "$latest_tag"
+
+          tagged_gradle_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*(.+)$/\1/p' gradle.properties | head -1 | tr -d '[:space:]')"
+          if [[ "$tagged_gradle_version" != "$version" ]]; then
+            echo "Refusing recovery: tagged source $latest_tag contains Gradle version $tagged_gradle_version" >&2
+            exit 1
+          fi
+
+          ./gradlew :patches:generatePatchesList --no-daemon --stacktrace
+
+          asset="$(find patches/build/libs -maxdepth 1 -type f -name "patches-${version}.mpp" -print -quit)"
+          if [[ -z "$asset" ]]; then
+            candidate="$(find patches/build/libs -maxdepth 1 -type f -name 'patches-*.mpp' ! -name '*sources*' ! -name '*javadoc*' -print -quit)"
+            test -n "$candidate" && test -s "$candidate"
+            asset="patches/build/libs/patches-${version}.mpp"
+            cp "$candidate" "$asset"
+          fi
+          test -s "$asset"
+
+          gh release create "$latest_tag" "$asset" \
+            --verify-tag \
+            --title "$latest_tag" \
+            --generate-notes
+
+          gh release view "$latest_tag" --json tagName,assets --jq \
+            '.tagName + " " + (.assets | map(.name) | join(","))'
+          echo "Recovered GitHub Release $latest_tag with $(basename "$asset") built from the tagged source."
