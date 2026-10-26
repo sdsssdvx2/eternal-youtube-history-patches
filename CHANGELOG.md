@@ -1,3 +1,10 @@
+## [1.9.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.8.1...v1.9.0) (2026-10-26)
+
+### ✨ New Features
+
+* add safe auto-updates for unpacked PC extension ([#11](https://github.com/sdsssdvx2/eternal-youtube-history-patches/issues/11)) ([0ac883e](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/0ac883eec6b6f87643689d15b0b55d0c10c2d799))
+* make Eternal maintenance page-independent and fix controls ([42020a4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/42020a475a1f808aad76a30328da109980458fa5))
+
 ## [1.8.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.8.0...v1.8.1) (2026-10-26)
 
 ### 🐛 Bug Fixes
