@@ -4,14 +4,12 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Process;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,10 +87,20 @@ final class EternalWatchLaterAutoSweep {
                 }
 
                 SweepResult result = sweep();
-                lastStatus = "전체 자동 정리: 확인 " + result.scanned
+                lastStatus = "전체 자동 정리: 페이지 " + result.pages
+                        + ", 확인 " + result.scanned
                         + ", 대상 " + result.qualified
                         + ", 제거 " + result.removed
-                        + ", 실패 " + result.failures;
+                        + ", 실패 " + result.failures
+                        + (result.hasMore ? ", 다음 페이지 남음" : "");
+
+                // v1.9.1 could parse zero entries from YouTube's newer lockup payload and then save
+                // that as a six-hour "success", masking a visibly non-empty Watch Later list. Zero
+                // parsed rows are ambiguous (truly empty vs parser drift), so never cache success.
+                if (result.scanned == 0) {
+                    lastStatus += " · 0개 파싱은 성공으로 저장하지 않음";
+                    return;
+                }
                 if (result.failures == 0 && !result.hasMore) {
                     prefs.edit().putLong(PREF_LAST_SUCCESS, System.currentTimeMillis()).apply();
                 }
@@ -132,7 +140,8 @@ final class EternalWatchLaterAutoSweep {
             }
             sleepQuietly(350L);
         }
-        return new SweepResult(listed.entries.size(), candidates.size(), removed, failures, listed.hasMore);
+        return new SweepResult(listed.entries.size(), candidates.size(), removed, failures,
+                listed.pages, listed.hasMore);
     }
 
     private static boolean isSignedIn() {
@@ -151,14 +160,18 @@ final class EternalWatchLaterAutoSweep {
     private static Entry resolveEntry(String videoId) throws Exception {
         byte[] body = PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER);
         JSONObject json = request(PlaylistRoutes.GET_SET_VIDEO_ID, body);
-        LinkedHashMap<String, Entry> entries = new LinkedHashMap<>();
-        collect(json, entries, new ArrayList<>(), 0);
-        for (Entry e : entries.values()) if (videoId.equals(e.videoId)) return e;
+        LinkedHashMap<String, String> parsed = new LinkedHashMap<>();
+        EternalWatchLaterPayload.collect(json, parsed, new ArrayList<>(), 0);
+        for (Map.Entry<String, String> pair : parsed.entrySet()) {
+            if (videoId.equals(pair.getValue())) return new Entry(pair.getValue(), pair.getKey());
+        }
         return null;
     }
 
     private static boolean removeEntry(Entry entry) throws Exception {
-        if (entry == null || !validVideoId(entry.videoId) || !validSetVideoId(entry.setVideoId)) return false;
+        if (entry == null
+                || !EternalWatchLaterPayload.validVideoId(entry.videoId)
+                || !EternalWatchLaterPayload.validSetVideoId(entry.setVideoId)) return false;
         byte[] body = PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId);
         JSONObject json = request(PlaylistRoutes.EDIT_PLAYLIST, body);
         if (!"STATUS_SUCCEEDED".equals(json.optString("status", ""))) return false;
@@ -186,11 +199,18 @@ final class EternalWatchLaterAutoSweep {
             JSONObject json = request(PlaylistRoutes.BROWSE_PLAYLIST, body.toString().getBytes(StandardCharsets.UTF_8));
             pages++;
             ArrayList<String> continuations = new ArrayList<>();
+            LinkedHashMap<String, String> parsed = new LinkedHashMap<>();
             int before = entries.size();
-            collect(json, entries, continuations, 0);
+            EternalWatchLaterPayload.collect(json, parsed, continuations, 0);
+            for (Map.Entry<String, String> pair : parsed.entrySet()) {
+                entries.put(pair.getKey(), new Entry(pair.getValue(), pair.getKey()));
+            }
             String next = null;
             for (String token : continuations) {
-                if (validToken(token) && seen.add(token)) { next = token; break; }
+                if (EternalWatchLaterPayload.validToken(token) && seen.add(token)) {
+                    next = token;
+                    break;
+                }
             }
             if (next == null || (pages > 1 && entries.size() == before)) {
                 continuation = null;
@@ -201,7 +221,7 @@ final class EternalWatchLaterAutoSweep {
             sleepQuietly(100L);
         } while (pages < Math.max(1, maxPages));
         if (continuation == null) hasMore = false;
-        return new ListResult(entries, hasMore && pages >= maxPages);
+        return new ListResult(entries, pages, hasMore && pages >= maxPages);
     }
 
     private static JSONObject request(app.morphe.extension.shared.requests.Route.CompiledRoute route,
@@ -220,59 +240,6 @@ final class EternalWatchLaterAutoSweep {
         } finally {
             connection.disconnect();
         }
-    }
-
-    private static void collect(Object node, Map<String, Entry> entries,
-                                List<String> continuations, int depth) {
-        if (node == null || depth > 64) return;
-        if (node instanceof JSONObject obj) {
-            parseRenderer(obj.optJSONObject("playlistVideoRenderer"), entries);
-            parseRenderer(obj.optJSONObject("playlistPanelVideoRenderer"), entries);
-            addToken(obj.optJSONObject("continuationCommand"), "token", continuations);
-            addToken(obj.optJSONObject("nextContinuationData"), "continuation", continuations);
-            addToken(obj.optJSONObject("reloadContinuationData"), "continuation", continuations);
-            Iterator<String> keys = obj.keys();
-            while (keys.hasNext()) {
-                Object child = obj.opt(keys.next());
-                if (child instanceof JSONObject || child instanceof JSONArray) {
-                    collect(child, entries, continuations, depth + 1);
-                }
-            }
-        } else if (node instanceof JSONArray arr) {
-            for (int i = 0; i < arr.length(); i++) collect(arr.opt(i), entries, continuations, depth + 1);
-        }
-    }
-
-    private static void parseRenderer(JSONObject renderer, Map<String, Entry> entries) {
-        if (renderer == null) return;
-        String videoId = renderer.optString("videoId", "");
-        String setVideoId = renderer.optString("setVideoId", renderer.optString("playlistSetVideoId", ""));
-        if (validVideoId(videoId) && validSetVideoId(setVideoId)) {
-            entries.put(setVideoId, new Entry(videoId, setVideoId));
-        }
-    }
-
-    private static void addToken(JSONObject obj, String key, List<String> out) {
-        if (obj == null) return;
-        String token = obj.optString(key, "");
-        if (validToken(token)) out.add(token);
-    }
-
-    private static boolean validVideoId(String value) {
-        return value != null && value.matches("^[A-Za-z0-9_-]{11}$");
-    }
-
-    private static boolean validSetVideoId(String value) {
-        if (value == null || value.length() < 4 || value.length() > 512) return false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c < 0x21 || c > 0x7e) return false;
-        }
-        return true;
-    }
-
-    private static boolean validToken(String value) {
-        return value != null && !value.trim().isEmpty() && value.length() < 8192;
     }
 
     private static void sleepQuietly(long ms) {
@@ -304,9 +271,11 @@ final class EternalWatchLaterAutoSweep {
 
     private static final class ListResult {
         final LinkedHashMap<String, Entry> entries;
+        final int pages;
         final boolean hasMore;
-        ListResult(LinkedHashMap<String, Entry> entries, boolean hasMore) {
+        ListResult(LinkedHashMap<String, Entry> entries, int pages, boolean hasMore) {
             this.entries = entries;
+            this.pages = pages;
             this.hasMore = hasMore;
         }
     }
@@ -316,12 +285,14 @@ final class EternalWatchLaterAutoSweep {
         final int qualified;
         final int removed;
         final int failures;
+        final int pages;
         final boolean hasMore;
-        SweepResult(int scanned, int qualified, int removed, int failures, boolean hasMore) {
+        SweepResult(int scanned, int qualified, int removed, int failures, int pages, boolean hasMore) {
             this.scanned = scanned;
             this.qualified = qualified;
             this.removed = removed;
             this.failures = failures;
+            this.pages = pages;
             this.hasMore = hasMore;
         }
     }
