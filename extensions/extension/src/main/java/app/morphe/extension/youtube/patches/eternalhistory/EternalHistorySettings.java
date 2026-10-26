@@ -46,6 +46,12 @@ public final class EternalHistorySettings {
     public static final BooleanSetting DIM_CARD_INFO =
             new BooleanSetting("morphe_eternal_history_dim_card_info", FALSE, false, parent(ENABLED));
 
+    /** Destructive Watch Later automation is opt-in. Unknown progress is never eligible. */
+    public static final BooleanSetting WATCH_LATER_AUTO_CLEANUP =
+            new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE, false, parent(ENABLED));
+    public static final IntegerSetting WATCH_LATER_CLEANUP_MIN_PROGRESS =
+            new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60, false, parent(ENABLED));
+
     public static String feedMode() {
         String mode = FEED_MODE.get();
         if (mode == null || mode.isEmpty()) return HIDE_WATCHED.get() ? "hide" : "none";
@@ -56,6 +62,11 @@ public final class EternalHistorySettings {
     public static int thumbnailOpacityPercent() {
         int value = THUMBNAIL_OPACITY.get();
         return Math.max(10, Math.min(100, value));
+    }
+
+    public static int watchLaterCleanupProgressPercent() {
+        int value = WATCH_LATER_CLEANUP_MIN_PROGRESS.get();
+        return Math.max(1, Math.min(100, value));
     }
 
     public static boolean isFeedVisualEnabled() { return !"none".equals(feedMode()); }

@@ -27,3 +27,65 @@ ytd-thumbnail.eyh-watched.eyh-watched-grayscale:not(.eyh-watched-linked),
 .eyh-hidden {
   display: none !important;
 }
+
+/* Compact Eternal controls injected into the desktop YouTube masthead. */
+#eyh-header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-end: 8px;
+  height: 32px;
+  padding: 0 4px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--yt-spec-badge-chip-background, rgba(0,0,0,.08)) 88%, transparent);
+  font-family: Roboto, Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#eyh-header-controls .eyh-header-brand {
+  padding: 0 4px 0 6px;
+  font-weight: 600;
+  color: var(--yt-spec-text-primary, inherit);
+}
+#eyh-header-controls .eyh-header-button {
+  appearance: none;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--yt-spec-text-secondary, inherit);
+  min-width: 36px;
+  height: 26px;
+  padding: 0 7px;
+  font: inherit;
+  cursor: pointer;
+}
+#eyh-header-controls .eyh-header-button:hover {
+  background: var(--yt-spec-button-chip-background-hover, rgba(127,127,127,.18));
+}
+#eyh-header-controls .eyh-header-button.eyh-active {
+  background: var(--yt-spec-call-to-action, #065fd4);
+  color: var(--yt-spec-static-brand-white, #fff);
+}
+#eyh-header-controls .eyh-cleanup-button {
+  min-width: 62px;
+  font-weight: 600;
+}
+#eyh-header-controls #eyh-header-status {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--yt-spec-text-secondary, inherit);
+  padding: 0 4px;
+}
+#eyh-header-controls #eyh-header-status[data-kind="error"] {
+  color: #d93025;
+}
+#eyh-header-controls [hidden] {
+  display: none !important;
+}
+@media (max-width: 1000px) {
+  #eyh-header-controls .eyh-header-brand,
+  #eyh-header-controls #eyh-header-status { display: none; }
+  #eyh-header-controls { margin-inline-end: 2px; }
+}

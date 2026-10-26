@@ -17,6 +17,8 @@ async function load() {
     watchedThumbnailOpacityPct: 65,
     watchedThumbnailGrayscale: false,
     watchedLinkCardInfo: false,
+    watchLaterAutoCleanupEnabled: false,
+    watchLaterCleanupMinProgressPct: 60,
     autoHistoryPages: 3,
     cloudEnabled: false,
     workerUrl: '',
@@ -28,6 +30,8 @@ async function load() {
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
+  $('#watchLaterAutoCleanupEnabled').checked = Boolean(v.watchLaterAutoCleanupEnabled);
+  $('#watchLaterCleanupMinProgressPct').value = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
   $('#autoHistoryPages').value = v.autoHistoryPages;
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
   $('#workerUrl').value = v.workerUrl || '';
@@ -46,6 +50,8 @@ async function save() {
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
+    watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked,
+    watchLaterCleanupMinProgressPct: Math.max(1, Math.min(100, Number($('#watchLaterCleanupMinProgressPct').value) || 60)),
     autoHistoryPages: Math.max(1, Math.min(50, Number($('#autoHistoryPages').value) || 3)),
     cloudEnabled: enabled,
     workerUrl,
@@ -97,3 +103,20 @@ $('#openCloudHistory').addEventListener('click', async () => {
   chrome.tabs.create({ url: v.workerUrl.replace(/\/+$/, '') + '/' });
 });
 load();
+
+
+$('#runDiagnostics').addEventListener('click', async () => {
+  const out = $('#diagnostics');
+  out.textContent = '진단 중…';
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !/^https:\/\/www\.youtube\.com\//.test(tab.url || '')) {
+      throw new Error('현재 창의 활성 탭이 youtube.com이 아닙니다.');
+    }
+    const page = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_DIAGNOSTICS' });
+    const client = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
+    out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client }, null, 2);
+  } catch (e) {
+    out.textContent = `진단 실패: ${e.message}`;
+  }
+});
