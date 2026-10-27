@@ -29,6 +29,25 @@
     return location.pathname === '/playlist' && new URLSearchParams(location.search).get('list') === 'WL';
   }
 
+  function declaredWatchLaterCount() {
+    const selectors = [
+      'ytd-playlist-header-renderer #stats',
+      'ytd-playlist-header-renderer #stats yt-formatted-string',
+      'ytd-playlist-sidebar-primary-info-renderer #stats'
+    ];
+    for (const selector of selectors) {
+      for (const node of document.querySelectorAll(selector)) {
+        const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const match = text.match(/동영상\s*([0-9,]+)\s*개/i) || text.match(/([0-9,]+)\s*videos?\b/i);
+        if (!match) continue;
+        const count = Number(match[1].replace(/,/g, ''));
+        if (Number.isSafeInteger(count) && count >= 0) return count;
+      }
+    }
+    return null;
+  }
+
   function setStatus(text, kind = '') {
     const status = document.querySelector('#eyh-header-status');
     if (!status) return;
@@ -127,6 +146,10 @@
     const listed = await requestPage('EYH_WL_LIST_REQUEST', { maxPages: 250 }, 600000);
     if (listed.hasMore) throw new Error('Watch Later 전체 목록을 끝까지 읽지 못해 삭제하지 않습니다.');
     const entries = listed.entries || [];
+    const declaredCount = declaredWatchLaterCount();
+    if (declaredCount != null && entries.length !== declaredCount) {
+      throw new Error(`YouTube 표시 개수 ${declaredCount}개와 안전 파서 ${entries.length}개가 달라 삭제하지 않습니다.`);
+    }
     const ledger = await readLedger(entries.map(e => e.videoId));
     const prefs = await storageGet({ watchLaterCleanupMinProgressPct: 60 });
     const progressById = {};
@@ -135,7 +158,7 @@
       const pct = CORE.progress(ledger.progress?.[entry.videoId]);
       if (pct != null) progressById[entry.videoId] = pct;
     }
-    return CORE.buildTransaction({
+    const tx = CORE.buildTransaction({
       id: `pcwl:${crypto.randomUUID()}`,
       entries,
       progressById,
@@ -143,6 +166,8 @@
       pages: listed.pages,
       hasMore: Boolean(listed.hasMore)
     });
+    tx.declaredCount = declaredCount;
+    return tx;
   }
 
   async function runSafeCleanup() {
