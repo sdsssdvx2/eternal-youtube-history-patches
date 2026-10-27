@@ -21,10 +21,7 @@ import app.morphe.extension.shared.innertube.utils.AuthUtils;
 import app.morphe.extension.shared.requests.Requester;
 import app.morphe.extension.youtube.patches.utils.requests.PlaylistRoutes;
 
-/**
- * Narrow undo path for the durable safe-cleanup journal.
- * Entries known to have received no delete request (missing / identity_mismatch) are never re-added.
- */
+/** Idempotent rollback for entries that definitely or possibly received a delete request. */
 final class EternalWatchLaterSafeUndo {
     private static final String WATCH_LATER = "WL";
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
@@ -40,16 +37,7 @@ final class EternalWatchLaterSafeUndo {
     private static volatile String lastStatus = "아직 실행하지 않음";
 
     static boolean hasUndoableTransaction() {
-        try {
-            JSONObject tx = EternalWatchLaterTransactionStore.loadCurrent();
-            if (tx == null || "undone".equals(tx.optString("state", ""))) return false;
-            JSONArray candidates = tx.optJSONArray("candidates");
-            if (candidates == null) return false;
-            for (int i = 0; i < candidates.length(); i++) {
-                if (shouldRestore(candidates.optJSONObject(i))) return true;
-            }
-        } catch (Throwable ignored) { }
-        return false;
+        return EternalWatchLaterTransactionStore.hasUndoableCurrent();
     }
 
     static void undoLastCleanup(Activity activity) {
@@ -63,29 +51,28 @@ final class EternalWatchLaterSafeUndo {
                 JSONObject tx = EternalWatchLaterTransactionStore.loadCurrent();
                 JSONArray candidates = tx == null ? null : tx.optJSONArray("candidates");
                 if (tx == null || candidates == null || "undone".equals(tx.optString("state", ""))) {
-                    running.set(false);
-                    activity.runOnUiThread(() -> Utils.showToastShort("되돌릴 안전 정리 기록이 없습니다."));
+                    finishNoWork(activity, "되돌릴 안전 정리 기록이 없습니다.");
                     return;
                 }
                 int restoreCount = 0;
-                int untouchedCount = 0;
+                int untouched = 0;
                 for (int i = 0; i < candidates.length(); i++) {
-                    if (shouldRestore(candidates.optJSONObject(i))) restoreCount++; else untouchedCount++;
+                    if (EternalWatchLaterTransactionStore.shouldRestore(candidates.optJSONObject(i))) restoreCount++;
+                    else untouched++;
                 }
                 if (restoreCount == 0) {
-                    running.set(false);
-                    activity.runOnUiThread(() -> Utils.showToastShort("우리 정리 코드가 제거했을 가능성이 있는 항목이 없습니다."));
+                    finishNoWork(activity, "삭제 요청이 실제로 전송됐거나 결과가 불확실한 항목이 없습니다.");
                     return;
                 }
                 final JSONObject loaded = tx;
-                final int finalRestoreCount = restoreCount;
-                final int finalUntouchedCount = untouchedCount;
+                final int count = restoreCount;
+                final int skipped = untouched;
                 activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                         .setTitle("마지막 안전 정리 되돌리기")
-                        .setMessage("우리 정리 코드가 제거했거나 결과가 불확실한 " + finalRestoreCount
+                        .setMessage("삭제됐거나 삭제 요청 결과가 불확실한 " + count
                                 + "개의 Watch Later 멤버십만 확인·복구할까요?"
-                                + (finalUntouchedCount > 0 ? "\n\n삭제 요청을 보내지 않았음이 확정된 " + finalUntouchedCount + "개는 건드리지 않습니다." : "")
-                                + "\n\nYouTube의 추가 API 특성상 원래의 정확한 목록 위치까지는 복원되지 않을 수 있습니다.")
+                                + (skipped > 0 ? "\n\n삭제 요청을 보내지 않은 " + skipped + "개는 건드리지 않습니다." : "")
+                                + "\n\nYouTube 추가 API 특성상 원래의 정확한 목록 위치까지는 복원되지 않을 수 있습니다.")
                         .setNegativeButton(android.R.string.cancel, (dialog, which) -> running.set(false))
                         .setOnCancelListener(dialog -> running.set(false))
                         .setPositiveButton("되돌리기", (dialog, which) -> IO.execute(() -> executeUndo(activity, loaded)))
@@ -96,6 +83,11 @@ final class EternalWatchLaterSafeUndo {
                 activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
             }
         });
+    }
+
+    private static void finishNoWork(Activity activity, String message) {
+        running.set(false);
+        activity.runOnUiThread(() -> Utils.showToastShort(message));
     }
 
     private static void executeUndo(Activity activity, JSONObject tx) {
@@ -110,13 +102,15 @@ final class EternalWatchLaterSafeUndo {
             for (int i = 0; i < candidates.length(); i++) {
                 JSONObject candidate = candidates.optJSONObject(i);
                 if (candidate == null) continue;
-                if (!shouldRestore(candidate)) {
+                if (!EternalWatchLaterTransactionStore.shouldRestore(candidate)) {
                     candidate.put("undoStatus", "not_removed");
                     candidate.put("undoAt", System.currentTimeMillis());
                     durable = EternalWatchLaterTransactionStore.saveVerified(durable);
                     candidates = durable.optJSONArray("candidates");
                     continue;
                 }
+                String undoStatus = candidate.optString("undoStatus", "pending");
+                if ("restored".equals(undoStatus) || "already_present".equals(undoStatus)) continue;
 
                 String videoId = candidate.optString("videoId", "");
                 try {
@@ -162,17 +156,10 @@ final class EternalWatchLaterSafeUndo {
         return "안전 되돌리기=" + (running.get() ? "진행 중" : lastStatus);
     }
 
-    private static boolean shouldRestore(JSONObject candidate) {
-        if (candidate == null) return false;
-        String status = candidate.optString("status", "prepared");
-        // These two states are assigned only before any delete request is sent.
-        if ("missing".equals(status) || "identity_mismatch".equals(status)) return false;
-        String undo = candidate.optString("undoStatus", "pending");
-        return !"not_removed".equals(undo);
-    }
-
     private static Entry resolveEntryStrict(String videoId) throws Exception {
-        if (!EternalWatchLaterPayload.validVideoId(videoId)) throw new IllegalArgumentException("올바르지 않은 videoId입니다.");
+        if (!EternalWatchLaterPayload.validVideoId(videoId)) {
+            throw new IllegalArgumentException("올바르지 않은 videoId입니다.");
+        }
         byte[] body = PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER);
         JSONObject json = request(PlaylistRoutes.GET_SET_VIDEO_ID, body);
         StrictPairMap parsed = new StrictPairMap();
@@ -255,10 +242,7 @@ final class EternalWatchLaterSafeUndo {
     private static final class Entry {
         final String videoId;
         final String setVideoId;
-        Entry(String videoId, String setVideoId) {
-            this.videoId = videoId;
-            this.setVideoId = setVideoId;
-        }
+        Entry(String videoId, String setVideoId) { this.videoId = videoId; this.setVideoId = setVideoId; }
     }
 
     private EternalWatchLaterSafeUndo() { }
