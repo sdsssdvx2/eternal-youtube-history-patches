@@ -4,7 +4,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.youtube.addon.AddOnApi;
-import app.morphe.extension.youtube.shared.NavigationBar;
 
 /** Runtime entry point injected into Morphe's AddOnManager. */
 @SuppressWarnings("unused")
@@ -15,12 +14,15 @@ public final class EternalHistoryAddOn {
         if (!registered.compareAndSet(false, true)) return;
         Logger.printDebug(() -> "Registering Eternal YouTube History add-on");
         EternalHistorySettings.ENABLED.get();
+
+        // Preserve the v1.10.x common/default profile migration, but page-specific navigation
+        // tracking is intentionally dormant in v1.10.5. The last proven-stable v1.9.1 runtime did
+        // not subscribe to YouTube's bottom-navigation lifecycle at all.
         EternalSurfaceSettings.ensureDefaultProfileMigrated();
 
         if (EternalWatchLaterSafety.isLocked()) {
-            // Preserve the user's preference value for future migration, but disable every runtime
-            // entry point that could delete from Watch Later. refreshSchedule() also cancels any
-            // periodic JobScheduler job left behind by an older installed build.
+            // Preserve stored settings for future migration while disabling every runtime path that
+            // could delete from Watch Later. refreshSchedule() also cancels an older scheduled job.
             EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
         }
 
@@ -30,7 +32,6 @@ public final class EternalHistoryAddOn {
                 EternalWatchLaterCleaner.onNewVideoStarted();
             }
             EternalWatchLaterJobService.refreshSchedule();
-            EternalHistoryToolbar.onSurfaceChanged();
         });
         AddOnApi.addVideoIdListener(videoId -> {
             EternalHistoryClient.onVideoIdChanged(videoId);
@@ -44,15 +45,16 @@ public final class EternalHistoryAddOn {
                 EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
             }
         });
-        // Morphe already gives the newly selected navigation button to this listener. Eternal only
-        // records that value. It must not query NavigationBar/PlayerType back from inside YouTube's
-        // tab-transition callback, because those host objects are temporarily being rebuilt there.
-        NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
+
+        // IMPORTANT: no NavigationBar listener here. v1.10.0 introduced a listener that runs in the
+        // exact bottom-tab transition where real devices began crashing (Shorts, Subscriptions, You).
+        // v1.10.1-v1.10.4 made that callback more defensive, but the real-device crash persisted.
+        // Restore the v1.9.1 ownership boundary: Eternal observes video lifecycle only; its toolbar
+        // mounts opportunistically from the proven native-toolbar ImageView hook.
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
         EternalWatchLaterStateMigration.migrate();
         EternalWatchLaterJobService.refreshSchedule();
-        EternalHistoryToolbar.ensureControlSoon();
     }
 
     private EternalHistoryAddOn() { }
