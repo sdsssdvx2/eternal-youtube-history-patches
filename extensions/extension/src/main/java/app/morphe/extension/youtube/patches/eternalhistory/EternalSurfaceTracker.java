@@ -16,6 +16,13 @@ public final class EternalSurfaceTracker {
         try {
             if (browseId == null || browseId.isBlank()) return;
             lastBrowseId = browseId;
+            // FEshorts is Morphe/YouTube's stable browse id for the full-screen Shorts surface.
+            // Publish it immediately so the delayed overlay-removal path is queued as early as
+            // possible, without registering any NavigationBar callback.
+            if ("FEshorts".equals(browseId)) {
+                publishSurface(EternalSurfaceSettings.Surface.SHORTS);
+                return;
+            }
             EternalSurfaceSettings.Surface mapped = fromBrowseId(browseId);
             if (mapped != EternalSurfaceSettings.Surface.OTHER) publishSurface(mapped);
         } catch (Throwable t) {
