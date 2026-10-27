@@ -1,0 +1,10 @@
+/* Stability layer: keep one presentation owner (content.js) and make safety/UI exclusions declarative. */
+#eyh-header-controls .eyh-header-brand,
+#eyh-watch-later-auto,
+#eyh-watch-later-cleanup {
+  display: none !important;
+}
+
+html.eyh-shorts-surface #eyh-header-controls {
+  display: none !important;
+}
