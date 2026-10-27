@@ -84,9 +84,9 @@ private object EternalToolbarButtonFingerprint : Fingerprint(
 )
 
 /**
- * Same structural browse-id anchor used by Morphe's Change start page patch. Eternal only observes
- * the value; it never rewrites it. This makes Watch Later/Liked/playlist/channel/history profiles
- * exact instead of guessing from whichever navigation button is still selected underneath.
+ * Historical v1.10.x browse-id anchor retained only for source-level forensic comparison. The
+ * v1.10.5 runtime intentionally does not install this hook: v1.9.1 was stable without any Eternal
+ * callback running inside YouTube browse/navigation transitions.
  */
 private object EternalBrowseIdFingerprint : Fingerprint(
     returnType = "L",
@@ -117,6 +117,7 @@ private fun installEternalToolbarHook() {
     }
 }
 
+/** Not called by v1.10.5; kept temporarily so the regression delta remains easy to audit. */
 context(context: BytecodePatchContext)
 private fun installEternalBrowseIdHook() {
     EternalBrowseIdFingerprint.apply {
@@ -146,7 +147,7 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
             it.parameters.isEmpty() && AccessFlags.PUBLIC.isSet(it.accessFlags) && AccessFlags.STATIC.isSet(it.accessFlags)
     } ?: throw PatchException("Eternal History could not find AddOnManager.registerAddOns()")
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
-    installEternalBrowseIdHook()
+    // Deliberately no installEternalBrowseIdHook(): navigation is owned entirely by YouTube again.
     installEternalToolbarHook()
 }
 
@@ -191,8 +192,7 @@ private fun declareAddOnPreferences() {
     if (!declarationFile.exists()) {
         declarationFile.parentFile?.mkdirs()
         declarationFile.writeText(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-                "<morphe-add-on-preferences xmlns:android=\"http://schemas.android.com/apk/res/android\"/>"
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><morphe-add-on-preferences xmlns:android=\"http://schemas.android.com/apk/res/android\"/>"
         )
     }
 

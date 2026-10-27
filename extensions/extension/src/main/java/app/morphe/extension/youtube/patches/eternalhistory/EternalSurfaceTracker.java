@@ -6,13 +6,17 @@ import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.patches.components.ContextInterface;
 import app.morphe.extension.youtube.shared.NavigationBar;
 
-/** Tracks stable YouTube surface signals without re-entering host navigation state. */
+/**
+ * Historical v1.10.x surface classifier retained only so stored page-profile data stays readable.
+ * v1.10.5 installs no browse-id or bottom-navigation hook and no active filter/UI calls this class.
+ * Even if an old call site survives in a stale process, updates here are cache-only and never touch UI.
+ */
 @SuppressWarnings("unused")
 public final class EternalSurfaceTracker {
     private static volatile String lastBrowseId = "";
     private static volatile EternalSurfaceSettings.Surface lastUiSurface = EternalSurfaceSettings.Surface.HOME;
 
-    /** Injection point beside YouTube's own browse-id load. Does not mutate the browse id. */
+    /** Historical injection target; v1.10.5 no longer installs the browse-id hook. */
     public static void onBrowseId(@Nullable String browseId) {
         try {
             if (browseId == null || browseId.isBlank()) return;
@@ -20,15 +24,11 @@ public final class EternalSurfaceTracker {
             EternalSurfaceSettings.Surface mapped = fromBrowseId(browseId);
             if (mapped != EternalSurfaceSettings.Surface.OTHER) publishSurface(mapped);
         } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal browse surface update ignored: " + safeMessage(t));
+            Logger.printDebug(() -> "Eternal dormant browse surface update ignored: " + safeMessage(t));
         }
     }
 
-    /**
-     * Morphe passes the selected button into this callback. Never call back into NavigationBar from
-     * here: YouTube is in the middle of rebuilding tab/search/player state and re-entrant host-state
-     * reads have proven unsafe on real devices.
-     */
+    /** Historical target; v1.10.5 does not register a NavigationBar listener. */
     static void onNavigationChanged(@Nullable NavigationBar.NavigationButton button) {
         try {
             if (button == NavigationBar.NavigationButton.HOME) {
@@ -45,14 +45,11 @@ public final class EternalSurfaceTracker {
                 publishSurface(EternalSurfaceSettings.Surface.SHORTS);
             }
         } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal navigation surface update ignored: " + safeMessage(t));
+            Logger.printDebug(() -> "Eternal dormant navigation surface update ignored: " + safeMessage(t));
         }
     }
 
-    /**
-     * Component classification uses only Eternal-owned cached signals plus the Litho path already
-     * handed to the filter. It deliberately performs no NavigationBar/PlayerType/search queries.
-     */
+    /** Historical classifier retained for source compatibility; active v1.10.5 filters do not call it. */
     static EternalSurfaceSettings.Surface forComponent(ContextInterface contextInterface, String path) {
         try {
             EternalSurfaceSettings.Surface cached = lastUiSurface;
@@ -77,13 +74,12 @@ public final class EternalSurfaceTracker {
             }
             return cached == null ? EternalSurfaceSettings.Surface.OTHER : cached;
         } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal component surface classification ignored: " + safeMessage(t));
+            Logger.printDebug(() -> "Eternal dormant component classification ignored: " + safeMessage(t));
             EternalSurfaceSettings.Surface cached = lastUiSurface;
             return cached == null ? EternalSurfaceSettings.Surface.OTHER : cached;
         }
     }
 
-    /** Main-thread UI classification is intentionally just the last stable cached signal. */
     static EternalSurfaceSettings.Surface currentForUi() {
         EternalSurfaceSettings.Surface surface = lastUiSurface;
         return surface == null ? EternalSurfaceSettings.Surface.OTHER : surface;
@@ -94,11 +90,10 @@ public final class EternalSurfaceTracker {
         return surface;
     }
 
+    /** Cache-only by design: no toolbar callback, no adapter refresh, no host navigation access. */
     private static void publishSurface(EternalSurfaceSettings.Surface surface) {
         if (surface == null || surface == EternalSurfaceSettings.Surface.OTHER) return;
-        EternalSurfaceSettings.Surface previous = lastUiSurface;
         lastUiSurface = surface;
-        if (previous != surface) EternalHistoryToolbar.onSurfaceChanged();
     }
 
     private static EternalSurfaceSettings.Surface fromBrowseId(String browseId) {
