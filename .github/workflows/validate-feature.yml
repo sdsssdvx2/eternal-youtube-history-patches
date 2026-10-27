@@ -50,8 +50,10 @@ jobs:
           grep -F "root.querySelector('#eyh-surface-settings')?.remove()" pc-stability-controller.js
           grep -F "root.style.display = shorts ? 'none' : ''" pc-stability-controller.js
           grep -F 'watchLaterAutoCleanupEnabled: false' pc-stability-controller.js
-          grep -F 'unparsedCount: declared - entries.length' watch-later-recovery-content.js
-          echo 'PASS PC single-renderer display + Shorts exclusion + ADD-only recovery assertions'
+          grep -F "'lockupViewModel'" watch-later-core.js
+          grep -F 'declared !== entries.length' watch-later-recovery-content.js
+          grep -F 'unparsedCount: 0' watch-later-recovery-content.js
+          echo 'PASS PC single-renderer display + Shorts preservation + strict recovery assertions'
 
   android-compile:
     runs-on: ubuntu-latest
