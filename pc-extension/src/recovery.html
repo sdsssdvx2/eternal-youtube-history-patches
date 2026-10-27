@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Watch Later 복구 · Eternal YouTube History</title>
+  <link rel="stylesheet" href="recovery.css">
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <p class="eyebrow">Eternal YouTube History</p>
+      <h1>Watch Later 복구 후보</h1>
+      <p class="lead">Chrome 방문 기록에서 실제 <code>list=WL</code>로 열었던 영상만 찾아 현재 Watch Later와 비교합니다. 자동 복원은 하지 않습니다.</p>
+    </div>
+    <span class="privacy">history 권한은 스캔 직후 자동 반납</span>
+  </header>
+
+  <section class="card warning">
+    <strong>안전 원칙</strong>
+    <p>이 도구는 Watch Later에서 아무것도 삭제하지 않습니다. 후보는 모두 처음에는 미선택이며, 선택한 영상만 하나씩 다시 추가합니다. 과거에 일부러 제거한 영상도 후보가 될 수 있으므로 제목과 날짜를 확인하세요.</p>
+  </section>
+
+  <section class="card controls">
+    <button id="scan" class="primary">Chrome 기록에서 복구 후보 찾기</button>
+    <button id="selectAll" disabled>후보 전체 선택</button>
+    <button id="clearSelection" disabled>선택 해제</button>
+    <button id="restore" class="restore" disabled>선택한 영상 Watch Later에 복구</button>
+    <div id="status" role="status" aria-live="polite">아직 스캔하지 않았습니다.</div>
+  </section>
+
+  <section id="summary" class="summary" hidden>
+    <div><b id="historyEvidence">0</b><span>WL 방문기록 영상</span></div>
+    <div><b id="currentCount">0</b><span>현재 Watch Later</span></div>
+    <div><b id="candidateCount">0</b><span>복구 후보</span></div>
+    <div><b id="selectedCount">0</b><span>선택</span></div>
+  </section>
+
+  <section id="resultsCard" class="card" hidden>
+    <div class="resultsHead">
+      <div>
+        <h2>후보 목록</h2>
+        <p>근거: Chrome 방문 URL에 <code>list=WL</code>이 있었고, 현재 Watch Later strict snapshot에는 없는 영상입니다.</p>
+      </div>
+    </div>
+    <div id="results" class="results"></div>
+  </section>
+
+  <section class="card footnote">
+    <strong>한계</strong>
+    <p>Chrome에서 Watch Later를 통해 실제로 열어 본 영상만 찾을 수 있습니다. 폰에서만 열었거나, 저장만 해두고 한 번도 재생하지 않은 영상은 이 방식으로 찾을 수 없습니다. Google Takeout/My Activity도 삭제된 과거 Watch Later 멤버십을 보장하는 복구 저장소는 아닙니다.</p>
+  </section>
+</main>
+<script src="watch-later-recovery-core.js"></script>
+<script src="recovery.js"></script>
+</body>
+</html>
