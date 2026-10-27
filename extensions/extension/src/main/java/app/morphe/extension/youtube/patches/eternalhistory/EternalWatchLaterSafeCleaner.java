@@ -29,18 +29,7 @@ import app.morphe.extension.shared.requests.Requester;
 import app.morphe.extension.youtube.patches.utils.requests.PlaylistRoutes;
 
 /**
- * Manual-only fail-closed Watch Later cleanup. The legacy cleaner and all automatic deletion remain
- * locked by EternalWatchLaterSafety.
- *
- * Invariants:
- * 1. A strict full playlist snapshot is prepared before the confirmation dialog.
- * 2. After the user confirms, that complete snapshot/journal is durably saved and read back.
- * 3. The full playlist is independently enumerated again after confirmation and must match exactly.
- * 4. Every candidate is re-resolved by videoId immediately before mutation.
- * 5. "attempting" is durably stored before a delete request can be sent.
- * 6. After that fsync/read-back, identity is resolved once more; mismatch means zero delete request.
- * 7. The result is durably stored before another candidate may be touched.
- * 8. The first ambiguity/failure stops the remaining deletes.
+ * Manual-only fail-closed Watch Later cleanup. Legacy and automatic deletion stay locked.
  */
 final class EternalWatchLaterSafeCleaner {
     private static final String WATCH_LATER = "WL";
@@ -73,12 +62,11 @@ final class EternalWatchLaterSafeCleaner {
                 }
                 Map<String, Float> progress = EternalHistoryDb.get().loadProgressSnapshot();
                 int threshold = cleanupThreshold();
-                JSONArray snapshot = snapshotJson(preview.entries);
-                JSONArray candidates = candidatesJson(preview.entries, progress, threshold);
                 JSONObject tx = EternalWatchLaterTransactionStore.newTransaction(
-                        "androidwl:" + UUID.randomUUID(), threshold, preview.pages, snapshot, candidates);
+                        "androidwl:" + UUID.randomUUID(), threshold, preview.pages,
+                        snapshotJson(preview.entries), candidatesJson(preview.entries, progress, threshold));
                 lastStatus = "안전 미리보기: 페이지 " + preview.pages + ", " + preview.entries.size()
-                        + "개 중 " + candidates.length() + "개 대상";
+                        + "개 중 " + tx.optJSONArray("candidates").length() + "개 대상";
                 activity.runOnUiThread(() -> showConfirmation(activity, tx));
             } catch (Throwable t) {
                 running.set(false);
@@ -124,7 +112,7 @@ final class EternalWatchLaterSafeCleaner {
             ensureSignedIn();
             EternalWatchLaterTransactionStore.archiveCurrentIfReplaceable();
 
-            // Full pre-delete evidence must survive a process death before any destructive request.
+            // Full snapshot/journal must survive process death before any write to YouTube.
             durable = EternalWatchLaterTransactionStore.saveVerified(tx);
             JSONArray originalSnapshot = durable.optJSONArray("snapshot");
             if (originalSnapshot == null || originalSnapshot.length() == 0) {
@@ -154,14 +142,14 @@ final class EternalWatchLaterSafeCleaner {
             for (int i = 0; i < candidates.length() && !stop; i++) {
                 candidates = durable.optJSONArray("candidates");
                 JSONObject candidate = candidates == null ? null : candidates.optJSONObject(i);
-                if (candidate == null) continue;
-                if (!"prepared".equals(candidate.optString("status", "prepared"))) continue;
+                if (candidate == null || !"prepared".equals(candidate.optString("status", "prepared"))) continue;
 
                 String videoId = candidate.optString("videoId", "");
                 String expectedSetVideoId = candidate.optString("setVideoId", "");
                 final int index = i + 1;
                 final int total = candidates.length();
                 activity.runOnUiThread(() -> Utils.showToastShort(index + "/" + total + " 삭제 직전 식별자 확인…"));
+                boolean requestMayHaveBeenSent = false;
 
                 try {
                     Entry firstFresh = resolveEntryStrict(videoId);
@@ -178,8 +166,7 @@ final class EternalWatchLaterSafeCleaner {
                         break;
                     }
 
-                    // Critical crash boundary: no edit_playlist request is allowed before this state
-                    // has been fsynced and read back successfully.
+                    // Crash boundary: edit_playlist cannot run until attempting is fsynced/read back.
                     candidate.put("status", "attempting");
                     candidate.put("attemptAt", System.currentTimeMillis());
                     candidate.remove("error");
@@ -192,8 +179,7 @@ final class EternalWatchLaterSafeCleaner {
                         throw new IllegalStateException("삭제 직전 attempting journal 재확인에 실패했습니다.");
                     }
 
-                    // Re-resolve after the durable write. This is the identity check immediately
-                    // adjacent to the destructive request.
+                    // Re-resolve after fsync so the check is immediately adjacent to the request.
                     Entry finalFresh = resolveEntryStrict(videoId);
                     if (finalFresh == null) {
                         markNoRequest(candidate, "missing", "journal 저장 후 항목이 사라져 요청하지 않음");
@@ -208,6 +194,10 @@ final class EternalWatchLaterSafeCleaner {
                         break;
                     }
 
+                    // From this exact point until the durable result is committed, a crash means the
+                    // request outcome is uncertain; the persisted attempting state makes it undoable.
+                    requestMayHaveBeenSent = true;
+                    candidate.put("requestStartedAt", System.currentTimeMillis());
                     if (removeFreshEntry(finalFresh)) {
                         candidate.put("status", "removed");
                         candidate.remove("error");
@@ -217,15 +207,7 @@ final class EternalWatchLaterSafeCleaner {
                         stop = true;
                     }
                 } catch (Throwable t) {
-                    // If attempting was already persisted, failure is rollback-eligible because the
-                    // request outcome may be uncertain. If it was never persisted, no request could
-                    // have been sent by this implementation.
-                    String currentStatus = candidate.optString("status", "prepared");
-                    if ("attempting".equals(currentStatus)) {
-                        candidate.put("status", "failed");
-                    } else {
-                        candidate.put("status", "aborted_before_request");
-                    }
+                    candidate.put("status", requestMayHaveBeenSent ? "failed" : "aborted_before_request");
                     candidate.put("error", safeMessage(t));
                     stop = true;
                     Logger.printDebug(() -> "Eternal safe Watch Later remove stopped for " + videoId + ": " + safeMessage(t));
