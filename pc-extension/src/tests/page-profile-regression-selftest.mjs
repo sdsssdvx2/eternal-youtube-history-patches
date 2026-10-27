@@ -11,6 +11,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'ut
 const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
 const content = fs.readFileSync(path.join(src, 'content.js'), 'utf8');
 const options = fs.readFileSync(path.join(src, 'options.js'), 'utf8');
+const optionsHtml = fs.readFileSync(path.join(src, 'options.html'), 'utf8');
 
 const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(isolated, 'missing isolated world content script');
@@ -39,13 +40,22 @@ assert.match(stability, /hideEnabled: mode === 'hide'/);
 
 // The broken gear/panel layer is not resident. Stale remnants are actively removed.
 assert.match(stability, /#eyh-surface-settings/);
+assert.match(stability, /#eyh-surface-panel/);
 assert.doesNotMatch(stability, /openPanel/);
-assert.doesNotMatch(stability, /eyh-surface-panel/);
+assert.doesNotMatch(stability, /eyh-surface-compact/);
+assert.match(optionsHtml, /안정화 버전에서는 별도의 ⚙ 페이지 패널을 띄우지 않습니다/);
 
-// Shorts is a no-op presentation surface and carries no Eternal masthead UI.
+// Shorts carries no Eternal masthead UI and, importantly, never rewrites the global legacy mode.
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
-assert.match(stability, /watchedDisplayMode: 'none', watchedMinProgressPct: 0/);
 assert.match(stability, /root\.style\.display = shorts \? 'none' : ''/);
+assert.match(stability, /if \(key === 'shorts'\) \{[\s\S]*?scheduleHeaderDecoration\(\);[\s\S]*?return;[\s\S]*?\}/);
+const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \}/)?.[1] || '';
+assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)/,
+  'Shorts must not corrupt the legacy/default presentation state');
+
+// A direct 0.9.x -> 0.10.7 upgrade snapshots the legacy default before any page override is stored.
+assert.match(stability, /if \(!hasStoredDefault\)/);
+assert.match(stability, /watchedSurfaceDefaultProfile: defaults/);
 
 // Common defaults and page overrides still retain full threshold expressiveness in storage.
 for (const token of [
@@ -57,5 +67,9 @@ assert.match(stability, /linkedThresholds/);
 assert.match(stability, /sharedThreshold/);
 assert.match(stability, /dimThreshold/);
 assert.match(stability, /hideThreshold/);
+assert.match(options, /watchedDisplayMode: presentation\.mode/,
+  'options must feed the single renderer instead of disabling it');
+assert.match(options, /watchLaterAutoCleanupEnabled: false/);
+assert.match(optionsHtml, /자동 정리 \(현재 안전 잠금\)/);
 
 console.log('PASS lightweight page-profile regression self-test');
