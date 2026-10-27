@@ -9,11 +9,11 @@ const text = name => fs.readFileSync(path.join(src, name), 'utf8');
 const manifest = JSON.parse(text('manifest.json'));
 const content = text('content.js');
 const surface = text('surface-profiles.js');
-const hotfix = text('pc-ui-hotfix.js');
 const safety = text('watch-later-safety-main.js');
 const safeCore = text('watch-later-safe-core.js');
 const safeMain = text('watch-later-safe-main.js');
 const safeCoordinator = text('watch-later-safe.js');
+const recoveryContent = text('watch-later-recovery-content.js');
 const css = text('content.css');
 const bridge = text('page-bridge.js');
 const core = text('watch-later-core.js');
@@ -35,7 +35,7 @@ assert.equal(isolatedWorld.js[0], 'watch-later-core.js', 'core must load first i
 assert.ok(isolatedWorld.js.indexOf('watch-later-safe-core.js') < isolatedWorld.js.indexOf('watch-later-safe.js'), 'safe transaction core must precede coordinator');
 assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in isolated YouTube pages');
 assert.ok(isolatedWorld.js.includes('surface-profiles.js'), 'page-profile renderer must load in isolated YouTube pages');
-assert.ok(isolatedWorld.js.includes('pc-ui-hotfix.js'), 'PC UI/safety hotfix must load in isolated YouTube pages');
+assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'), 'competing PC UI observer must not load');
 assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'transactional Watch Later coordinator must load');
 assert.match(content, /watchLaterAutoCleanupEnabled = false/);
 assert.match(content, /watchLaterCleanupMinProgressPct = 60/);
@@ -65,8 +65,6 @@ assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_REQUEST'/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_ONE_REQUEST'/);
-assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
-assert.match(hotfix, /button\.disabled = true/);
 assert.match(safeCoordinator, /watchLaterAutoCleanupEnabled: false/);
 
 // v0.10.5 must not inherit the legacy list-completeness ambiguity. The destructive coordinator uses
@@ -128,14 +126,20 @@ assert.match(safeCoordinator, /candidate\.undoStatus = 'not_needed'/);
 assert.match(safeCoordinator, /candidate\.undoStatus = 'attempting'/);
 assert.match(safeCoordinator, /마지막 정리 되돌리기/);
 
+// Recovery is ADD-only: a header count mismatch is diagnostic, not a reason to block candidate
+// discovery. Every selected candidate is re-resolved by safeAdd before any mutation.
+assert.match(recoveryContent, /const countMismatch = declared != null && declared !== entries\.length/);
+assert.match(recoveryContent, /countMismatch,/);
+assert.doesNotMatch(recoveryContent, /표시 개수 .*복구 비교를 중단합니다/);
+
 // Users must be able to tell whether PC background cleanup previously ran without opening devtools.
 assert.match(popupHtml, /id="watchLaterSafety"/);
 assert.match(popup, /eyhLastAutoWatchLaterSweep/);
 assert.match(popup, /최근 PC 자동 정리/);
 assert.match(popup, /현재 자동 설정/);
 
-// Page-profile presentation must never share the legacy renderer's toggle classes. v0.10.0 did,
-// so the two scanners alternately added/removed the same classes and produced visible flicker.
+// Page-profile presentation must never share the legacy renderer's toggle classes. One script owns
+// quick buttons, detailed profile settings, and card presentation; no attribute-observer hotfix may compete.
 assert.match(surface, /eyh-surface-watched/);
 assert.match(surface, /eyh-surface-hidden/);
 assert.doesNotMatch(surface, /classList\.toggle\('eyh-watched'/);
@@ -144,15 +148,17 @@ assert.match(css, /\.eyh-surface-watched/);
 assert.match(css, /\.eyh-surface-hidden/);
 assert.match(surface, /scanGeneration/);
 assert.match(surface, /generation !== scanGeneration/);
+assert.match(surface, /function bindQuickButton\(button\)/);
+assert.match(surface, /button\.hidden = false/);
+assert.match(surface, /event\.stopImmediatePropagation\(\)/);
+assert.match(surface, /applyQuickMode\(button\.dataset\.eyhMode\)/);
+assert.match(surface, /showReloadNotice/);
+assert.match(surface, /#eyh-header-controls, #eyh-surface-panel/);
 
-// Keep redundant masthead copy hidden, but restore the fast 표시/흐림/숨김 controls. Detailed
-// per-page settings stay on the gear button, and invalidated old tabs must explain a one-tab reload.
+// Keep redundant masthead copy hidden; detailed per-page settings stay on the gear button.
 assert.match(surface, /button\.textContent = '⚙'/);
 assert.match(surface, /brand\.hidden = true/);
 assert.doesNotMatch(surface, /brand\.textContent = `Eternal/);
-assert.match(hotfix, /querySelectorAll\('button\[data-eyh-mode\]'\)/);
-assert.match(hotfix, /button\.hidden = false/);
-assert.match(hotfix, /showReloadNotice/);
 
 // Common defaults must have the same expressive power as a page override.
 for (const id of [

@@ -80,13 +80,17 @@
     }
     const entries = Array.isArray(listed.entries) ? listed.entries : [];
     const declared = declaredWatchLaterCount();
-    if (declared == null) throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없습니다.');
-    if (declared !== entries.length) {
-      throw new Error(`YouTube 표시 개수 ${declared}개와 안전 파서 ${entries.length}개가 달라 복구 비교를 중단합니다.`);
-    }
+    // Recovery is ADD-only. YouTube's header count can include unavailable/private entries that do
+    // not expose a usable (videoId,setVideoId) tuple to the strict parser. Do not block recovery on
+    // that benign mismatch: every selected candidate is re-resolved immediately before ADD and an
+    // already-present video returns already_present without mutation. Destructive cleanup keeps its
+    // stricter completeness rules in the transaction coordinator.
+    const countMismatch = declared != null && declared !== entries.length;
     return {
       entries: entries.map(entry => ({ videoId: entry.videoId, setVideoId: entry.setVideoId })),
       declaredCount: declared,
+      parsedCount: entries.length,
+      countMismatch,
       pages: Number(listed.pages || 0)
     };
   }

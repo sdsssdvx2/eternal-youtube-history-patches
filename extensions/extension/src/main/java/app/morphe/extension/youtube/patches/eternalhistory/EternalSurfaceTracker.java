@@ -4,9 +4,8 @@ import androidx.annotation.Nullable;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.patches.components.ContextInterface;
-import app.morphe.extension.youtube.shared.NavigationBar;
 
-/** Tracks stable YouTube surface signals without re-entering host navigation state. */
+/** Tracks stable YouTube surface signals without participating in host navigation callbacks. */
 @SuppressWarnings("unused")
 public final class EternalSurfaceTracker {
     private static volatile String lastBrowseId = "";
@@ -17,6 +16,13 @@ public final class EternalSurfaceTracker {
         try {
             if (browseId == null || browseId.isBlank()) return;
             lastBrowseId = browseId;
+            // FEshorts is Morphe/YouTube's stable browse id for the full-screen Shorts surface.
+            // Publish it immediately so the delayed overlay-removal path is queued as early as
+            // possible, without registering any NavigationBar callback.
+            if ("FEshorts".equals(browseId)) {
+                publishSurface(EternalSurfaceSettings.Surface.SHORTS);
+                return;
+            }
             EternalSurfaceSettings.Surface mapped = fromBrowseId(browseId);
             if (mapped != EternalSurfaceSettings.Surface.OTHER) publishSurface(mapped);
         } catch (Throwable t) {
@@ -25,33 +31,9 @@ public final class EternalSurfaceTracker {
     }
 
     /**
-     * Morphe passes the selected button into this callback. Never call back into NavigationBar from
-     * here: YouTube is in the middle of rebuilding tab/search/player state and re-entrant host-state
-     * reads have proven unsafe on real devices.
-     */
-    static void onNavigationChanged(@Nullable NavigationBar.NavigationButton button) {
-        try {
-            if (button == NavigationBar.NavigationButton.HOME) {
-                lastBrowseId = "FEwhat_to_watch";
-                publishSurface(EternalSurfaceSettings.Surface.HOME);
-            } else if (button == NavigationBar.NavigationButton.SUBSCRIPTIONS) {
-                lastBrowseId = "FEsubscriptions";
-                publishSurface(EternalSurfaceSettings.Surface.SUBSCRIPTIONS);
-            } else if (button == NavigationBar.NavigationButton.LIBRARY) {
-                lastBrowseId = "FElibrary";
-                publishSurface(EternalSurfaceSettings.Surface.LIBRARY);
-            } else if (button == NavigationBar.NavigationButton.SHORTS) {
-                lastBrowseId = "";
-                publishSurface(EternalSurfaceSettings.Surface.SHORTS);
-            }
-        } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal navigation surface update ignored: " + safeMessage(t));
-        }
-    }
-
-    /**
      * Component classification uses only Eternal-owned cached signals plus the Litho path already
-     * handed to the filter. It deliberately performs no NavigationBar/PlayerType/search queries.
+     * handed to the filter. It deliberately performs no NavigationBar/PlayerType/search queries and
+     * is not registered as a YouTube navigation callback.
      */
     static EternalSurfaceSettings.Surface forComponent(ContextInterface contextInterface, String path) {
         try {
@@ -105,6 +87,7 @@ public final class EternalSurfaceTracker {
         if (browseId == null || browseId.isBlank()) return EternalSurfaceSettings.Surface.OTHER;
         return switch (browseId) {
             case "FEwhat_to_watch" -> EternalSurfaceSettings.Surface.HOME;
+            case "FEshorts" -> EternalSurfaceSettings.Surface.SHORTS;
             case "FEsubscriptions", "FEchannels" -> EternalSurfaceSettings.Surface.SUBSCRIPTIONS;
             case "FEhistory" -> EternalSurfaceSettings.Surface.HISTORY;
             case "FEplaylist_aggregation" -> EternalSurfaceSettings.Surface.PLAYLISTS;

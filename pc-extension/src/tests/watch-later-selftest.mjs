@@ -7,7 +7,7 @@ import '../watch-later-core.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const safety = fs.readFileSync(path.join(src, 'watch-later-safety-main.js'), 'utf8');
-const hotfix = fs.readFileSync(path.join(src, 'pc-ui-hotfix.js'), 'utf8');
+const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 
 const C = globalThis.EYHWatchLaterCore;
@@ -28,8 +28,6 @@ const entries = C.extractPlaylistEntries(initial);
 assert.deepEqual(entries, [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid' }, { videoId: 'lmnopqrstuv', setVideoId: 'SET_002_valid' }]);
 assert.deepEqual(C.extractContinuationTokens(initial), ['CONTINUATION_TOKEN_1']);
 
-// /next membership lookups commonly expose playlistPanelVideoRenderer.playlistSetVideoId
-// instead of playlistVideoRenderer.setVideoId. Both must resolve to the same safe tuple.
 const membership = {
   contents: {
     singleColumnWatchNextResults: {
@@ -63,23 +61,25 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The v0.10.3 emergency boundary remains permanent in v0.10.6: destructive legacy requests are
-// intercepted in MAIN world before the old page bridge can call browse/edit_playlist. The recovery
-// feature added in v0.10.6 is a separate ADD-only path and must not reopen these messages.
+// The emergency MAIN-world boundary remains permanent: destructive legacy requests are intercepted
+// before page-bridge can call browse/edit_playlist. Automatic cleanup is independently forced off by
+// the currently loaded safe transaction coordinator, not by the retired v0.10.6 UI hotfix.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
-assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
-assert.match(hotfix, /#eyh-watch-later-auto/);
-assert.match(hotfix, /#eyh-watch-later-cleanup/);
+assert.match(safeCoordinator, /watchLaterAutoCleanupEnabled: false/);
 
 const mainWorld = manifest.content_scripts.find(entry => entry.world === 'MAIN');
+const isolatedWorld = manifest.content_scripts.find(entry => entry.world === 'ISOLATED');
 assert.ok(mainWorld, 'MAIN-world content script is required');
+assert.ok(isolatedWorld, 'ISOLATED-world content script is required');
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'safety boundary must load before page-bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'));
-assert.equal(manifest.version, '0.10.6');
+assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'safe transaction coordinator must load');
+assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'), 'retired competing UI hotfix must not load');
+assert.equal(manifest.version, '0.10.7');
 
 console.log('PASS watch-later-core + fail-closed safety self-test');
