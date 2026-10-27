@@ -25,6 +25,11 @@ final class EternalCleanupCoordinator {
 
     static void previewAndConfirm(Activity activity) {
         if (activity == null) return;
+        if (EternalWatchLaterSafety.isLocked()) {
+            lastSyncStatus = "안전 잠금: 삭제 실행 안 함";
+            Utils.showToastLong(EternalWatchLaterSafety.MESSAGE);
+            return;
+        }
         if (!running.compareAndSet(false, true)) {
             Utils.showToastShort("Eternal 중앙 기록 동기화가 이미 진행 중입니다.");
             return;
@@ -48,6 +53,7 @@ final class EternalCleanupCoordinator {
     }
 
     static String diagnosticSummary() {
+        if (EternalWatchLaterSafety.isLocked()) return "중앙 정리 동기화=안전 잠금";
         return "중앙 정리 동기화=" + (running.get() ? "진행 중" : lastSyncStatus);
     }
 
