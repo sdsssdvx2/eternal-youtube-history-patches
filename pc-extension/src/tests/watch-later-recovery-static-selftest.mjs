@@ -14,7 +14,7 @@ const recoveryHtml = text('recovery.html');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.6');
+assert.equal(manifest.version, '0.10.7');
 assert.deepEqual(manifest.optional_permissions, ['history'], 'history must remain optional, never install-time required');
 assert.ok(!manifest.permissions.includes('history'), 'history must not be a permanent required permission');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
@@ -35,7 +35,11 @@ assert.doesNotMatch(main, /setVideoId/,
 
 assert.match(content, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(content, /terminalReason !== 'no-continuation'/);
-assert.match(content, /declared !== entries\.length/);
+assert.match(content, /const countMismatch = declared !== entries\.length/);
+assert.match(content, /countGap: declared - entries\.length/);
+assert.match(content, /삭제 작업은 하지 않습니다/);
+assert.doesNotMatch(content, /달라 복구 비교를 중단합니다/,
+  'ADD-only recovery must warn on declared/parser count gaps instead of blocking all evidence');
 assert.match(content, /EYH_WL_RECOVERY_ADD_REQUEST/);
 assert.doesNotMatch(content, /EYH_WL_SAFE_REMOVE_REQUEST/);
 
@@ -54,6 +58,8 @@ const startupRemove = recovery.lastIndexOf('chrome.permissions.remove(HISTORY_PE
 const startupEnable = recovery.lastIndexOf("$('#scan').disabled = false");
 assert.ok(startupDisable >= 0 && startupRemove > startupDisable && startupEnable > startupRemove,
   'recovery page must finish stale history-permission cleanup before enabling a new scan');
+assert.match(recovery, /snapshot\.countMismatch/);
+assert.match(recovery, /snapshot\.warning/);
 assert.match(recovery, /resetResults\(\);/);
 assert.match(recovery, /list=WL/);
 assert.match(recovery, /type: 'EYH_RECOVERY_GET_WL_SNAPSHOT'/);
