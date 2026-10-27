@@ -33,7 +33,7 @@ public final class EternalHistorySettings {
     public static final IntegerSetting HIDE_MIN_PROGRESS =
             new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));
 
-    /** Rich common/default profile. Page-specific profiles override these values. */
+    /** Rich common/default profile. Page-specific profiles remain stored but are runtime-dormant. */
     public static final BooleanSetting DEFAULT_DIM_ENABLED =
             new BooleanSetting("morphe_eternal_history_default_dim_enabled", FALSE, false, parent(ENABLED));
     public static final BooleanSetting DEFAULT_HIDE_ENABLED =
@@ -52,14 +52,11 @@ public final class EternalHistorySettings {
             new IntegerSetting("morphe_eternal_history_thumbnail_opacity", 65, false, parent(ENABLED));
     public static final BooleanSetting THUMBNAIL_GRAYSCALE =
             new BooleanSetting("morphe_eternal_history_thumbnail_grayscale", FALSE, false, parent(ENABLED));
-    /**
-     * False: dim only the thumbnail. True: dim the whole card so channel avatar, title and metadata
-     * inherit the exact same opacity/grayscale as the thumbnail.
-     */
+    /** False: dim only the thumbnail. True: dim the whole card and its metadata. */
     public static final BooleanSetting DIM_CARD_INFO =
             new BooleanSetting("morphe_eternal_history_dim_card_info", FALSE, false, parent(ENABLED));
 
-    /** Destructive Watch Later automation is opt-in. Unknown progress is never eligible. */
+    /** Destructive Watch Later automation remains safety-locked elsewhere. */
     public static final BooleanSetting WATCH_LATER_AUTO_CLEANUP =
             new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE, false, parent(ENABLED));
     public static final IntegerSetting WATCH_LATER_CLEANUP_MIN_PROGRESS =
@@ -92,7 +89,15 @@ public final class EternalHistorySettings {
         return clamp(DEFAULT_HIDE_THRESHOLD.get(), 0, 100);
     }
 
-    public static boolean isFeedVisualEnabled() { return EternalSurfaceSettings.anyVisualEnabled(); }
+    /**
+     * v1.10.5 deliberately ignores stored per-surface profiles at runtime while the navigation
+     * regression is rolled back. The values are preserved in SharedPreferences for a later safe
+     * reintroduction; they must not keep presentation/cache work active in this release.
+     */
+    public static boolean isFeedVisualEnabled() {
+        return EternalSurfaceSettings.defaultProfile(false).visualEnabled();
+    }
+
     /** Legacy helpers retained for migration and old call sites. */
     public static boolean isDimMode() { return "dim".equals(feedMode()); }
     public static boolean isHideMode() { return "hide".equals(feedMode()); }
