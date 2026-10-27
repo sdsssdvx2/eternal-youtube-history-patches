@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import './watch-later-recovery-selftest.mjs';
+import './watch-later-recovery-static-selftest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
