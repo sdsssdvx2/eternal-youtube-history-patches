@@ -17,6 +17,7 @@ const safeMain = text('watch-later-safe-main.js');
 const safeCoordinator = text('watch-later-safe.js');
 const bridge = text('page-bridge.js');
 const core = text('watch-later-core.js');
+const recoveryContent = text('watch-later-recovery-content.js');
 const options = text('options.js');
 const optionsHtml = text('options.html');
 const maintenance = text('maintenance.js');
@@ -52,7 +53,7 @@ assert.doesNotMatch(stability, /eyh-surface-watched/);
 assert.doesNotMatch(stability, /eyh-surface-hidden/);
 assert.match(stability, /content\.js is the sole card renderer/);
 
-// Restore the familiar quick buttons, remove the broken gear, and keep Shorts completely untouched.
+// Restore the familiar quick buttons, remove the broken gear, and hide the masthead on Shorts.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
@@ -62,7 +63,11 @@ assert.match(stability, /watchedSurfaceProfiles: profiles/);
 assert.match(stability, /root\.querySelector\('#eyh-surface-settings'\)\?\.remove\(\)/);
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
 assert.match(stability, /root\.style\.display = shorts \? 'none' : ''/);
-assert.match(stability, /watchedDisplayMode: 'none', watchedMinProgressPct: 0/);
+const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \}/)?.[1] || '';
+assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)|watchedDisplayMode|watchedMinProgressPct/,
+  'Shorts must hide UI without mutating renderer/default storage');
+assert.match(stability, /watchedSurfaceDefaultProfile: defaults/,
+  'direct stable-line upgrades must snapshot the legacy default before page overrides');
 
 // Legacy auto cleanup must be dormant both at preference level and at the MAIN-world mutation edge.
 assert.match(content, /watchLaterAutoCleanupEnabled = false/);
@@ -104,7 +109,14 @@ assert.ok(freshResolve >= 0 && exactCompare > freshResolve && destructiveAction 
 assert.match(safeMain, /ACTION_ADD_VIDEO/);
 assert.match(safeMain, /already_present/);
 
-// Existing history/diagnostic and recovery infrastructure stays intact.
+// Recovery remains ADD-only and now requires exact membership completeness after modern renderer parsing.
+assert.match(core, /'lockupViewModel'/);
+assert.match(core, /collectItemIds/);
+assert.match(recoveryContent, /declared !== entries\.length/);
+assert.match(recoveryContent, /unparsedCount: 0/);
+assert.doesNotMatch(recoveryContent, /declared < entries\.length/);
+
+// Existing history/diagnostic infrastructure stays intact.
 assert.match(content, /GET_PAGE_DIAGNOSTICS/);
 assert.match(maintenance, /EYH_REQUEST_HISTORY/);
 assert.match(maintenance, /document\.visibilityState !== 'visible'/);
@@ -119,6 +131,7 @@ for (const id of [
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
 ]) assert.ok(optionsHtml.includes(`id="${id}"`), `missing default profile control ${id}`);
 assert.match(options, /watchedSurfaceDefaultProfile: defaultProfile/);
+assert.match(options, /watchedDisplayMode: presentation\.mode/);
 assert.match(stability, /watchedSurfaceDefaultProfile/);
 assert.match(stability, /effectivePresentation/);
 
