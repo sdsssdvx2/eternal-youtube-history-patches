@@ -8,10 +8,10 @@ import './watch-later-recovery-static-selftest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const surface = fs.readFileSync(path.join(src, 'surface-profiles.js'), 'utf8');
-const hotfix = fs.readFileSync(path.join(src, 'pc-ui-hotfix.js'), 'utf8');
 const content = fs.readFileSync(path.join(src, 'content.js'), 'utf8');
 const css = fs.readFileSync(path.join(src, 'content.css'), 'utf8');
 const options = fs.readFileSync(path.join(src, 'options.js'), 'utf8');
+const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 
 // v0.10.0 regression: two scanners toggled the exact same presentation classes.
 assert.match(content, /classList\.toggle\('eyh-watched'/);
@@ -23,32 +23,35 @@ assert.match(surface, /classList\.toggle\('eyh-surface-hidden'/);
 assert.match(css, /\.eyh-surface-watched/);
 assert.match(css, /\.eyh-surface-hidden/);
 
+// v0.10.6 regression: pc-ui-hotfix and surface-profiles repeatedly fought over hidden/active state.
+const isolated = manifest.content_scripts.find(x => x.world === 'ISOLATED');
+assert.ok(isolated, 'isolated content-script list missing');
+assert.ok(!isolated.js.includes('pc-ui-hotfix.js'), 'competing pc-ui-hotfix must not load');
+assert.match(surface, /function bindQuickButton\(button\)/);
+assert.match(surface, /button\.hidden = false/);
+assert.match(surface, /event\.stopImmediatePropagation\(\)/);
+assert.match(surface, /applyQuickMode\(button\.dataset\.eyhMode\)/);
+assert.match(surface, /watchedSurfaceProfiles: profiles/);
+
 // A late async response from a previous YouTube SPA surface must not repaint the new surface.
 assert.match(surface, /const generation = \+\+scanGeneration/);
 assert.match(surface, /generation !== scanGeneration \|\| key !== surfaceKey\(\)/);
 
-// Keep redundant brand/page text out of the masthead, but never remove the proven quick controls.
+// Keep redundant brand text out of the masthead; quick controls and gear share one owner.
 assert.match(surface, /button\.textContent = '⚙'/);
 assert.match(surface, /brand\.hidden = true/);
-assert.match(hotfix, /querySelectorAll\('button\[data-eyh-mode\]'\)/);
-assert.match(hotfix, /button\.hidden = false/);
-assert.match(hotfix, /applyQuickMode\(mode\)/);
-assert.match(hotfix, /dimEnabled: mode === 'dim'/);
-assert.match(hotfix, /hideEnabled: mode === 'hide'/);
+assert.match(surface, /showReloadNotice\(\)/);
+assert.match(surface, /openPanel\(\)/);
 
-// An old tab whose extension context was invalidated must explain itself instead of silently eating
-// the gear click. A single reload is sufficient; extension removal/re-registration is never needed.
-assert.match(hotfix, /EXTENSION_CONTEXT_INVALIDATED/);
-assert.match(hotfix, /showReloadNotice\(\)/);
-assert.match(hotfix, /이 탭만 한 번 새로고침/);
+// Eternal's own header/panel mutations must not feed back into another whole-page scan.
+assert.match(surface, /#eyh-header-controls, #eyh-surface-panel/);
+assert.match(surface, /function scheduleScan\(delay = 140\)/);
 
-// Shorts is a full-screen player, not a recommendation-card page. It must carry neither profile
-// rendering nor any Eternal masthead controls; leaving Shorts must still remount normal controls.
+// Shorts is a full-screen player, not a recommendation-card page. It carries no Eternal controls.
 assert.match(surface, /if \(key === 'shorts'\) \{\s*clearAllManaged\(\)/s);
-assert.match(surface, /if \(key === 'shorts'\) \{\s*button\?\.remove\(\)/s);
-assert.match(surface, /const key = surfaceKey\(\);\s*if \(key === 'shorts'\) return;/s);
-assert.match(hotfix, /if \(key === 'shorts'\)[\s\S]*root\.style\.display = 'none'/);
-assert.match(hotfix, /root\.style\.removeProperty\('display'\)/);
+assert.match(surface, /if \(key === 'shorts'\) \{\s*root\.style\.display = 'none'/s);
+assert.match(surface, /button\?\.remove\(\)/);
+assert.match(surface, /root\.style\.removeProperty\('display'\)/);
 
 // Common defaults and per-page overrides have identical dim/hide threshold expressiveness.
 for (const token of [
