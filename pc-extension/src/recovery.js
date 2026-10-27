@@ -312,7 +312,12 @@ $('#clearSelection').addEventListener('click', () => {
 });
 $('#restore').addEventListener('click', () => restoreSelected());
 
+resetResults();
+$('#scan').disabled = true;
+setStatus('이전 복구 세션의 잔여 history 권한이 없는지 확인 중…');
 // If a previous recovery page/browser was killed during the short scan window, do not retain the
 // optional browser-history privilege across sessions. The user must explicitly grant it again.
-chrome.permissions.remove(HISTORY_PERMISSION).catch(() => false);
-resetResults();
+chrome.permissions.remove(HISTORY_PERMISSION).catch(() => false).finally(() => {
+  $('#scan').disabled = false;
+  setStatus('아직 스캔하지 않았습니다.');
+});
