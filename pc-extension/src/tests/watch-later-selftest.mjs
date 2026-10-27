@@ -45,6 +45,53 @@ assert.deepEqual(C.extractPlaylistEntries(membership), [
   { videoId: 'abcdefghijk', setVideoId: 'PANEL_SET_001' }
 ]);
 
+// Current YouTube Watch Later browse payloads can use lockup/view-model rows where videoId is near
+// the item root and setVideoId is buried in a menu service endpoint. Keep parity with the Android
+// conservative parser instead of silently under-counting these rows.
+const modern = {
+  contents: [
+    {
+      lockupViewModel: {
+        contentId: 'modernabc12',
+        metadata: { lockupMetadataViewModel: { title: { content: 'Modern row' } } },
+        menu: {
+          menuRenderer: {
+            items: [{ menuServiceItemRenderer: { serviceEndpoint: { playlistEditEndpoint: { actions: [
+              { setVideoId: 'LOCKUP_SET_001' }
+            ] } } } }]
+          }
+        }
+      }
+    },
+    {
+      playlistVideoViewModel: {
+        videoId: 'modernxyz34',
+        rendererContext: { commandContext: { onTap: { innertubeCommand: { playlistEditEndpoint: {
+          actions: [{ playlistSetVideoId: 'VIEWMODEL_SET_002' }]
+        } } } } }
+      }
+    },
+    {
+      // Ambiguous item: two distinct video ids share one subtree. Fail closed and do not guess.
+      videoLockupViewModel: {
+        videoId: 'ambiguous01',
+        related: { videoId: 'ambiguous02' },
+        menu: { serviceEndpoint: { setVideoId: 'AMBIG_SET_003' } }
+      }
+    }
+  ],
+  continuationContents: {
+    playlistVideoListContinuation: {
+      continuations: [{ nextContinuationData: { continuation: 'CONTINUATION_TOKEN_2' } }]
+    }
+  }
+};
+assert.deepEqual(C.extractPlaylistEntries(modern), [
+  { videoId: 'modernabc12', setVideoId: 'LOCKUP_SET_001' },
+  { videoId: 'modernxyz34', setVideoId: 'VIEWMODEL_SET_002' }
+]);
+assert.deepEqual(C.extractContinuationTokens(modern), ['CONTINUATION_TOKEN_2']);
+
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: 61.2, lmnopqrstuv: 59.9 }, 60), [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid', progressPct: 61.2 }]);
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: 60 }, 60), [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid', progressPct: 60 }]);
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: null }, 60), []);
@@ -83,4 +130,4 @@ assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexO
 assert.ok(!isolated.js.includes('watch-later-safe.js'), 'destructive safe-cleanup UI is intentionally dormant in stability release');
 assert.equal(manifest.version, '0.10.7');
 
-console.log('PASS watch-later-core + fail-closed safety self-test');
+console.log('PASS watch-later-core + modern lockup + fail-closed safety self-test');
