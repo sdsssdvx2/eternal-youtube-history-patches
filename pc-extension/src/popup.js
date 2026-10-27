@@ -1,5 +1,14 @@
 const $ = s => document.querySelector(s);
 
+function formatSweep(sweep) {
+  if (!sweep || typeof sweep !== 'object' || !Number(sweep.at)) {
+    return 'Watch Later 안전 잠금: 켜짐 · 기록된 PC 자동 정리 실행 없음';
+  }
+  const when = new Date(Number(sweep.at)).toLocaleString();
+  if (sweep.error) return `Watch Later 안전 잠금: 켜짐 · 최근 PC 자동 정리 시도 ${when} · 오류: ${String(sweep.error)}`;
+  return `Watch Later 안전 잠금: 켜짐 · 최근 PC 자동 정리 ${when} · 기준 ${Number(sweep.threshold || 0)}% · 확인 ${Number(sweep.scanned || 0)} · 대상 ${Number(sweep.qualified || 0)} · 삭제 ${Number(sweep.removed || 0)} · 실패 ${Number(sweep.failures || 0)}`;
+}
+
 async function refresh() {
   const s = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
   const serverCount = Number(s?.server?.count);
@@ -10,10 +19,19 @@ async function refresh() {
   const ec = Number(s?.server?.eventCount ?? s?.eventCount ?? 0);
   $('#eventCount').textContent = ec.toLocaleString();
   $('#eventStat').hidden = ec <= 0;
-  const cfg = await chrome.storage.local.get({ watchedDisplayMode: 'dim', watchedMinProgressPct: 0, watchedThumbnailOpacityPct: 65, watchedThumbnailGrayscale: false, watchedLinkCardInfo: false });
+  const cfg = await chrome.storage.local.get({
+    watchedDisplayMode: 'dim',
+    watchedMinProgressPct: 0,
+    watchedThumbnailOpacityPct: 65,
+    watchedThumbnailGrayscale: false,
+    watchedLinkCardInfo: false,
+    watchLaterAutoCleanupEnabled: false,
+    eyhLastAutoWatchLaterSweep: null
+  });
   const modeLabel = cfg.watchedDisplayMode === 'hide' ? '숨기기' : cfg.watchedDisplayMode === 'none' ? '표시 변경 안 함' : '옅게 표시';
   const styleLabel = cfg.watchedDisplayMode === 'dim' ? ` · 불투명도 ${Math.max(10, Math.min(100, Number(cfg.watchedThumbnailOpacityPct) || 65))}% · 흑백 ${cfg.watchedThumbnailGrayscale ? '켬' : '끔'} · 영상 정보 연동 ${cfg.watchedLinkCardInfo ? '켬' : '끔'}` : '';
   $('#displayRule').textContent = `시청 영상: ${modeLabel}${styleLabel} · 최소 진행률 ${Number(cfg.watchedMinProgressPct || 0)}%`;
+  $('#watchLaterSafety').textContent = `${formatSweep(cfg.eyhLastAutoWatchLaterSweep)} · 현재 자동 설정 ${cfg.watchLaterAutoCleanupEnabled ? '켜짐(안전 잠금으로 실행 차단)' : '꺼짐'}`;
 }
 
 async function sync(maxPages, label) {
