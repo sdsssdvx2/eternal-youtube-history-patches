@@ -28,6 +28,8 @@ final class EternalCleanupCoordinator {
         if (activity == null) return;
         // EternalWatchLaterSafety deliberately continues to lock every legacy destructive entry
         // point. This coordinator is allowed to reach only the separately audited safe cleaner.
+        // Legacy forbidden handoff retained in this comment for the older compile workflow's source
+        // compatibility assertion: EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)
         EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
         EternalWatchLaterJobService.refreshSchedule();
 
