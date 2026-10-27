@@ -1,3 +1,9 @@
+## [1.10.2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.1...v1.10.2) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* stabilize tab navigation and disable Shorts page controls ([#16](https://github.com/sdsssdvx2/eternal-youtube-history-patches/issues/16)) ([192d8f2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/192d8f252d23f991c0821c7efb80f6d4868245bb))
+
 ## [1.10.1](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.0...v1.10.1) (2026-10-26)
 
 ### 🐛 Bug Fixes
