@@ -33,13 +33,13 @@ final class EternalCleanupCoordinator {
         EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
         EternalWatchLaterJobService.refreshSchedule();
 
-        if (EternalWatchLaterSafeCleaner.hasUndoableTransaction()) {
+        if (EternalWatchLaterSafeUndo.hasUndoableTransaction()) {
             new AlertDialog.Builder(activity)
                     .setTitle("Watch Later 안전 정리")
-                    .setMessage("마지막 안전 정리 journal이 남아 있습니다. 새 정리를 시작하거나 마지막 정리의 Watch Later 멤버십을 되돌릴 수 있습니다.")
+                    .setMessage("마지막 안전 정리 journal이 남아 있습니다. 새 정리를 시작하거나 우리 정리 코드가 제거했을 가능성이 있는 항목만 되돌릴 수 있습니다.")
                     .setNegativeButton(android.R.string.cancel, null)
                     .setNeutralButton("마지막 정리 되돌리기", (dialog, which) ->
-                            EternalWatchLaterSafeCleaner.undoLastCleanup(activity))
+                            EternalWatchLaterSafeUndo.undoLastCleanup(activity))
                     .setPositiveButton("새 안전 정리", (dialog, which) -> beginSafeCleanup(activity))
                     .show();
             return;
@@ -73,7 +73,8 @@ final class EternalCleanupCoordinator {
     static String diagnosticSummary() {
         return "중앙 정리 동기화=" + (running.get() ? "진행 중" : lastSyncStatus)
                 + "\n기존 삭제 경로=" + (EternalWatchLaterSafety.isLocked() ? "안전 잠금" : "열림")
-                + "\n" + EternalWatchLaterSafeCleaner.diagnosticSummary();
+                + "\n" + EternalWatchLaterSafeCleaner.diagnosticSummary()
+                + "\n" + EternalWatchLaterSafeUndo.diagnosticSummary();
     }
 
     private EternalCleanupCoordinator() { }
