@@ -3,6 +3,8 @@
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
   let refreshQueued = false;
+  let observedHeader = null;
+  let headerObserver = null;
 
   function extensionAlive() {
     try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
@@ -149,24 +151,32 @@
     }, true);
   }
 
+  function observeHeader(root) {
+    if (observedHeader === root) return;
+    headerObserver?.disconnect();
+    observedHeader = root;
+    headerObserver = new MutationObserver(scheduleDecorate);
+    headerObserver.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+  }
+
   function decorate() {
     refreshQueued = false;
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return;
+    observeHeader(root);
 
     const key = surfaceKey();
     if (key === 'shorts') {
-      root.style.display = 'none';
+      if (root.style.display !== 'none') root.style.display = 'none';
       return;
     }
-    root.style.removeProperty('display');
+    if (root.style.display === 'none') root.style.removeProperty('display');
 
     const brand = root.querySelector('.eyh-header-brand');
-    if (brand) brand.hidden = true;
+    if (brand && !brand.hidden) brand.hidden = true;
 
     for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
-      button.hidden = false;
-      button.removeAttribute('hidden');
+      if (button.hidden) button.hidden = false;
       bindQuickButton(button);
     }
 
@@ -175,7 +185,7 @@
     for (const id of ['#eyh-watch-later-auto', '#eyh-watch-later-cleanup']) {
       const button = root.querySelector(id);
       if (!button) continue;
-      button.hidden = true;
+      if (!button.hidden) button.hidden = true;
       button.disabled = true;
       button.title = '안전 복구 기능 추가 전까지 Watch Later 정리는 잠겨 있습니다.';
     }
@@ -201,8 +211,10 @@
     });
   }
 
-  const observer = new MutationObserver(scheduleDecorate);
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+  const pageObserver = new MutationObserver(mutations => {
+    if (mutations.some(m => m.type === 'childList' && m.addedNodes.length)) scheduleDecorate();
+  });
+  pageObserver.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener('yt-navigate-finish', scheduleDecorate, true);
   window.addEventListener('popstate', scheduleDecorate, true);
   setTimeout(scheduleDecorate, 0);
