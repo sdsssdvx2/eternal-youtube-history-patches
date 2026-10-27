@@ -30,6 +30,9 @@ public final class EternalHistoryAddOn {
             EternalHistoryClient.onVideoTimeChanged(videoTimeMs);
             EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
         });
+        // Morphe already gives the newly selected navigation button to this listener. Eternal only
+        // records that value. It must not query NavigationBar/PlayerType back from inside YouTube's
+        // tab-transition callback, because those host objects are temporarily being rebuilt there.
         NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
