@@ -81,12 +81,21 @@
     const entries = Array.isArray(listed.entries) ? listed.entries : [];
     const declared = declaredWatchLaterCount();
     if (declared == null) throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없습니다.');
-    if (declared !== entries.length) {
-      throw new Error(`YouTube 표시 개수 ${declared}개와 안전 파서 ${entries.length}개가 달라 복구 비교를 중단합니다.`);
-    }
+
+    // Count equality remains mandatory for destructive cleanup, but recovery is ADD-only. YouTube's
+    // displayed count can include unavailable/private entries that do not expose a usable
+    // videoId+setVideoId tuple through browse. Treat that gap as a warning for recovery evidence
+    // instead of blocking the entire comparison; safeAdd still re-checks membership per video.
+    const countMismatch = declared !== entries.length;
     return {
       entries: entries.map(entry => ({ videoId: entry.videoId, setVideoId: entry.setVideoId })),
       declaredCount: declared,
+      parsedCount: entries.length,
+      countMismatch,
+      countGap: declared - entries.length,
+      warning: countMismatch
+        ? `YouTube 표시 ${declared}개 중 안전 파서가 식별 가능한 ${entries.length}개만 현재 멤버십 비교에 사용합니다. 삭제 작업은 하지 않습니다.`
+        : null,
       pages: Number(listed.pages || 0)
     };
   }
