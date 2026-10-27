@@ -1,6 +1,7 @@
 package app.morphe.extension.youtube.patches.eternalhistory;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.os.Process;
 
 import java.util.concurrent.ExecutorService;
@@ -29,6 +30,22 @@ final class EternalCleanupCoordinator {
         // point. This coordinator is allowed to reach only the separately audited safe cleaner.
         EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
         EternalWatchLaterJobService.refreshSchedule();
+
+        if (EternalWatchLaterSafeCleaner.hasUndoableTransaction()) {
+            new AlertDialog.Builder(activity)
+                    .setTitle("Watch Later 안전 정리")
+                    .setMessage("마지막 안전 정리 journal이 남아 있습니다. 새 정리를 시작하거나 마지막 정리의 Watch Later 멤버십을 되돌릴 수 있습니다.")
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setNeutralButton("마지막 정리 되돌리기", (dialog, which) ->
+                            EternalWatchLaterSafeCleaner.undoLastCleanup(activity))
+                    .setPositiveButton("새 안전 정리", (dialog, which) -> beginSafeCleanup(activity))
+                    .show();
+            return;
+        }
+        beginSafeCleanup(activity);
+    }
+
+    private static void beginSafeCleanup(Activity activity) {
         if (!running.compareAndSet(false, true)) {
             Utils.showToastShort("Eternal 중앙 기록 동기화가 이미 진행 중입니다.");
             return;
