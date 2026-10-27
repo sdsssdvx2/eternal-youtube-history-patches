@@ -28,7 +28,8 @@ const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
 const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'legacy destructive safety boundary must load first in MAIN world');
-assert.ok(mainWorld.js.indexOf('watch-later-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'), 'Watch Later core must precede safe write bridge');
+assert.ok(mainWorld.js.indexOf('watch-later-core.js') < mainWorld.js.indexOf('watch-later-safe-core.js'), 'Watch Later parser must precede safe core in MAIN world');
+assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'), 'safe core must precede safe write bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'), 'safe bridge must be isolated from the legacy page bridge');
 assert.equal(isolatedWorld.js[0], 'watch-later-core.js', 'core must load first in ISOLATED world');
 assert.ok(isolatedWorld.js.indexOf('watch-later-safe-core.js') < isolatedWorld.js.indexOf('watch-later-safe.js'), 'safe transaction core must precede coordinator');
@@ -68,24 +69,49 @@ assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
 assert.match(hotfix, /button\.disabled = true/);
 assert.match(safeCoordinator, /watchLaterAutoCleanupEnabled: false/);
 
-// Transactional v0.10.4 path: complete snapshot, durable read-back verified journal, then one-item
-// writes only. No destructive request may be issued before persistVerified(tx).
+// v0.10.5 must not inherit the legacy list-completeness ambiguity. The destructive coordinator uses
+// a separate strict server-only list protocol, and the MAIN-world enumerator rejects loops, multiple
+// continuation candidates, zero-add continuation pages, and the page cap through paginationDecision.
+assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_LIST_REQUEST'/);
+assert.match(safeMain, /strictListWatchLater/);
+assert.match(safeMain, /SAFE\.paginationDecision/);
+assert.match(safeMain, /terminalReason: decision\.terminalReason/);
+assert.match(safeCore, /continuation이 반복/);
+assert.match(safeCore, /continuation 후보가 둘 이상/);
+assert.match(safeCore, /continuation은 남았지만 새 항목이 없어/);
+assert.match(safeCore, /안전 페이지 한도/);
+assert.match(safeCoordinator, /YouTube 화면의 Watch Later 전체 개수를 확인할 수 없어/);
+assert.match(safeCoordinator, /listed\.terminalReason !== 'no-continuation'/);
+
+// Transactional path: persist the full snapshot, re-enumerate the entire playlist after user
+// confirmation, require exact membership equality, and only then enter the destructive phase.
 assert.match(safeCore, /MAX_SNAPSHOT_ENTRIES = 5000/);
+assert.match(safeCore, /sameSnapshotMembership/);
 assert.match(safeCore, /if \(hasMore\) throw new Error/);
 assert.match(safeCore, /status: 'prepared'/);
-assert.match(safeCoordinator, /YouTube 표시 개수 .*안전 파서/);
-assert.match(safeCoordinator, /const recomputed = await sha256Hex\(CORE\.canonicalForDigest\(check\)\)/);
-const persistBeforeDelete = safeCoordinator.indexOf('let durable = await persistVerified(tx)');
-const firstSafeRemove = safeCoordinator.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST'");
-assert.ok(persistBeforeDelete >= 0 && firstSafeRemove > persistBeforeDelete, 'journal must be durably verified before first delete');
-assert.match(safeCoordinator, /The next delete is forbidden until the result of this one is durably re-read and verified/);
-assert.match(safeCoordinator, /durable = await persistVerified\(durable\)/);
-assert.match(safeCoordinator, /EYH_WL_SAFE_ADD_REQUEST/);
-assert.match(safeCoordinator, /마지막 정리 되돌리기/);
+assert.match(safeCoordinator, /const recomputed = await sha256Hex\(CORE\.canonicalForDigest\(tx\)\)/);
+const persistBeforeSecondSnapshot = safeCoordinator.indexOf('let durable = await persistVerified(tx)');
+const secondSnapshot = safeCoordinator.indexOf('revalidatePreparedSnapshot(durable)');
+const enteringRemoving = safeCoordinator.indexOf("durable.state = 'removing'");
+assert.ok(persistBeforeSecondSnapshot >= 0 && secondSnapshot > persistBeforeSecondSnapshot && enteringRemoving > secondSnapshot,
+  'durable journal and second full snapshot verification must precede removing state');
+assert.match(safeCoordinator, /CORE\.sameSnapshotMembership\(tx\.snapshot, current\)/);
 
-// MAIN-world safe remove must resolve current membership immediately before delete and require the
-// fresh tuple to equal the snapshot tuple. Restore must use YouTube's idempotent add primitive and
-// verify membership afterwards.
+// Crash-safety invariant: each individual candidate is durably marked attempting before the safe
+// remove request. A non-removed result halts the remaining deletion sequence immediately.
+const firstAttempting = safeCoordinator.indexOf("candidate.status = 'attempting'");
+const persistAttempting = safeCoordinator.indexOf('durable = await persistVerified(durable)', firstAttempting);
+const firstSafeRemove = safeCoordinator.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST'");
+assert.ok(firstAttempting >= 0 && persistAttempting > firstAttempting && firstSafeRemove > persistAttempting,
+  'attempting journal state must be durably verified before every destructive request');
+assert.match(safeCoordinator, /The next delete is forbidden until the result of this one is durably re-read and verified/);
+assert.match(safeCoordinator, /if \(candidate\.status !== 'removed'\)/);
+assert.match(safeCoordinator, /haltReason = candidate\.status/);
+
+// MAIN-world safe remove still resolves current membership immediately before delete and requires
+// fresh tuple equality. Restore stays idempotent. Schema-2 undo narrows recovery to removed or
+// uncertain attempts, while schema-1 remains broad for v0.10.4 crash compatibility.
 const freshResolve = safeMain.indexOf('const fresh = await resolveEntry(id)');
 const exactCompare = safeMain.indexOf('fresh.setVideoId !== expected');
 const destructiveAction = safeMain.indexOf("action: 'ACTION_REMOVE_VIDEO'");
@@ -94,8 +120,13 @@ assert.ok(freshResolve >= 0 && exactCompare > freshResolve && destructiveAction 
 assert.match(safeMain, /ACTION_ADD_VIDEO/);
 assert.match(safeMain, /addedVideoId: id/);
 assert.match(safeMain, /already_present/);
-assert.match(safeMain, /journalDigest/);
+assert.match(safeMain, /operationId\.startsWith\('pcwl:'\)/);
 assert.match(safeMain, /EYH_WL_SAFE_RESULT/);
+assert.match(safeCore, /UNDO_UNCERTAIN_STATES/);
+assert.match(safeCore, /Number\(tx\?\.schema \|\| 0\) < 2/);
+assert.match(safeCoordinator, /candidate\.undoStatus = 'not_needed'/);
+assert.match(safeCoordinator, /candidate\.undoStatus = 'attempting'/);
+assert.match(safeCoordinator, /마지막 정리 되돌리기/);
 
 // Users must be able to tell whether PC background cleanup previously ran without opening devtools.
 assert.match(popupHtml, /id="watchLaterSafety"/);
