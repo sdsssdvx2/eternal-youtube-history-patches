@@ -107,6 +107,7 @@ jobs:
           tracker="$base/EternalSurfaceTracker.java"
           filter="$base/EternalWatchedFilter.java"
           toolbar="$base/EternalHistoryToolbar.java"
+          runtime_addon="$base/EternalHistoryAddOn.java"
           coordinator="$base/EternalCleanupCoordinator.java"
           safe_cleaner="$base/EternalWatchLaterSafeCleaner.java"
           safe_undo="$base/EternalWatchLaterSafeUndo.java"
@@ -125,7 +126,6 @@ jobs:
           grep -F 'PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER)' "$cleaner"
           grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
           grep -F 'resolveEntry(entry.videoId) == null' "$cleaner"
-          grep -F 'EternalCleanupCoordinator.previewAndConfirm(activity)' "$toolbar"
           grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$coordinator"
           grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
           grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
@@ -173,7 +173,7 @@ jobs:
           grep -F 'CURRENT_PARSER_STATE_VERSION = 2' "$migration"
           grep -F '.remove(PREF_LAST_SUCCESS)' "$migration"
 
-          # Common defaults and per-surface overrides retain the same expressive power.
+          # Common defaults and per-surface overrides remain stored even while on-page overlay is dormant.
           grep -F 'DEFAULT_DIM_ENABLED' "$settings"
           grep -F 'DEFAULT_HIDE_ENABLED' "$settings"
           grep -F 'DEFAULT_LINKED_THRESHOLDS' "$settings"
@@ -193,33 +193,33 @@ jobs:
           grep -F 'profile.hideEnabled' "$filter"
           grep -F 'profile.dimEnabled' "$filter"
           grep -F 'isPlaylistLikeSurface(surface)' "$filter"
-          grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
 
-          # Real-device tab transitions are state-only and Shorts keeps no Eternal overlay/filter.
-          grep -F 'lastUiSurface' "$tracker"
-          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
-          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
-          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
-          ! grep -F 'getSelectedNavigationButton()' "$tracker"
-          ! grep -F 'PlayerType.getCurrent()' "$tracker"
-          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
-          grep -F 'root.addView(control' "$toolbar"
-          grep -F 'scheduleControlMount(220L)' "$toolbar"
-          grep -F 'schedulePresentationRefresh()' "$toolbar"
-          grep -F 'notifyDataSetChanged' "$toolbar"
-          grep -F 'Surface.SHORTS' "$toolbar"
+          # Stability baseline: zero Eternal UI work is attached to YouTube navigation/view rebuilds.
+          grep -F 'Stability baseline: no Eternal callback is attached' "$runtime_addon"
+          ! grep -F 'NavigationBar.addOnNavigationButtonChangedListener' "$runtime_addon"
+          ! grep -F 'EternalHistoryToolbar.onSurfaceChanged()' "$runtime_addon"
+          ! grep -F 'EternalHistoryToolbar.ensureControlSoon()' "$runtime_addon"
+          grep -F 'no-op by design' "$toolbar"
+          ! grep -F 'root.addView' "$toolbar"
+          ! grep -F 'ViewGroup' "$toolbar"
+          ! grep -F 'scheduleControlMount' "$toolbar"
+          ! grep -F 'notifyDataSetChanged' "$toolbar"
+          grep -F 'Component classification is deliberately pure' "$tracker"
+          ! grep -F 'publishSurface' "$tracker"
+          ! grep -F 'onSurfaceChanged' "$tracker"
+          ! grep -F 'NavigationBar' "$tracker"
+          ! grep -F 'PlayerType' "$tracker"
+          grep -F 'looksLikeShorts(lower)' "$tracker"
           grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
-          ! grep -F 'findActionMenu' "$toolbar"
-          ! grep -F 'host.addView(control' "$toolbar"
 
-          # Exact subpage classification and final host manifest JobService registration stay locked.
+          # Exact subpage browse observation and final host manifest JobService registration stay locked.
           grep -F 'EternalBrowseIdFingerprint' "$addon"
           grep -F 'onBrowseId(Ljava/lang/String;)V' "$addon"
           grep -F 'declareWatchLaterJobService()' "$addon"
           grep -F 'android.permission.BIND_JOB_SERVICE' "$addon"
           grep -F 'case "VLWL"' "$tracker"
           grep -F 'case "VLLL"' "$tracker"
-          echo 'PASS Android display + locked automation + manual transactional safety assertions'
+          echo 'PASS Android navigation-detached display + locked automation + manual transactional safety assertions'
 
   android-patch-smoke:
     needs: android-compile
