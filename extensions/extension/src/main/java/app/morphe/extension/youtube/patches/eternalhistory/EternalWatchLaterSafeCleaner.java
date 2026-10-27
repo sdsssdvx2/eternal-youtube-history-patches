@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -29,14 +29,18 @@ import app.morphe.extension.shared.requests.Requester;
 import app.morphe.extension.youtube.patches.utils.requests.PlaylistRoutes;
 
 /**
- * New manual-only Watch Later cleanup path. The legacy cleaner remains safety-locked.
+ * Manual-only fail-closed Watch Later cleanup. The legacy cleaner and all automatic deletion remain
+ * locked by EternalWatchLaterSafety.
  *
- * Safety invariants:
- * - two complete independent playlist reads must agree exactly;
- * - the complete membership + every candidate is durably journaled and read back before delete #1;
- * - each videoId is resolved again immediately before delete and fresh setVideoId must match;
- * - each result is durably journaled before the next delete;
- * - undo is idempotent ACTION_ADD_VIDEO and is journaled item-by-item.
+ * Invariants:
+ * 1. A strict full playlist snapshot is prepared before the confirmation dialog.
+ * 2. After the user confirms, that complete snapshot/journal is durably saved and read back.
+ * 3. The full playlist is independently enumerated again after confirmation and must match exactly.
+ * 4. Every candidate is re-resolved by videoId immediately before mutation.
+ * 5. "attempting" is durably stored before a delete request can be sent.
+ * 6. After that fsync/read-back, identity is resolved once more; mismatch means zero delete request.
+ * 7. The result is durably stored before another candidate may be touched.
+ * 8. The first ambiguity/failure stops the remaining deletes.
  */
 final class EternalWatchLaterSafeCleaner {
     private static final String WATCH_LATER = "WL";
@@ -59,31 +63,21 @@ final class EternalWatchLaterSafeCleaner {
             Utils.showToastShort("Watch Later 안전 정리가 이미 진행 중입니다.");
             return;
         }
-        Utils.showToastShort("Watch Later 전체 목록을 이중 검증합니다…");
+        Utils.showToastShort("Watch Later 전체 목록을 안전 검사합니다…");
         IO.execute(() -> {
             try {
                 ensureSignedIn();
-                ListResult first = listWatchLater(MAX_PAGES);
-                if (first.hasMore) throw new IllegalStateException("Watch Later 전체 목록을 끝까지 읽지 못해 삭제하지 않습니다.");
-                if (first.entries.isEmpty()) throw new IllegalStateException("Watch Later 항목이 0개로 파싱되어 삭제하지 않습니다.");
-                if (first.entries.size() > EternalWatchLaterTransactionStore.MAX_SNAPSHOT_ENTRIES) {
-                    throw new IllegalStateException("Watch Later 항목이 안전 한도를 초과해 삭제하지 않습니다.");
+                ListResult preview = listWatchLaterStrict(MAX_PAGES);
+                if (preview.entries.isEmpty()) {
+                    throw new IllegalStateException("Watch Later 항목이 0개로 파싱되어 빈 목록인지 확인할 수 없으므로 삭제하지 않습니다.");
                 }
-
-                sleepQuietly(300L);
-                ListResult second = listWatchLater(MAX_PAGES);
-                if (second.hasMore) throw new IllegalStateException("두 번째 Watch Later 검사가 완료되지 않아 삭제하지 않습니다.");
-                if (!sameMembership(first.entries, second.entries)) {
-                    throw new IllegalStateException("두 번 읽은 Watch Later 멤버십이 달라 목록이 안정되지 않았습니다. 삭제하지 않습니다.");
-                }
-
                 Map<String, Float> progress = EternalHistoryDb.get().loadProgressSnapshot();
                 int threshold = cleanupThreshold();
-                JSONArray snapshot = snapshotJson(second.entries);
-                JSONArray candidates = candidatesJson(second.entries, progress, threshold);
+                JSONArray snapshot = snapshotJson(preview.entries);
+                JSONArray candidates = candidatesJson(preview.entries, progress, threshold);
                 JSONObject tx = EternalWatchLaterTransactionStore.newTransaction(
-                        "androidwl:" + UUID.randomUUID(), threshold, second.pages, snapshot, candidates);
-                lastStatus = "안전 검사: 페이지 " + second.pages + ", " + second.entries.size()
+                        "androidwl:" + UUID.randomUUID(), threshold, preview.pages, snapshot, candidates);
+                lastStatus = "안전 미리보기: 페이지 " + preview.pages + ", " + preview.entries.size()
                         + "개 중 " + candidates.length() + "개 대상";
                 activity.runOnUiThread(() -> showConfirmation(activity, tx));
             } catch (Throwable t) {
@@ -115,7 +109,9 @@ final class EternalWatchLaterSafeCleaner {
         new AlertDialog.Builder(activity)
                 .setTitle("Watch Later 안전 정리")
                 .setMessage("Eternal 진행률 " + threshold + "% 이상인 영상 " + count + "개를 정리할까요?\n\n"
-                        + preview + "\n\n전체 목록과 대상 journal을 먼저 원자적으로 저장하고, 각 삭제 직전에 현재 식별자를 다시 확인합니다. 마지막 정리는 되돌릴 수 있습니다.")
+                        + preview
+                        + "\n\n확인 후 전체 Watch Later를 다시 읽어 첫 스냅샷과 정확히 같을 때만 시작합니다. "
+                        + "각 삭제는 journal 선저장과 식별자 재검증을 통과해야 하며, 중간 실패 시 즉시 멈춥니다.")
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> running.set(false))
                 .setOnCancelListener(dialog -> running.set(false))
                 .setPositiveButton("안전 정리", (dialog, which) -> IO.execute(() -> executeCleanup(activity, tx)))
@@ -123,147 +119,173 @@ final class EternalWatchLaterSafeCleaner {
     }
 
     private static void executeCleanup(Activity activity, JSONObject tx) {
+        JSONObject durable = null;
         try {
+            ensureSignedIn();
             EternalWatchLaterTransactionStore.archiveCurrentIfReplaceable();
-            JSONObject durable = EternalWatchLaterTransactionStore.saveVerified(tx);
-            durable.put("state", "removing");
+
+            // Full pre-delete evidence must survive a process death before any destructive request.
+            durable = EternalWatchLaterTransactionStore.saveVerified(tx);
+            JSONArray originalSnapshot = durable.optJSONArray("snapshot");
+            if (originalSnapshot == null || originalSnapshot.length() == 0) {
+                throw new IllegalStateException("저장된 Watch Later 스냅샷이 비어 있습니다.");
+            }
+
+            activity.runOnUiThread(() -> Utils.showToastShort("확인 후 Watch Later 전체 목록을 다시 검증합니다…"));
+            ListResult confirmed = listWatchLaterStrict(MAX_PAGES);
+            if (confirmed.entries.isEmpty()) {
+                throw new IllegalStateException("두 번째 전체 검사에서 0개가 파싱되어 삭제하지 않습니다.");
+            }
+            if (!sameMembership(originalSnapshot, confirmed.entries)) {
+                throw new IllegalStateException("확인창 이후 Watch Later 멤버십이 바뀌어 삭제하지 않습니다.");
+            }
+            durable.put("confirmedPages", confirmed.pages);
+            durable.put("verifiedAt", System.currentTimeMillis());
+            durable.put("state", "verified");
             durable = EternalWatchLaterTransactionStore.saveVerified(durable);
+            durable.put("state", "removing");
+            durable.put("removalStartedAt", System.currentTimeMillis());
+            durable = EternalWatchLaterTransactionStore.saveVerified(durable);
+
             JSONArray candidates = durable.optJSONArray("candidates");
             if (candidates == null) throw new IllegalStateException("안전 journal에 정리 대상이 없습니다.");
+            boolean stop = false;
 
-            for (int i = 0; i < candidates.length(); i++) {
-                JSONObject candidate = candidates.optJSONObject(i);
+            for (int i = 0; i < candidates.length() && !stop; i++) {
+                candidates = durable.optJSONArray("candidates");
+                JSONObject candidate = candidates == null ? null : candidates.optJSONObject(i);
                 if (candidate == null) continue;
+                if (!"prepared".equals(candidate.optString("status", "prepared"))) continue;
+
                 String videoId = candidate.optString("videoId", "");
                 String expectedSetVideoId = candidate.optString("setVideoId", "");
                 final int index = i + 1;
                 final int total = candidates.length();
-                activity.runOnUiThread(() -> Utils.showToastShort(index + "/" + total + " 삭제 직전 식별자 재검증…"));
+                activity.runOnUiThread(() -> Utils.showToastShort(index + "/" + total + " 삭제 직전 식별자 확인…"));
+
                 try {
-                    Entry fresh = resolveEntryStrict(videoId);
-                    if (fresh == null) {
-                        candidate.put("status", "missing");
-                    } else if (!expectedSetVideoId.equals(fresh.setVideoId)) {
-                        candidate.put("status", "identity_mismatch");
-                    } else if (removeFreshEntry(fresh)) {
+                    Entry firstFresh = resolveEntryStrict(videoId);
+                    if (firstFresh == null) {
+                        markNoRequest(candidate, "missing", "현재 Watch Later에서 항목을 찾지 못함");
+                        durable = persistResult(durable);
+                        stop = true;
+                        break;
+                    }
+                    if (!expectedSetVideoId.equals(firstFresh.setVideoId)) {
+                        markNoRequest(candidate, "identity_mismatch", "현재 setVideoId가 스냅샷과 다름");
+                        durable = persistResult(durable);
+                        stop = true;
+                        break;
+                    }
+
+                    // Critical crash boundary: no edit_playlist request is allowed before this state
+                    // has been fsynced and read back successfully.
+                    candidate.put("status", "attempting");
+                    candidate.put("attemptAt", System.currentTimeMillis());
+                    candidate.remove("error");
+                    EternalWatchLaterTransactionStore.recalcCounts(durable);
+                    durable = EternalWatchLaterTransactionStore.saveVerified(durable);
+
+                    candidates = durable.optJSONArray("candidates");
+                    candidate = candidates == null ? null : candidates.optJSONObject(i);
+                    if (candidate == null || !"attempting".equals(candidate.optString("status", ""))) {
+                        throw new IllegalStateException("삭제 직전 attempting journal 재확인에 실패했습니다.");
+                    }
+
+                    // Re-resolve after the durable write. This is the identity check immediately
+                    // adjacent to the destructive request.
+                    Entry finalFresh = resolveEntryStrict(videoId);
+                    if (finalFresh == null) {
+                        markNoRequest(candidate, "missing", "journal 저장 후 항목이 사라져 요청하지 않음");
+                        durable = persistResult(durable);
+                        stop = true;
+                        break;
+                    }
+                    if (!expectedSetVideoId.equals(finalFresh.setVideoId)) {
+                        markNoRequest(candidate, "identity_mismatch", "journal 저장 후 setVideoId가 바뀌어 요청하지 않음");
+                        durable = persistResult(durable);
+                        stop = true;
+                        break;
+                    }
+
+                    if (removeFreshEntry(finalFresh)) {
                         candidate.put("status", "removed");
+                        candidate.remove("error");
                     } else {
                         candidate.put("status", "failed");
-                        candidate.put("error", "서버가 제거를 확인하지 않음");
+                        candidate.put("error", "서버가 제거 완료를 확인하지 못함");
+                        stop = true;
                     }
                 } catch (Throwable t) {
-                    candidate.put("status", "failed");
+                    // If attempting was already persisted, failure is rollback-eligible because the
+                    // request outcome may be uncertain. If it was never persisted, no request could
+                    // have been sent by this implementation.
+                    String currentStatus = candidate.optString("status", "prepared");
+                    if ("attempting".equals(currentStatus)) {
+                        candidate.put("status", "failed");
+                    } else {
+                        candidate.put("status", "aborted_before_request");
+                    }
                     candidate.put("error", safeMessage(t));
-                    Logger.printDebug(() -> "Eternal safe Watch Later remove failed for " + videoId + ": " + safeMessage(t));
+                    stop = true;
+                    Logger.printDebug(() -> "Eternal safe Watch Later remove stopped for " + videoId + ": " + safeMessage(t));
                 }
+
                 candidate.put("resultAt", System.currentTimeMillis());
-                EternalWatchLaterTransactionStore.recalcCounts(durable);
-                // Critical invariant: no next delete until this result has been atomically persisted and read back.
-                durable = EternalWatchLaterTransactionStore.saveVerified(durable);
-                candidates = durable.optJSONArray("candidates");
+                durable = persistResult(durable);
+                if (!"removed".equals(candidate.optString("status", ""))) stop = true;
                 sleepQuietly(300L);
             }
 
             EternalWatchLaterTransactionStore.recalcCounts(durable);
-            int failures = durable.optInt("failureCount", 0);
-            durable.put("state", failures == 0 ? "completed" : "partial");
+            boolean allRemoved = allCandidatesRemoved(durable.optJSONArray("candidates"));
+            durable.put("state", allRemoved ? "completed" : "partial");
             durable.put("completedAt", System.currentTimeMillis());
             durable = EternalWatchLaterTransactionStore.saveVerified(durable);
             int removed = durable.optInt("removedCount", 0);
-            lastStatus = failures == 0
+            int failures = durable.optInt("failureCount", 0);
+            int uncertain = durable.optInt("uncertainCount", 0);
+            lastStatus = allRemoved
                     ? "안전 정리 완료: " + removed + "개 제거 · 되돌리기 가능"
-                    : "안전 정리: " + removed + "개 제거 · " + failures + "개 보류/실패 · 되돌리기 가능";
+                    : "안전 정리 중단: " + removed + "개 제거 · 실패/보류 " + failures
+                        + " · 불확실 " + uncertain + " · 필요한 항목만 되돌리기 가능";
             activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
         } catch (Throwable t) {
             lastStatus = "안전 정리 중단: " + safeMessage(t);
-            activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
-        } finally {
-            running.set(false);
-        }
-    }
-
-    static void undoLastCleanup(Activity activity) {
-        if (activity == null) return;
-        if (!running.compareAndSet(false, true)) {
-            Utils.showToastShort("Watch Later 안전 작업이 이미 진행 중입니다.");
-            return;
-        }
-        IO.execute(() -> {
             try {
-                JSONObject tx = EternalWatchLaterTransactionStore.loadCurrent();
-                JSONArray candidates = tx == null ? null : tx.optJSONArray("candidates");
-                if (tx == null || candidates == null || candidates.length() == 0 || "undone".equals(tx.optString("state", ""))) {
-                    running.set(false);
-                    activity.runOnUiThread(() -> Utils.showToastShort("되돌릴 안전 정리 기록이 없습니다."));
-                    return;
+                JSONObject current = durable != null ? durable : EternalWatchLaterTransactionStore.loadCurrent();
+                if (current != null && tx.optString("id", "").equals(current.optString("id", ""))) {
+                    current.put("state", "partial");
+                    current.put("fatalError", safeMessage(t));
+                    current.put("completedAt", System.currentTimeMillis());
+                    EternalWatchLaterTransactionStore.recalcCounts(current);
+                    EternalWatchLaterTransactionStore.saveVerified(current);
                 }
-                final JSONObject loaded = tx;
-                final int count = candidates.length();
-                activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
-                        .setTitle("마지막 안전 정리 되돌리기")
-                        .setMessage("마지막 안전 정리 대상 " + count + "개의 Watch Later 멤버십을 확인하고 빠진 영상만 다시 추가할까요?\n\nYouTube의 추가 API 특성상 원래의 정확한 목록 위치까지는 복원되지 않을 수 있습니다.")
-                        .setNegativeButton(android.R.string.cancel, (dialog, which) -> running.set(false))
-                        .setOnCancelListener(dialog -> running.set(false))
-                        .setPositiveButton("되돌리기", (dialog, which) -> IO.execute(() -> executeUndo(activity, loaded)))
-                        .show());
-            } catch (Throwable t) {
-                running.set(false);
-                lastStatus = "되돌리기 준비 실패: " + safeMessage(t);
-                activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
-            }
-        });
-    }
-
-    private static void executeUndo(Activity activity, JSONObject tx) {
-        try {
-            ensureSignedIn();
-            tx.put("state", "undoing");
-            tx.put("undoStartedAt", System.currentTimeMillis());
-            JSONObject durable = EternalWatchLaterTransactionStore.saveVerified(tx);
-            JSONArray candidates = durable.optJSONArray("candidates");
-            if (candidates == null) throw new IllegalStateException("복구 대상 journal이 없습니다.");
-
-            for (int i = 0; i < candidates.length(); i++) {
-                JSONObject candidate = candidates.optJSONObject(i);
-                if (candidate == null) continue;
-                String videoId = candidate.optString("videoId", "");
-                try {
-                    Entry existing = resolveEntryStrict(videoId);
-                    if (existing != null) {
-                        candidate.put("undoStatus", "already_present");
-                    } else if (addEntry(videoId)) {
-                        candidate.put("undoStatus", "restored");
-                    } else {
-                        candidate.put("undoStatus", "failed");
-                        candidate.put("undoError", "서버가 복구를 확인하지 않음");
-                    }
-                } catch (Throwable t) {
-                    candidate.put("undoStatus", "failed");
-                    candidate.put("undoError", safeMessage(t));
-                }
-                candidate.put("undoAt", System.currentTimeMillis());
-                EternalWatchLaterTransactionStore.recalcCounts(durable);
-                durable = EternalWatchLaterTransactionStore.saveVerified(durable);
-                candidates = durable.optJSONArray("candidates");
-                sleepQuietly(250L);
-            }
-
-            EternalWatchLaterTransactionStore.recalcCounts(durable);
-            int failures = durable.optInt("undoFailureCount", 0);
-            durable.put("state", failures == 0 ? "undone" : "undo_partial");
-            durable.put("undoCompletedAt", System.currentTimeMillis());
-            durable = EternalWatchLaterTransactionStore.saveVerified(durable);
-            int restored = durable.optInt("undoRestoredCount", 0);
-            lastStatus = failures == 0
-                    ? "되돌리기 완료: " + restored + "개 멤버십 확인/복구"
-                    : "되돌리기: " + restored + "개 확인/복구 · " + failures + "개 실패";
-            activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
-        } catch (Throwable t) {
-            lastStatus = "되돌리기 중단: " + safeMessage(t);
+            } catch (Throwable ignored) { }
             activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));
         } finally {
             running.set(false);
         }
+    }
+
+    private static JSONObject persistResult(JSONObject durable) throws Exception {
+        EternalWatchLaterTransactionStore.recalcCounts(durable);
+        return EternalWatchLaterTransactionStore.saveVerified(durable);
+    }
+
+    private static void markNoRequest(JSONObject candidate, String status, String reason) throws Exception {
+        candidate.put("status", status);
+        candidate.put("error", reason);
+        candidate.put("resultAt", System.currentTimeMillis());
+    }
+
+    private static boolean allCandidatesRemoved(JSONArray candidates) {
+        if (candidates == null) return false;
+        for (int i = 0; i < candidates.length(); i++) {
+            JSONObject c = candidates.optJSONObject(i);
+            if (c == null || !"removed".equals(c.optString("status", ""))) return false;
+        }
+        return true;
     }
 
     static boolean hasUndoableTransaction() {
@@ -303,17 +325,31 @@ final class EternalWatchLaterSafeCleaner {
         return out;
     }
 
-    private static boolean sameMembership(LinkedHashMap<String, Entry> a, LinkedHashMap<String, Entry> b) {
-        if (a.size() != b.size()) return false;
-        Map<String, String> byVideoA = new HashMap<>();
-        Map<String, String> byVideoB = new HashMap<>();
-        for (Entry e : a.values()) byVideoA.put(e.videoId, e.setVideoId);
-        for (Entry e : b.values()) byVideoB.put(e.videoId, e.setVideoId);
-        return byVideoA.equals(byVideoB);
+    private static boolean sameMembership(JSONArray snapshot, LinkedHashMap<String, Entry> current) {
+        if (snapshot == null || snapshot.length() != current.size()) return false;
+        Map<String, String> expected = new HashMap<>();
+        for (int i = 0; i < snapshot.length(); i++) {
+            JSONObject item = snapshot.optJSONObject(i);
+            if (item == null) return false;
+            String videoId = item.optString("videoId", "");
+            String setVideoId = item.optString("setVideoId", "");
+            if (!EternalWatchLaterPayload.validVideoId(videoId)
+                    || !EternalWatchLaterPayload.validSetVideoId(setVideoId)) return false;
+            String old = expected.put(videoId, setVideoId);
+            if (old != null && !old.equals(setVideoId)) return false;
+        }
+        Map<String, String> actual = new HashMap<>();
+        for (Entry e : current.values()) {
+            String old = actual.put(e.videoId, e.setVideoId);
+            if (old != null && !old.equals(e.setVideoId)) return false;
+        }
+        return expected.equals(actual);
     }
 
     private static Entry resolveEntryStrict(String videoId) throws Exception {
-        if (!EternalWatchLaterPayload.validVideoId(videoId)) throw new IllegalArgumentException("올바르지 않은 videoId입니다.");
+        if (!EternalWatchLaterPayload.validVideoId(videoId)) {
+            throw new IllegalArgumentException("올바르지 않은 videoId입니다.");
+        }
         byte[] body = PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER);
         JSONObject json = request(PlaylistRoutes.GET_SET_VIDEO_ID, body);
         StrictPairMap parsed = new StrictPairMap();
@@ -343,26 +379,15 @@ final class EternalWatchLaterSafeCleaner {
         return false;
     }
 
-    private static boolean addEntry(String videoId) throws Exception {
-        if (!EternalWatchLaterPayload.validVideoId(videoId)) return false;
-        byte[] body = PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null);
-        JSONObject json = request(PlaylistRoutes.EDIT_PLAYLIST, body);
-        if (!"STATUS_SUCCEEDED".equals(json.optString("status", ""))) return false;
-        for (int i = 0; i < 4; i++) {
-            sleepQuietly(250L + i * 150L);
-            if (resolveEntryStrict(videoId) != null) return true;
-        }
-        return false;
-    }
-
-    private static ListResult listWatchLater(int maxPages) throws Exception {
+    /** Strict full enumeration. Any pagination ambiguity is an exception, never a terminal list. */
+    private static ListResult listWatchLaterStrict(int maxPages) throws Exception {
         LinkedHashMap<String, Entry> entries = new LinkedHashMap<>();
         Map<String, String> byVideo = new HashMap<>();
-        Set<String> seenTokens = new HashSet<>();
+        Set<String> consumedTokens = new HashSet<>();
         String continuation = null;
         int pages = 0;
-        boolean hasMore = false;
-        do {
+
+        for (;;) {
             byte[] initial = PlaylistRoutes.browsePlaylistBody(WATCH_LATER);
             JSONObject body = new JSONObject(new String(initial, StandardCharsets.UTF_8));
             if (continuation != null) {
@@ -371,15 +396,17 @@ final class EternalWatchLaterSafeCleaner {
             }
             JSONObject json = request(PlaylistRoutes.BROWSE_PLAYLIST, body.toString().getBytes(StandardCharsets.UTF_8));
             pages++;
-            ArrayList<String> continuations = new ArrayList<>();
             StrictPairMap parsed = new StrictPairMap();
-            EternalWatchLaterPayload.collect(json, parsed, continuations, 0);
+            ArrayList<String> rawContinuations = new ArrayList<>();
+            EternalWatchLaterPayload.collect(json, parsed, rawContinuations, 0);
             if (parsed.conflict) throw new IllegalStateException("Watch Later 응답 안에서 setVideoId 매핑 충돌을 발견했습니다.");
+
             int before = entries.size();
             for (Map.Entry<String, String> pair : parsed.entrySet()) {
                 String setId = pair.getKey();
                 String videoId = pair.getValue();
-                if (!EternalWatchLaterPayload.validSetVideoId(setId) || !EternalWatchLaterPayload.validVideoId(videoId)) {
+                if (!EternalWatchLaterPayload.validSetVideoId(setId)
+                        || !EternalWatchLaterPayload.validVideoId(videoId)) {
                     throw new IllegalStateException("Watch Later 식별자가 올바르지 않습니다.");
                 }
                 String previousSet = byVideo.putIfAbsent(videoId, setId);
@@ -395,23 +422,28 @@ final class EternalWatchLaterSafeCleaner {
                     throw new IllegalStateException("Watch Later 항목이 안전 한도를 초과합니다.");
                 }
             }
-            String next = null;
-            for (String token : continuations) {
-                if (EternalWatchLaterPayload.validToken(token) && seenTokens.add(token)) { next = token; break; }
+
+            LinkedHashSet<String> pageTokens = new LinkedHashSet<>();
+            for (String token : rawContinuations) {
+                if (EternalWatchLaterPayload.validToken(token)) pageTokens.add(token);
             }
-            if (next == null) {
-                continuation = null;
-                hasMore = false;
-                break;
+            if (pageTokens.isEmpty()) return new ListResult(entries, pages);
+            if (pageTokens.size() != 1) {
+                throw new IllegalStateException("Watch Later 응답에 서로 다른 continuation이 여러 개라 전체 목록을 확정할 수 없습니다.");
             }
-            if (pages > 1 && entries.size() == before) {
-                throw new IllegalStateException("Watch Later continuation이 새 항목 없이 반복되어 전체 목록을 확인할 수 없습니다.");
+            String next = pageTokens.iterator().next();
+            if (!consumedTokens.add(next)) {
+                throw new IllegalStateException("Watch Later continuation token이 반복되어 전체 목록을 확정할 수 없습니다.");
+            }
+            if (entries.size() == before) {
+                throw new IllegalStateException("Watch Later continuation이 있는데 새 항목이 없어 전체 목록을 확정할 수 없습니다.");
+            }
+            if (pages >= Math.max(1, maxPages)) {
+                throw new IllegalStateException("Watch Later 전체 목록이 안전 페이지 한도를 초과했습니다.");
             }
             continuation = next;
-            hasMore = true;
             sleepQuietly(100L);
-        } while (pages < Math.max(1, maxPages));
-        return new ListResult(entries, pages, hasMore && continuation != null);
+        }
     }
 
     private static JSONObject request(app.morphe.extension.shared.requests.Route.CompiledRoute route, byte[] body) throws Exception {
@@ -472,20 +504,15 @@ final class EternalWatchLaterSafeCleaner {
     private static final class Entry {
         final String videoId;
         final String setVideoId;
-        Entry(String videoId, String setVideoId) {
-            this.videoId = videoId;
-            this.setVideoId = setVideoId;
-        }
+        Entry(String videoId, String setVideoId) { this.videoId = videoId; this.setVideoId = setVideoId; }
     }
 
     private static final class ListResult {
         final LinkedHashMap<String, Entry> entries;
         final int pages;
-        final boolean hasMore;
-        ListResult(LinkedHashMap<String, Entry> entries, int pages, boolean hasMore) {
+        ListResult(LinkedHashMap<String, Entry> entries, int pages) {
             this.entries = entries;
             this.pages = pages;
-            this.hasMore = hasMore;
         }
     }
 
