@@ -16,19 +16,33 @@ public final class EternalHistoryAddOn {
         Logger.printDebug(() -> "Registering Eternal YouTube History add-on");
         EternalHistorySettings.ENABLED.get();
         EternalSurfaceSettings.ensureDefaultProfileMigrated();
+
+        if (EternalWatchLaterSafety.isLocked()) {
+            // Preserve the user's preference value for future migration, but disable every runtime
+            // entry point that could delete from Watch Later. refreshSchedule() also cancels any
+            // periodic JobScheduler job left behind by an older installed build.
+            EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
+        }
+
         AddOnApi.addNewVideoStartedListener(() -> {
             EternalHistoryClient.onNewVideoStarted();
-            EternalWatchLaterCleaner.onNewVideoStarted();
+            if (!EternalWatchLaterSafety.isLocked()) {
+                EternalWatchLaterCleaner.onNewVideoStarted();
+            }
             EternalWatchLaterJobService.refreshSchedule();
             EternalHistoryToolbar.onSurfaceChanged();
         });
         AddOnApi.addVideoIdListener(videoId -> {
             EternalHistoryClient.onVideoIdChanged(videoId);
-            EternalWatchLaterCleaner.onVideoIdChanged(videoId);
+            if (!EternalWatchLaterSafety.isLocked()) {
+                EternalWatchLaterCleaner.onVideoIdChanged(videoId);
+            }
         });
         AddOnApi.addVideoTimeListener(videoTimeMs -> {
             EternalHistoryClient.onVideoTimeChanged(videoTimeMs);
-            EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
+            if (!EternalWatchLaterSafety.isLocked()) {
+                EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
+            }
         });
         // Morphe already gives the newly selected navigation button to this listener. Eternal only
         // records that value. It must not query NavigationBar/PlayerType back from inside YouTube's
