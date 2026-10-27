@@ -25,7 +25,7 @@ public final class EternalHistorySettings {
     public static final BooleanSetting AUTO_UPDATE_CHECK =
             new BooleanSetting("morphe_eternal_history_auto_update_check", TRUE, false, parent(ENABLED));
 
-    /** Legacy values retained only for one-time migration from v1.10 and older installs. */
+    /** Legacy values retained for migration and the stability renderer fallback. */
     public static final StringSetting FEED_MODE =
             new StringSetting("morphe_eternal_history_feed_mode", "", false, parent(ENABLED));
     public static final BooleanSetting HIDE_WATCHED =
@@ -33,7 +33,7 @@ public final class EternalHistorySettings {
     public static final IntegerSetting HIDE_MIN_PROGRESS =
             new IntegerSetting("morphe_eternal_history_hide_min_progress", 0, false, parent(ENABLED));
 
-    /** Rich common/default profile. Page-specific profiles override these values. */
+    /** Rich common/default profile. Saved page-specific profiles are preserved but inactive in v1.10.5. */
     public static final BooleanSetting DEFAULT_DIM_ENABLED =
             new BooleanSetting("morphe_eternal_history_default_dim_enabled", FALSE, false, parent(ENABLED));
     public static final BooleanSetting DEFAULT_HIDE_ENABLED =
@@ -47,29 +47,45 @@ public final class EternalHistorySettings {
     public static final IntegerSetting DEFAULT_HIDE_THRESHOLD =
             new IntegerSetting("morphe_eternal_history_default_hide_threshold", 0, false, parent(ENABLED));
 
-    /** Opacity used by watched visual components in dim mode. */
     public static final IntegerSetting THUMBNAIL_OPACITY =
             new IntegerSetting("morphe_eternal_history_thumbnail_opacity", 65, false, parent(ENABLED));
     public static final BooleanSetting THUMBNAIL_GRAYSCALE =
             new BooleanSetting("morphe_eternal_history_thumbnail_grayscale", FALSE, false, parent(ENABLED));
-    /**
-     * False: dim only the thumbnail. True: dim the whole card so channel avatar, title and metadata
-     * inherit the exact same opacity/grayscale as the thumbnail.
-     */
     public static final BooleanSetting DIM_CARD_INFO =
             new BooleanSetting("morphe_eternal_history_dim_card_info", FALSE, false, parent(ENABLED));
 
-    /** Destructive Watch Later automation is opt-in. Unknown progress is never eligible. */
+    /** Destructive Watch Later automation remains opt-in and is runtime-locked by safety code. */
     public static final BooleanSetting WATCH_LATER_AUTO_CLEANUP =
             new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE, false, parent(ENABLED));
     public static final IntegerSetting WATCH_LATER_CLEANUP_MIN_PROGRESS =
             new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60, false, parent(ENABLED));
 
+    /**
+     * v1.10.5 uses one proven global presentation mode again. Keep the richer common profile as the
+     * source of truth so no user settings are lost; hide takes precedence when both rules are on.
+     */
     public static String feedMode() {
+        if (DEFAULT_HIDE_ENABLED.get()) return "hide";
+        if (DEFAULT_DIM_ENABLED.get()) return "dim";
         String mode = FEED_MODE.get();
         if (mode == null || mode.isEmpty()) return HIDE_WATCHED.get() ? "hide" : "none";
         if ("dim".equals(mode) || "hide".equals(mode)) return mode;
         return "none";
+    }
+
+    /** Threshold corresponding to the single stability presentation mode. */
+    public static int feedMinProgressPercent() {
+        if (DEFAULT_HIDE_ENABLED.get()) {
+            return DEFAULT_LINKED_THRESHOLDS.get()
+                    ? defaultSharedThresholdPercent()
+                    : defaultHideThresholdPercent();
+        }
+        if (DEFAULT_DIM_ENABLED.get()) {
+            return DEFAULT_LINKED_THRESHOLDS.get()
+                    ? defaultSharedThresholdPercent()
+                    : defaultDimThresholdPercent();
+        }
+        return clamp(HIDE_MIN_PROGRESS.get(), 0, 100);
     }
 
     public static int thumbnailOpacityPercent() {
@@ -92,8 +108,7 @@ public final class EternalHistorySettings {
         return clamp(DEFAULT_HIDE_THRESHOLD.get(), 0, 100);
     }
 
-    public static boolean isFeedVisualEnabled() { return EternalSurfaceSettings.anyVisualEnabled(); }
-    /** Legacy helpers retained for migration and old call sites. */
+    public static boolean isFeedVisualEnabled() { return isDimMode() || isHideMode(); }
     public static boolean isDimMode() { return "dim".equals(feedMode()); }
     public static boolean isHideMode() { return "hide".equals(feedMode()); }
 
