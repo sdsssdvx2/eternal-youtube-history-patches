@@ -18,7 +18,7 @@
   <string name="morphe_eternal_history_auto_update_check_summary">기본 켜짐. 하루 최대 2회 작은 공개 상태 파일만 확인하고, 새 Morphe/Eternal YouTube 빌드가 있으면 버전당 한 번 알려줍니다. 자동 설치는 하지 않습니다.</string>
 
   <string name="morphe_eternal_history_default_profile_title">시청한 영상 표시 · 공통 기본값</string>
-  <string name="morphe_eternal_history_default_profile_summary">페이지별 개별 설정이 없을 때 사용합니다. 상단 E에서 페이지 값을 바꾸면 그 페이지가 우선하고, ‘기본값으로 되돌리기’로 다시 이 값을 따릅니다.</string>
+  <string name="morphe_eternal_history_default_profile_summary">안정화 모드에서는 모든 일반 영상 목록에 이 공통 기본값만 적용합니다. 기존 페이지별 개별 설정은 삭제하지 않고 보존되며, 탭 전환 안정성이 확인된 뒤 다시 사용할 수 있습니다.</string>
   <string name="morphe_eternal_history_default_dim_enabled_title">기본값: 흐리게 표시</string>
   <string name="morphe_eternal_history_default_dim_enabled_summary">켜면 Eternal 시청 기록과 아래 진행률 기준을 만족한 영상을 흐리게 표시합니다.</string>
   <string name="morphe_eternal_history_default_hide_enabled_title">기본값: 숨기기</string>
@@ -48,12 +48,12 @@
   <string name="morphe_eternal_history_thumbnail_grayscale_summary">켜면 흐리게 표시되는 영역을 흑백으로 표시합니다. 기본은 썸네일만 대상입니다.</string>
   <string name="morphe_eternal_history_dim_card_info_title">썸네일 아래 영상 정보도 함께 흐리게</string>
   <string name="morphe_eternal_history_dim_card_info_summary">켜면 채널 이미지·영상 제목·채널명·조회수·업로드 시점·메뉴까지 썸네일과 같은 불투명도/흑백 설정에 연동합니다.</string>
-  <string name="morphe_eternal_history_feed_note_title">페이지별 표시 설정</string>
-  <string name="morphe_eternal_history_feed_note_summary">공통 기본값은 이 화면에서 정하고, 각 YouTube 페이지의 작은 E 버튼에서 그 페이지만 따로 지정할 수 있습니다. 변경은 현재 화면에 즉시 재바인드하며, 개별 설정은 언제든 공통 기본값으로 되돌릴 수 있습니다.</string>
+  <string name="morphe_eternal_history_feed_note_title">안정화 모드</string>
+  <string name="morphe_eternal_history_feed_note_summary">실기기 탭 전환 crash를 격리하기 위해 YouTube host navigation/browse/toolbar hook과 페이지별 E overlay를 일시 중지했습니다. 공통 기본값은 계속 적용되고 기존 페이지별 설정은 보존됩니다. Shorts에서는 Eternal 표시 변경을 수행하지 않습니다.</string>
   <string name="morphe_eternal_history_watch_later_auto_cleanup_title">나중에 볼 자동 정리</string>
-  <string name="morphe_eternal_history_watch_later_auto_cleanup_summary">기본 꺼짐. 현재 영상의 진행률이 기준 이상이고 실제 Watch Later setVideoId가 확인된 경우에만 자동 제거합니다.</string>
+  <string name="morphe_eternal_history_watch_later_auto_cleanup_summary">안전 잠금 상태입니다. 데이터 손실 회귀가 완전히 검증되기 전까지 자동 삭제는 실행하지 않습니다.</string>
   <string name="morphe_eternal_history_watch_later_cleanup_min_progress_title">나중에 볼 정리 기준 진행률 (%)</string>
   <string name="morphe_eternal_history_watch_later_cleanup_min_progress_summary">1~100, 기본 60. 진행률을 모르는 영상은 자동/수동 정리 대상에서 항상 제외합니다.</string>
-  <string name="morphe_eternal_history_watch_later_note_title">페이지 E 버튼</string>
-  <string name="morphe_eternal_history_watch_later_note_summary">작은 E 버튼에서 현재 페이지 표시 설정, Watch Later 자동/수동 정리와 진단 정보를 사용할 수 있습니다. E는 YouTube의 native toolbar 버튼과 겹치지 않는 별도 overlay로 표시됩니다.</string>
+  <string name="morphe_eternal_history_watch_later_note_title">나중에 볼 안전 잠금</string>
+  <string name="morphe_eternal_history_watch_later_note_summary">탭 전환 crash 격리 동안 페이지 E overlay가 비활성화되어 앱 내부 수동 정리 버튼도 일시 중지됩니다. 기존 Watch Later 데이터와 거래 저널은 삭제하지 않습니다.</string>
 </resources>
