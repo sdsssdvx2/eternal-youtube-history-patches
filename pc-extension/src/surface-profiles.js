@@ -31,6 +31,10 @@
     try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
   }
 
+  function showReloadNotice() {
+    alert('Eternal 확장이 업데이트된 뒤 이 YouTube 탭의 이전 확장 컨텍스트가 남아 있습니다. 이 탭만 한 번 새로고침하면 다시 작동합니다.');
+  }
+
   async function storageGet(defaults) {
     if (!extensionAlive()) return defaults;
     try { return await chrome.storage.local.get(defaults); } catch { return defaults; }
@@ -67,8 +71,9 @@
       defaultProfile = legacyProfile(v);
       await storageSet({ watchedSurfaceDefaultProfile: defaultProfile });
     }
-    // Keep the stable legacy content script for History/Watch Later/sync duties, but disable only
-    // its old card renderer. surface-profiles.js owns presentation with its own CSS class namespace.
+    // content.js still owns watch/history collection and the stable masthead shell, but only this
+    // script owns card presentation. Keep the legacy renderer disabled without adding a second UI
+    // observer that fights over the same buttons/classes.
     if (v.watchedDisplayMode !== 'none') await storageSet({ watchedDisplayMode: 'none' });
     settings = {
       defaultProfile,
@@ -114,6 +119,62 @@
       dim: profile.linkedThresholds ? profile.sharedThreshold : profile.dimThreshold,
       hide: profile.linkedThresholds ? profile.sharedThreshold : profile.hideThreshold
     };
+  }
+
+  function effectiveQuickMode(profile) {
+    if (profile.hideEnabled) return 'hide';
+    if (profile.dimEnabled) return 'dim';
+    return 'none';
+  }
+
+  async function applyQuickMode(mode) {
+    if (!['none', 'dim', 'hide'].includes(mode)) return;
+    if (!extensionAlive()) {
+      showReloadNotice();
+      return;
+    }
+    if (!settings) await loadSettings();
+    const key = surfaceKey();
+    if (key === 'shorts') return;
+    const current = currentProfile(key);
+    const profile = normalizeProfile({
+      ...current,
+      dimEnabled: mode === 'dim',
+      hideEnabled: mode === 'hide'
+    });
+    const profiles = { ...(settings.profiles || {}), [key]: profile };
+    if (!(await storageSet({ watchedSurfaceProfiles: profiles }))) {
+      if (!extensionAlive()) showReloadNotice();
+      return;
+    }
+    settings.profiles = profiles;
+    watched.clear();
+    progress.clear();
+    scanGeneration++;
+    scheduleScan(0);
+  }
+
+  function bindQuickButton(button) {
+    if (button.dataset.eyhSurfaceBound === '1') return;
+    button.dataset.eyhSurfaceBound = '1';
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      applyQuickMode(button.dataset.eyhMode).catch(() => {
+        if (!extensionAlive()) showReloadNotice();
+      });
+    }, true);
+  }
+
+  function syncQuickButtons(root, profile) {
+    const activeMode = effectiveQuickMode(profile);
+    for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
+      button.hidden = false;
+      bindQuickButton(button);
+      const active = button.dataset.eyhMode === activeMode;
+      button.classList.toggle('eyh-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
   }
 
   function videoIdFromHref(href) {
@@ -167,9 +228,6 @@
     if (!settings || generation !== scanGeneration) return;
 
     const key = surfaceKey();
-    // The full-screen Shorts player has no recommendation-card surface that benefits from Eternal
-    // dim/hide presentation. Keep the page completely untouched and remove any style left by the
-    // preceding SPA surface before rendering the compact header state.
     if (key === 'shorts') {
       clearAllManaged();
       closePanel({ restorePreview: true });
@@ -222,7 +280,7 @@
     decorateHeader();
   }
 
-  function scheduleScan(delay = 80) {
+  function scheduleScan(delay = 140) {
     if (document.visibilityState === 'hidden') return;
     if (scanTimer) clearTimeout(scanTimer);
     scanTimer = setTimeout(scan, delay);
@@ -231,15 +289,29 @@
   function decorateHeader() {
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return;
-    for (const b of root.querySelectorAll('button[data-eyh-mode]')) b.hidden = true;
     const brand = root.querySelector('.eyh-header-brand'); if (brand) brand.hidden = true;
 
     const key = surfaceKey();
     let button = root.querySelector('#eyh-surface-settings');
     if (key === 'shorts') {
+      root.style.display = 'none';
       button?.remove();
       closePanel({ restorePreview: true });
       return;
+    }
+    root.style.removeProperty('display');
+
+    const profile = currentProfile(key);
+    syncQuickButtons(root, profile);
+
+    // Legacy destructive Watch Later controls stay unavailable. Safe transactional cleanup/undo is
+    // mounted separately by watch-later-safe.js.
+    for (const id of ['#eyh-watch-later-auto', '#eyh-watch-later-cleanup']) {
+      const legacy = root.querySelector(id);
+      if (!legacy) continue;
+      legacy.hidden = true;
+      legacy.disabled = true;
+      legacy.title = '안전 transaction 경로만 사용합니다.';
     }
 
     if (!button) {
@@ -247,13 +319,18 @@
       button.id = 'eyh-surface-settings'; button.type = 'button';
       button.className = 'eyh-header-button eyh-active eyh-surface-compact';
       button.textContent = '⚙';
-      button.addEventListener('click', () => { if (extensionAlive()) openPanel(); });
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!extensionAlive()) { showReloadNotice(); return; }
+        openPanel();
+      });
       root.insertBefore(button, root.querySelector('.eyh-wl-only') || root.querySelector('#eyh-header-status'));
     }
-    const p = currentProfile(key), t = effectiveThresholds(p);
+    const t = effectiveThresholds(profile);
     const states = [];
-    if (p.dimEnabled) states.push(`흐림 ${t.dim}%`);
-    if (p.hideEnabled) states.push(`숨김 ${t.hide}%`);
+    if (profile.dimEnabled) states.push(`흐림 ${t.dim}%`);
+    if (profile.hideEnabled) states.push(`숨김 ${t.hide}%`);
     button.textContent = '⚙';
     button.title = `${LABELS[key] || LABELS.other} 설정 · ${hasOverride(key) ? '개별 설정' : '공통 기본값 사용'} · ${states.join(' / ') || '표시 변경 없음'}`;
     button.setAttribute('aria-label', button.title);
@@ -343,7 +420,12 @@
   }
 
   const observer = new MutationObserver(mutations => {
-    if (mutations.some(m => m.type === 'childList' && m.addedNodes.length)) scheduleScan();
+    const relevant = mutations.some(m => {
+      if (m.type !== 'childList' || !m.addedNodes.length) return false;
+      const target = m.target instanceof Element ? m.target : m.target?.parentElement;
+      return !target?.closest?.('#eyh-header-controls, #eyh-surface-panel');
+    });
+    if (relevant) scheduleScan();
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
   const nav = () => {
