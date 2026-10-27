@@ -14,6 +14,7 @@ const safety = text('watch-later-safety-main.js');
 const safeCore = text('watch-later-safe-core.js');
 const safeMain = text('watch-later-safe-main.js');
 const safeCoordinator = text('watch-later-safe.js');
+const undoGuard = text('watch-later-safe-undo-guard.js');
 const css = text('content.css');
 const bridge = text('page-bridge.js');
 const core = text('watch-later-core.js');
@@ -32,6 +33,8 @@ assert.ok(mainWorld.js.indexOf('watch-later-core.js') < mainWorld.js.indexOf('wa
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'), 'safe bridge must be isolated from the legacy page bridge');
 assert.equal(isolatedWorld.js[0], 'watch-later-core.js', 'core must load first in ISOLATED world');
 assert.ok(isolatedWorld.js.indexOf('watch-later-safe-core.js') < isolatedWorld.js.indexOf('watch-later-safe.js'), 'safe transaction core must precede coordinator');
+assert.ok(isolatedWorld.js.indexOf('watch-later-safe.js') < isolatedWorld.js.indexOf('watch-later-safe-undo-guard.js'), 'narrow undo guard must load after safe coordinator');
+assert.ok(isolatedWorld.js.indexOf('watch-later-safe-undo-guard.js') < isolatedWorld.js.indexOf('maintenance.js'), 'undo guard must be active before maintenance');
 assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in isolated YouTube pages');
 assert.ok(isolatedWorld.js.includes('surface-profiles.js'), 'page-profile renderer must load in isolated YouTube pages');
 assert.ok(isolatedWorld.js.includes('pc-ui-hotfix.js'), 'PC UI/safety hotfix must load in isolated YouTube pages');
@@ -68,8 +71,7 @@ assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
 assert.match(hotfix, /button\.disabled = true/);
 assert.match(safeCoordinator, /watchLaterAutoCleanupEnabled: false/);
 
-// Transactional v0.10.4 path: complete snapshot, durable read-back verified journal, then one-item
-// writes only. No destructive request may be issued before persistVerified(tx).
+// Transactional path: complete snapshot, durable read-back verified journal, then one-item writes.
 assert.match(safeCore, /MAX_SNAPSHOT_ENTRIES = 5000/);
 assert.match(safeCore, /if \(hasMore\) throw new Error/);
 assert.match(safeCore, /status: 'prepared'/);
@@ -80,12 +82,9 @@ const firstSafeRemove = safeCoordinator.indexOf("requestPage('EYH_WL_SAFE_REMOVE
 assert.ok(persistBeforeDelete >= 0 && firstSafeRemove > persistBeforeDelete, 'journal must be durably verified before first delete');
 assert.match(safeCoordinator, /The next delete is forbidden until the result of this one is durably re-read and verified/);
 assert.match(safeCoordinator, /durable = await persistVerified\(durable\)/);
-assert.match(safeCoordinator, /EYH_WL_SAFE_ADD_REQUEST/);
-assert.match(safeCoordinator, /마지막 정리 되돌리기/);
 
 // MAIN-world safe remove must resolve current membership immediately before delete and require the
-// fresh tuple to equal the snapshot tuple. Restore must use YouTube's idempotent add primitive and
-// verify membership afterwards.
+// fresh tuple to equal the snapshot tuple. Restore uses idempotent add and verifies membership.
 const freshResolve = safeMain.indexOf('const fresh = await resolveEntry(id)');
 const exactCompare = safeMain.indexOf('fresh.setVideoId !== expected');
 const destructiveAction = safeMain.indexOf("action: 'ACTION_REMOVE_VIDEO'");
@@ -97,14 +96,25 @@ assert.match(safeMain, /already_present/);
 assert.match(safeMain, /journalDigest/);
 assert.match(safeMain, /EYH_WL_SAFE_RESULT/);
 
-// Users must be able to tell whether PC background cleanup previously ran without opening devtools.
+// v0.10.5 narrows undo: entries known to have received no delete request must never trigger ADD.
+assert.match(undoGuard, /status === 'missing' \|\| status === 'identity_mismatch'/);
+assert.match(undoGuard, /candidate\.undoStatus = 'not_removed'/);
+assert.match(undoGuard, /type: 'EYH_WL_SAFE_ADD_REQUEST'/);
+assert.match(undoGuard, /#eyh-watch-later-safe-undo/);
+assert.match(undoGuard, /event\.stopImmediatePropagation\(\)/);
+assert.match(undoGuard, /document\.addEventListener\('click'/);
+assert.match(undoGuard, /}, true\);/);
+const policy = undoGuard.indexOf('if (!shouldRestore(candidate))');
+const add = undoGuard.indexOf('const result = await requestAdd(tx, candidate)', policy);
+assert.ok(policy >= 0 && add > policy, 'no-delete statuses must be excluded before safe add request');
+
+// Users can tell whether PC background cleanup previously ran without opening devtools.
 assert.match(popupHtml, /id="watchLaterSafety"/);
 assert.match(popup, /eyhLastAutoWatchLaterSweep/);
 assert.match(popup, /최근 PC 자동 정리/);
 assert.match(popup, /현재 자동 설정/);
 
-// Page-profile presentation must never share the legacy renderer's toggle classes. v0.10.0 did,
-// so the two scanners alternately added/removed the same classes and produced visible flicker.
+// Page-profile presentation must never share the legacy renderer's toggle classes.
 assert.match(surface, /eyh-surface-watched/);
 assert.match(surface, /eyh-surface-hidden/);
 assert.doesNotMatch(surface, /classList\.toggle\('eyh-watched'/);
@@ -114,8 +124,7 @@ assert.match(css, /\.eyh-surface-hidden/);
 assert.match(surface, /scanGeneration/);
 assert.match(surface, /generation !== scanGeneration/);
 
-// Keep redundant masthead copy hidden, but restore the fast 표시/흐림/숨김 controls. Detailed
-// per-page settings stay on the gear button, and invalidated old tabs must explain a one-tab reload.
+// Keep redundant masthead copy hidden, but restore the fast 표시/흐림/숨김 controls.
 assert.match(surface, /button\.textContent = '⚙'/);
 assert.match(surface, /brand\.hidden = true/);
 assert.doesNotMatch(surface, /brand\.textContent = `Eternal/);
@@ -123,7 +132,6 @@ assert.match(hotfix, /querySelectorAll\('button\[data-eyh-mode\]'\)/);
 assert.match(hotfix, /button\.hidden = false/);
 assert.match(hotfix, /showReloadNotice/);
 
-// Common defaults must have the same expressive power as a page override.
 for (const id of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
