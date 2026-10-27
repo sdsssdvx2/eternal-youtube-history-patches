@@ -81,19 +81,18 @@
     const entries = Array.isArray(listed.entries) ? listed.entries : [];
     const declared = declaredWatchLaterCount();
     if (declared == null) throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없습니다.');
-    if (declared < entries.length) {
-      throw new Error(`YouTube 표시 개수 ${declared}개보다 안전 파서 결과 ${entries.length}개가 더 많아 복구 비교를 중단합니다.`);
+    if (declared !== entries.length) {
+      throw new Error(
+        `YouTube 표시 개수 ${declared}개와 안전 파서 결과 ${entries.length}개가 일치하지 않아 복구 비교를 중단합니다. ` +
+        'private/deleted 항목인지 새 renderer 파싱 누락인지 확인되기 전에는 일부 목록으로 복구를 진행하지 않습니다.'
+      );
     }
 
-    // Recovery is ADD-only. YouTube may count unavailable/private/deleted tombstones in the playlist
-    // header even though they expose no usable videoId+setVideoId pair. Those entries cannot be
-    // compared, but allowing the known membership set is safe: each selected candidate is checked
-    // again immediately before ADD and an already-present membership is never duplicated.
     return {
       entries: entries.map(entry => ({ videoId: entry.videoId, setVideoId: entry.setVideoId })),
       declaredCount: declared,
       parsedCount: entries.length,
-      unparsedCount: declared - entries.length,
+      unparsedCount: 0,
       pages: Number(listed.pages || 0)
     };
   }
