@@ -5,9 +5,8 @@ import androidx.annotation.Nullable;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.patches.components.ContextInterface;
 import app.morphe.extension.youtube.shared.NavigationBar;
-import app.morphe.extension.youtube.shared.PlayerType;
 
-/** Tracks enough YouTube navigation state to choose a device-local page profile. */
+/** Tracks stable YouTube surface signals without re-entering host navigation state. */
 @SuppressWarnings("unused")
 public final class EternalSurfaceTracker {
     private static volatile String lastBrowseId = "";
@@ -19,138 +18,87 @@ public final class EternalSurfaceTracker {
             if (browseId == null || browseId.isBlank()) return;
             lastBrowseId = browseId;
             EternalSurfaceSettings.Surface mapped = fromBrowseId(browseId);
-            if (mapped != EternalSurfaceSettings.Surface.OTHER) lastUiSurface = mapped;
-            EternalHistoryToolbar.onSurfaceChanged();
+            if (mapped != EternalSurfaceSettings.Surface.OTHER) publishSurface(mapped);
         } catch (Throwable t) {
             Logger.printDebug(() -> "Eternal browse surface update ignored: " + safeMessage(t));
         }
     }
 
+    /**
+     * Morphe passes the selected button into this callback. Never call back into NavigationBar from
+     * here: YouTube is in the middle of rebuilding tab/search/player state and re-entrant host-state
+     * reads have proven unsafe on real devices.
+     */
     static void onNavigationChanged(@Nullable NavigationBar.NavigationButton button) {
         try {
             if (button == NavigationBar.NavigationButton.HOME) {
                 lastBrowseId = "FEwhat_to_watch";
-                lastUiSurface = EternalSurfaceSettings.Surface.HOME;
+                publishSurface(EternalSurfaceSettings.Surface.HOME);
             } else if (button == NavigationBar.NavigationButton.SUBSCRIPTIONS) {
                 lastBrowseId = "FEsubscriptions";
-                lastUiSurface = EternalSurfaceSettings.Surface.SUBSCRIPTIONS;
+                publishSurface(EternalSurfaceSettings.Surface.SUBSCRIPTIONS);
             } else if (button == NavigationBar.NavigationButton.LIBRARY) {
                 lastBrowseId = "FElibrary";
-                lastUiSurface = EternalSurfaceSettings.Surface.LIBRARY;
+                publishSurface(EternalSurfaceSettings.Surface.LIBRARY);
             } else if (button == NavigationBar.NavigationButton.SHORTS) {
                 lastBrowseId = "";
-                lastUiSurface = EternalSurfaceSettings.Surface.SHORTS;
+                publishSurface(EternalSurfaceSettings.Surface.SHORTS);
             }
-            EternalHistoryToolbar.onSurfaceChanged();
         } catch (Throwable t) {
-            // Navigation listeners run in YouTube's own tab transition path. Eternal must never be
-            // able to turn a transient host state into an app crash.
             Logger.printDebug(() -> "Eternal navigation surface update ignored: " + safeMessage(t));
         }
     }
 
+    /**
+     * Component classification uses only Eternal-owned cached signals plus the Litho path already
+     * handed to the filter. It deliberately performs no NavigationBar/PlayerType/search queries.
+     */
     static EternalSurfaceSettings.Surface forComponent(ContextInterface contextInterface, String path) {
         try {
-            if (safeSearchActive()) return EternalSurfaceSettings.Surface.SEARCH;
-
-            NavigationBar.NavigationButton nav = safeSelectedNavigationButton(contextInterface);
-            if (nav == NavigationBar.NavigationButton.SHORTS || containsShorts(path)) {
+            EternalSurfaceSettings.Surface cached = lastUiSurface;
+            if (cached == EternalSurfaceSettings.Surface.SHORTS) {
                 return EternalSurfaceSettings.Surface.SHORTS;
             }
-            if (safePlayerMaximized() || looksRelated(path)) {
-                return EternalSurfaceSettings.Surface.WATCH;
+
+            String lower = path == null ? "" : path.toLowerCase();
+            if (lower.contains("search_video")) {
+                return publishAndReturn(EternalSurfaceSettings.Surface.SEARCH);
+            }
+            if (looksRelated(lower)) {
+                return publishAndReturn(EternalSurfaceSettings.Surface.WATCH);
+            }
+            if (lower.contains("home_video")) {
+                return publishAndReturn(EternalSurfaceSettings.Surface.HOME);
             }
 
             EternalSurfaceSettings.Surface browse = fromBrowseId(lastBrowseId);
-            if (safeBackButtonVisible() && browse != EternalSurfaceSettings.Surface.OTHER) return browse;
-            if (nav == NavigationBar.NavigationButton.SUBSCRIPTIONS) return EternalSurfaceSettings.Surface.SUBSCRIPTIONS;
-            if (nav == NavigationBar.NavigationButton.LIBRARY) {
-                return browse == EternalSurfaceSettings.Surface.OTHER ? EternalSurfaceSettings.Surface.LIBRARY : browse;
+            if (browse != EternalSurfaceSettings.Surface.OTHER) {
+                return publishAndReturn(browse);
             }
-            if (isDetailBrowseSurface(browse)) return browse;
-            if (nav == NavigationBar.NavigationButton.HOME) return EternalSurfaceSettings.Surface.HOME;
-
-            if (path != null) {
-                if (path.contains("search_video")) return EternalSurfaceSettings.Surface.SEARCH;
-                if (path.contains("home_video")) return EternalSurfaceSettings.Surface.HOME;
-            }
-            return browse != EternalSurfaceSettings.Surface.OTHER ? browse : lastUiSurface;
+            return cached == null ? EternalSurfaceSettings.Surface.OTHER : cached;
         } catch (Throwable t) {
             Logger.printDebug(() -> "Eternal component surface classification ignored: " + safeMessage(t));
-            return lastUiSurface == null ? EternalSurfaceSettings.Surface.OTHER : lastUiSurface;
+            EternalSurfaceSettings.Surface cached = lastUiSurface;
+            return cached == null ? EternalSurfaceSettings.Surface.OTHER : cached;
         }
     }
 
-    /**
-     * Main-thread UI classification. Every host lookup is fail-open because YouTube temporarily
-     * tears down search/player/navigation objects while switching Shorts, Subscriptions, Home and
-     * the You tab. A display helper must never crash the host app during those transitions.
-     */
+    /** Main-thread UI classification is intentionally just the last stable cached signal. */
     static EternalSurfaceSettings.Surface currentForUi() {
-        try {
-            EternalSurfaceSettings.Surface resolved;
-            if (safeSearchActive()) resolved = EternalSurfaceSettings.Surface.SEARCH;
-            else {
-                NavigationBar.NavigationButton nav = safeSelectedNavigationButton();
-                if (nav == NavigationBar.NavigationButton.SHORTS) resolved = EternalSurfaceSettings.Surface.SHORTS;
-                else if (safePlayerMaximized()) resolved = EternalSurfaceSettings.Surface.WATCH;
-                else {
-                    EternalSurfaceSettings.Surface browse = fromBrowseId(lastBrowseId);
-                    if (safeBackButtonVisible() && browse != EternalSurfaceSettings.Surface.OTHER) resolved = browse;
-                    else if (nav == NavigationBar.NavigationButton.SUBSCRIPTIONS) resolved = EternalSurfaceSettings.Surface.SUBSCRIPTIONS;
-                    else if (nav == NavigationBar.NavigationButton.LIBRARY) {
-                        resolved = browse == EternalSurfaceSettings.Surface.OTHER ? EternalSurfaceSettings.Surface.LIBRARY : browse;
-                    } else if (isDetailBrowseSurface(browse)) resolved = browse;
-                    else if (nav == NavigationBar.NavigationButton.HOME) resolved = EternalSurfaceSettings.Surface.HOME;
-                    else resolved = browse == EternalSurfaceSettings.Surface.OTHER ? lastUiSurface : browse;
-                }
-            }
-            if (resolved == null) resolved = EternalSurfaceSettings.Surface.OTHER;
-            lastUiSurface = resolved;
-            return resolved;
-        } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal UI surface classification ignored: " + safeMessage(t));
-            return lastUiSurface == null ? EternalSurfaceSettings.Surface.OTHER : lastUiSurface;
-        }
+        EternalSurfaceSettings.Surface surface = lastUiSurface;
+        return surface == null ? EternalSurfaceSettings.Surface.OTHER : surface;
     }
 
-    private static boolean safeSearchActive() {
-        try { return NavigationBar.isSearchBarActive(); }
-        catch (Throwable ignored) { return false; }
+    private static EternalSurfaceSettings.Surface publishAndReturn(EternalSurfaceSettings.Surface surface) {
+        publishSurface(surface);
+        return surface;
     }
 
-    private static boolean safeBackButtonVisible() {
-        try { return NavigationBar.isBackButtonVisible(); }
-        catch (Throwable ignored) { return false; }
-    }
-
-    private static boolean safePlayerMaximized() {
-        try {
-            PlayerType type = PlayerType.getCurrent();
-            return type != null && type.isMaximizedOrFullscreen();
-        } catch (Throwable ignored) { return false; }
-    }
-
-    @Nullable
-    private static NavigationBar.NavigationButton safeSelectedNavigationButton() {
-        try { return NavigationBar.NavigationButton.getSelectedNavigationButton(); }
-        catch (Throwable ignored) { return null; }
-    }
-
-    @Nullable
-    private static NavigationBar.NavigationButton safeSelectedNavigationButton(ContextInterface contextInterface) {
-        if (contextInterface == null) return null;
-        try { return NavigationBar.NavigationButton.getSelectedNavigationButton(contextInterface); }
-        catch (Throwable ignored) { return null; }
-    }
-
-    private static boolean isDetailBrowseSurface(EternalSurfaceSettings.Surface browse) {
-        return browse == EternalSurfaceSettings.Surface.CHANNEL
-                || browse == EternalSurfaceSettings.Surface.WATCH_LATER
-                || browse == EternalSurfaceSettings.Surface.LIKED
-                || browse == EternalSurfaceSettings.Surface.PLAYLIST_DETAIL
-                || browse == EternalSurfaceSettings.Surface.HISTORY
-                || browse == EternalSurfaceSettings.Surface.PLAYLISTS;
+    private static void publishSurface(EternalSurfaceSettings.Surface surface) {
+        if (surface == null || surface == EternalSurfaceSettings.Surface.OTHER) return;
+        EternalSurfaceSettings.Surface previous = lastUiSurface;
+        lastUiSurface = surface;
+        if (previous != surface) EternalHistoryToolbar.onSurfaceChanged();
     }
 
     private static EternalSurfaceSettings.Surface fromBrowseId(String browseId) {
@@ -171,12 +119,9 @@ public final class EternalSurfaceTracker {
         };
     }
 
-    private static boolean containsShorts(String path) {
-        return path != null && path.toLowerCase().contains("shorts");
-    }
-
-    private static boolean looksRelated(String path) {
-        return path != null && (path.contains("related_video") || path.contains("compact_video"));
+    private static boolean looksRelated(String lowerPath) {
+        return lowerPath != null
+                && (lowerPath.contains("related_video") || lowerPath.contains("compact_video"));
     }
 
     private static String safeMessage(Throwable t) {

@@ -42,7 +42,9 @@ jobs:
           grep -F 'watchedSurfaceDefaultProfile' options.js
           grep -F "button.textContent = '⚙'" surface-profiles.js
           grep -F 'brand.hidden = true' surface-profiles.js
-          echo 'PASS PC page-scoped display assertions'
+          grep -F "if (key === 'shorts')" surface-profiles.js
+          grep -F 'button?.remove()' surface-profiles.js
+          echo 'PASS PC page-scoped display + Shorts exclusion assertions'
 
   android-compile:
     runs-on: ubuntu-latest
@@ -158,17 +160,22 @@ jobs:
           grep -F 'isPlaylistLikeSurface(surface)' "$filter"
           grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
 
-          # Runtime crash/UI regression locks: navigation queries fail open, Eternal never inserts
-          # into YouTube's native action row, and a saved page profile rebinds visible RecyclerViews.
-          grep -F 'safeSearchActive()' "$tracker"
-          grep -F 'safeSelectedNavigationButton()' "$tracker"
-          grep -F 'safeBackButtonVisible()' "$tracker"
-          grep -F 'safePlayerMaximized()' "$tracker"
+          # Real-device tab transitions are state-only. Morphe gives the selected button to the
+          # listener; Eternal must not re-enter transient NavigationBar/search/player state. Overlay
+          # work is deferred and the full-screen Shorts player has no E control or dim/hide pass.
           grep -F 'lastUiSurface' "$tracker"
+          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
+          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
+          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
+          ! grep -F 'getSelectedNavigationButton()' "$tracker"
+          ! grep -F 'PlayerType.getCurrent()' "$tracker"
           grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
           grep -F 'root.addView(control' "$toolbar"
+          grep -F 'scheduleControlMount(220L)' "$toolbar"
           grep -F 'schedulePresentationRefresh()' "$toolbar"
           grep -F 'notifyDataSetChanged' "$toolbar"
+          grep -F 'Surface.SHORTS' "$toolbar"
+          grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
           ! grep -F 'findActionMenu' "$toolbar"
           ! grep -F 'host.addView(control' "$toolbar"
 

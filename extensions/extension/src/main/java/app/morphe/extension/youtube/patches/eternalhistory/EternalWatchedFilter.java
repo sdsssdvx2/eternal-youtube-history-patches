@@ -63,6 +63,11 @@ public final class EternalWatchedFilter {
             if (videoId == null) return false;
 
             EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.forComponent(contextInterface, path);
+            // The full-screen Shorts player has no surrounding recommendation-card surface for this
+            // feature. Do not filter or dim anything there; this also keeps Shorts navigation free
+            // of unnecessary Eternal presentation work.
+            if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;
+
             EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
             if (!profile.visualEnabled()) return false;
 
