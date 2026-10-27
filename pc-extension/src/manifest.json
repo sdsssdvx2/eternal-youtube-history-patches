@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Eternal YouTube History",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger, page-scoped watched-card display controls, and safe Watch Later cleanup.",
   "permissions": [
     "storage",
