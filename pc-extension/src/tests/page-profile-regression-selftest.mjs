@@ -28,6 +28,12 @@ assert.match(surface, /generation !== scanGeneration \|\| key !== surfaceKey\(\)
 assert.match(surface, /button\.textContent = '⚙'/);
 assert.match(surface, /brand\.hidden = true/);
 
+// Shorts is a full-screen player, not a recommendation-card page. It must carry neither profile
+// rendering nor a settings button/panel; leaving Shorts must still let the normal SPA scan remount.
+assert.match(surface, /if \(key === 'shorts'\) \{\s*clearAllManaged\(\)/s);
+assert.match(surface, /if \(key === 'shorts'\) \{\s*button\?\.remove\(\)/s);
+assert.match(surface, /const key = surfaceKey\(\);\s*if \(key === 'shorts'\) return;/s);
+
 // Common defaults and per-page overrides have identical dim/hide threshold expressiveness.
 for (const token of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
