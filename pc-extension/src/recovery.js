@@ -15,17 +15,6 @@ function setStatus(text, error = false) {
   node.style.color = error ? '#f28b82' : '#a8c7fa';
 }
 
-function isWatchLaterUrl(raw) {
-  try {
-    const url = new URL(String(raw || ''));
-    return url.hostname === 'www.youtube.com'
-      && url.pathname === '/playlist'
-      && url.searchParams.get('list') === 'WL';
-  } catch {
-    return false;
-  }
-}
-
 async function sendWithRetry(tabId, message, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -42,24 +31,21 @@ async function sendWithRetry(tabId, message, timeoutMs = 60000) {
   throw lastError || new Error('YouTube Watch Later 탭과 연결하지 못했습니다.');
 }
 
-async function withWatchLaterTab(task) {
-  const tabs = await chrome.tabs.query({ url: ['https://www.youtube.com/*'] });
-  let tab = tabs.find(item => isWatchLaterUrl(item.url));
-  let created = false;
-  if (!tab) {
-    tab = await chrome.tabs.create({ url: WL_URL, active: false });
-    created = true;
-  }
-  if (!tab?.id) throw new Error('Watch Later 탭을 열지 못했습니다.');
+async function withFreshWatchLaterTab(task) {
+  // Never reuse an already-open YouTube tab here. An unpacked-extension update invalidates the old
+  // content-script context but leaves the page alive; a fresh hidden tab guarantees that the strict
+  // snapshot and ADD-only recovery bridge both belong to the currently installed extension build.
+  const tab = await chrome.tabs.create({ url: WL_URL, active: false });
+  if (!tab?.id) throw new Error('새 Watch Later 확인 탭을 열지 못했습니다.');
   try {
     return await task(tab.id);
   } finally {
-    if (created) await chrome.tabs.remove(tab.id).catch(() => {});
+    await chrome.tabs.remove(tab.id).catch(() => {});
   }
 }
 
 async function getCurrentSnapshot() {
-  return withWatchLaterTab(tabId => sendWithRetry(tabId, { type: 'EYH_RECOVERY_GET_WL_SNAPSHOT' }, 90000));
+  return withFreshWatchLaterTab(tabId => sendWithRetry(tabId, { type: 'EYH_RECOVERY_GET_WL_SNAPSHOT' }, 90000));
 }
 
 async function readLedgerProgress(ids) {
@@ -136,6 +122,21 @@ function candidateRow(item) {
   return row;
 }
 
+function resetResults() {
+  candidates = [];
+  currentCount = 0;
+  $('#historyEvidence').textContent = '0';
+  $('#currentCount').textContent = '0';
+  $('#candidateCount').textContent = '0';
+  $('#selectedCount').textContent = '0';
+  $('#summary').hidden = true;
+  $('#resultsCard').hidden = true;
+  $('#results').replaceChildren();
+  $('#selectAll').disabled = true;
+  $('#clearSelection').disabled = true;
+  $('#restore').disabled = true;
+}
+
 function render() {
   $('#summary').hidden = false;
   $('#resultsCard').hidden = false;
@@ -158,21 +159,20 @@ function render() {
 async function runScan() {
   if (busy) return;
   busy = true;
+  resetResults();
   $('#scan').disabled = true;
-  $('#selectAll').disabled = true;
-  $('#clearSelection').disabled = true;
-  $('#restore').disabled = true;
   setStatus('Chrome 방문 기록에서 list=WL 근거를 찾는 중…');
 
   let scan;
   try {
     scan = await scanChromeHistory();
   } finally {
+    // Browser-history access exists only for the shortest possible scan window.
     await chrome.permissions.remove(HISTORY_PERMISSION).catch(() => false);
   }
 
   try {
-    setStatus('history 권한을 반납했습니다. 현재 Watch Later 전체 목록을 안전하게 비교 중…');
+    setStatus('history 권한을 반납했습니다. 현재 Watch Later 전체 목록을 새 탭에서 안전하게 비교 중…');
     const snapshot = await getCurrentSnapshot();
     currentCount = Number(snapshot.declaredCount || snapshot.entries?.length || 0);
     const progress = await readLedgerProgress(scan.evidence.map(item => item.videoId));
@@ -222,7 +222,7 @@ async function restoreSelected() {
     durable.state = 'restoring';
     durable = await persistJournal(durable);
 
-    await withWatchLaterTab(async tabId => {
+    await withFreshWatchLaterTab(async tabId => {
       const before = await sendWithRetry(tabId, { type: 'EYH_RECOVERY_GET_WL_SNAPSHOT' }, 90000);
       const present = new Set((before.entries || []).map(entry => entry.videoId));
 
@@ -293,9 +293,11 @@ $('#scan').addEventListener('click', async () => {
     setStatus('Chrome 방문 기록 권한을 허용해야 list=WL 복구 후보를 찾을 수 있습니다.', true);
     return;
   }
-  runScan().catch(error => {
+  runScan().catch(async error => {
+    await chrome.permissions.remove(HISTORY_PERMISSION).catch(() => false);
     busy = false;
     $('#scan').disabled = false;
+    resetResults();
     setStatus(`복구 후보 스캔 실패: ${error.message}`, true);
   });
 });
@@ -309,3 +311,8 @@ $('#clearSelection').addEventListener('click', () => {
   updateSelectedCount();
 });
 $('#restore').addEventListener('click', () => restoreSelected());
+
+// If a previous recovery page/browser was killed during the short scan window, do not retain the
+// optional browser-history privilege across sessions. The user must explicitly grant it again.
+chrome.permissions.remove(HISTORY_PERMISSION).catch(() => false);
+resetResults();
