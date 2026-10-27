@@ -31,6 +31,12 @@ public final class EternalWatchLaterJobService extends JobService {
         JobScheduler scheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (scheduler == null) return;
 
+        if (EternalWatchLaterSafety.isLocked()) {
+            scheduler.cancel(JOB_ID);
+            scheduledEnabled = Boolean.FALSE;
+            return;
+        }
+
         boolean enabled = EternalHistorySettings.ENABLED.get()
                 && EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get();
         if (scheduledEnabled != null && scheduledEnabled == enabled) return;
@@ -62,11 +68,16 @@ public final class EternalWatchLaterJobService extends JobService {
     }
 
     static void runNow() {
+        if (EternalWatchLaterSafety.isLocked()) return;
         EternalWatchLaterAutoSweep.runAsync(true, null);
     }
 
     @Override
     public boolean onStartJob(JobParameters params) {
+        if (EternalWatchLaterSafety.isLocked()) {
+            running.set(false);
+            return false;
+        }
         if (!EternalHistorySettings.ENABLED.get()
                 || !EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get()) return false;
         if (!running.compareAndSet(false, true)) return false;
