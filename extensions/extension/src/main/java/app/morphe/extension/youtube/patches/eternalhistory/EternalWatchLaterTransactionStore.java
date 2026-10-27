@@ -23,10 +23,6 @@ final class EternalWatchLaterTransactionStore {
     private static final String CURRENT_FILE = "eternal-watch-later-transaction-v2.json";
     private static final String PREVIOUS_FILE = "eternal-watch-later-transaction-v2.previous.json";
 
-    /**
-     * Persist an integrity-wrapped transaction, fsync it, read it back, verify SHA-256, and only
-     * then return the parsed payload. Destructive code must use the returned object, not the input.
-     */
     static synchronized JSONObject saveVerified(JSONObject transaction) throws Exception {
         if (transaction == null) throw new IllegalArgumentException("transaction == null");
         transaction.put("schema", SCHEMA);
@@ -54,16 +50,18 @@ final class EternalWatchLaterTransactionStore {
     }
 
     /**
-     * Never overwrite an unfinished transaction. Completed/partial/undone records may be archived
-     * before a new manual cleanup starts so the latest rollback evidence is never silently lost.
+     * An unfinished journal is replaceable only when every candidate proves that no delete request
+     * could have been sent. Once any entry is removed/attempting/failed, rollback evidence is kept
+     * until the user runs undo.
      */
     static synchronized void archiveCurrentIfReplaceable() throws Exception {
         JSONObject current = loadCurrent();
         if (current == null) return;
         String state = current.optString("state", "");
-        if ("prepared".equals(state) || "verified".equals(state)
-                || "removing".equals(state) || "undoing".equals(state)) {
-            throw new IllegalStateException("완료되지 않은 이전 안전 정리가 있습니다. 먼저 마지막 정리 되돌리기를 실행하세요.");
+        boolean unfinished = "prepared".equals(state) || "verified".equals(state)
+                || "removing".equals(state) || "undoing".equals(state);
+        if (unfinished && containsDeleteRisk(current)) {
+            throw new IllegalStateException("완료되지 않은 이전 안전 정리에 삭제 가능성이 있는 항목이 있습니다. 먼저 마지막 정리 되돌리기를 실행하세요.");
         }
         JSONObject archived = writeVerified(atomicFile(PREVIOUS_FILE), current);
         if (!current.optString("id", "").equals(archived.optString("id", ""))) {
@@ -108,7 +106,8 @@ final class EternalWatchLaterTransactionStore {
                 String status = c.optString("status", "prepared");
                 String undo = c.optString("undoStatus", "pending");
                 if ("removed".equals(status)) removed++;
-                if ("failed".equals(status) || "identity_mismatch".equals(status) || "missing".equals(status)) failures++;
+                if ("failed".equals(status) || "identity_mismatch".equals(status)
+                        || "missing".equals(status) || "aborted_before_request".equals(status)) failures++;
                 if ("attempting".equals(status)) uncertain++;
                 if ("restored".equals(undo) || "already_present".equals(undo)) restored++;
                 if ("failed".equals(undo)) undoFailures++;
@@ -162,6 +161,15 @@ final class EternalWatchLaterTransactionStore {
         } catch (Throwable t) {
             return "안전 정리 journal=무결성 확인 실패";
         }
+    }
+
+    private static boolean containsDeleteRisk(JSONObject tx) {
+        JSONArray candidates = tx == null ? null : tx.optJSONArray("candidates");
+        if (candidates == null) return false;
+        for (int i = 0; i < candidates.length(); i++) {
+            if (shouldRestore(candidates.optJSONObject(i))) return true;
+        }
+        return false;
     }
 
     private static JSONObject writeVerified(AtomicFile file, JSONObject transaction) throws Exception {
