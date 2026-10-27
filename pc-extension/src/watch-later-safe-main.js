@@ -4,8 +4,11 @@
   const SOURCE = 'eternal-youtube-history-page';
   const TARGET = 'eternal-youtube-history-content';
   const WL = globalThis.EYHWatchLaterCore;
+  const SAFE = globalThis.EYHWatchLaterSafeCore;
   const OP_RE = /^[A-Za-z0-9:_-]{8,160}$/;
   const DIGEST_RE = /^[0-9a-f]{64}$/i;
+  const MAX_SAFE_PAGES = 250;
+  const MAX_SAFE_ENTRIES = 5000;
   const inFlight = new Set();
 
   function cfg(key, fallback = undefined) {
@@ -77,6 +80,81 @@
     return res.json();
   }
 
+  async function fetchWatchLaterPage(continuation = null) {
+    const body = {
+      context: getClientContext(),
+      contentCheckOk: true,
+      racyCheckOk: true
+    };
+    if (continuation) body.continuation = continuation;
+    else body.browseId = 'VLWL';
+    const json = await youtubeApiPost('browse', body);
+    return {
+      entries: WL.extractPlaylistEntries(json) || [],
+      continuations: WL.extractContinuationTokens(json) || []
+    };
+  }
+
+  function appendStrictEntry(raw, ordered, byVideo, bySet) {
+    const id = WL?.normalizeVideoId?.(raw?.videoId);
+    const setId = WL?.normalizeSetVideoId?.(raw?.setVideoId);
+    if (!id || !setId) throw new Error('Watch Later 응답에 모호한 항목 식별자가 있어 전체 목록 확인을 중단합니다.');
+    if (byVideo.has(id) && byVideo.get(id) !== setId) {
+      throw new Error(`Watch Later videoId ${id}의 setVideoId가 페이지 사이에서 바뀌어 정리를 중단합니다.`);
+    }
+    if (bySet.has(setId) && bySet.get(setId) !== id) {
+      throw new Error('Watch Later 동일 setVideoId가 서로 다른 videoId에 연결되어 정리를 중단합니다.');
+    }
+    if (byVideo.has(id)) return false;
+    byVideo.set(id, setId);
+    bySet.set(setId, id);
+    ordered.push({ videoId: id, setVideoId: setId });
+    if (ordered.length > MAX_SAFE_ENTRIES) {
+      throw new Error(`Watch Later 항목이 안전 한도 ${MAX_SAFE_ENTRIES}개를 초과해 정리를 중단합니다.`);
+    }
+    return true;
+  }
+
+  async function strictListWatchLater(maxPages = MAX_SAFE_PAGES) {
+    if (!WL || !SAFE) throw new Error('Watch Later 안전 코어가 로드되지 않았습니다.');
+    const limit = Math.max(1, Math.min(Number(maxPages) || MAX_SAFE_PAGES, MAX_SAFE_PAGES));
+    const ordered = [];
+    const byVideo = new Map();
+    const bySet = new Map();
+    const seenTokens = new Set();
+    let continuation = null;
+    let pages = 0;
+
+    while (true) {
+      const page = await fetchWatchLaterPage(continuation);
+      pages += 1;
+      let added = 0;
+      for (const entry of page.entries) {
+        if (appendStrictEntry(entry, ordered, byVideo, bySet)) added += 1;
+      }
+
+      const decision = SAFE.paginationDecision(page.continuations, seenTokens, {
+        pages,
+        added,
+        maxPages: limit
+      });
+      if (decision.complete) {
+        return {
+          entries: ordered,
+          pages,
+          complete: true,
+          hasMore: false,
+          terminalReason: decision.terminalReason,
+          strict: true
+        };
+      }
+
+      seenTokens.add(decision.next);
+      continuation = decision.next;
+      await new Promise(r => setTimeout(r, 80));
+    }
+  }
+
   async function resolveEntry(videoId) {
     const id = WL?.normalizeVideoId?.(videoId);
     if (!id) throw new Error('올바르지 않은 videoId입니다.');
@@ -139,11 +217,14 @@
   }
 
   function validEnvelope(msg) {
-    return OP_RE.test(String(msg?.operationId || '')) && DIGEST_RE.test(String(msg?.journalDigest || ''));
+    const operationId = String(msg?.operationId || '');
+    return operationId.startsWith('pcwl:')
+      && OP_RE.test(operationId)
+      && DIGEST_RE.test(String(msg?.journalDigest || ''));
   }
 
-  async function handle(msg) {
-    if (!WL) throw new Error('Watch Later core가 로드되지 않았습니다.');
+  async function handleMutation(msg) {
+    if (!WL || !SAFE) throw new Error('Watch Later 안전 코어가 로드되지 않았습니다.');
     if (!validEnvelope(msg)) throw new Error('안전 journal 식별자가 없거나 올바르지 않습니다.');
     const key = `${msg.operationId}:${msg.type}:${msg.videoId || ''}`;
     if (inFlight.has(key)) throw new Error('같은 안전 작업이 이미 진행 중입니다.');
@@ -159,17 +240,29 @@
 
   window.addEventListener('message', event => {
     if (event.source !== window) return;
+    if (event.origin && event.origin !== location.origin) return;
     const msg = event.data;
     if (!msg || msg.source !== TARGET || msg.target !== SOURCE) return;
-    if (msg.type !== 'EYH_WL_SAFE_REMOVE_REQUEST' && msg.type !== 'EYH_WL_SAFE_ADD_REQUEST') return;
+    if (![
+      'EYH_WL_SAFE_LIST_REQUEST',
+      'EYH_WL_SAFE_REMOVE_REQUEST',
+      'EYH_WL_SAFE_ADD_REQUEST'
+    ].includes(msg.type)) return;
     const requestId = msg.requestId;
-    handle(msg).then(result => {
+
+    const task = msg.type === 'EYH_WL_SAFE_LIST_REQUEST'
+      ? strictListWatchLater(msg.maxPages)
+      : handleMutation(msg);
+
+    task.then(result => {
       window.postMessage({
         source: SOURCE,
         target: TARGET,
         type: 'EYH_WL_SAFE_RESULT',
         requestId,
-        operationId: msg.operationId,
+        operationId: msg.operationId || null,
+        action: msg.type === 'EYH_WL_SAFE_LIST_REQUEST' ? 'list'
+          : msg.type === 'EYH_WL_SAFE_REMOVE_REQUEST' ? 'remove' : 'add',
         ok: true,
         ...result
       }, '*');
@@ -179,7 +272,7 @@
         target: TARGET,
         type: 'EYH_WL_SAFE_RESULT',
         requestId,
-        operationId: msg.operationId,
+        operationId: msg.operationId || null,
         ok: false,
         error: String(error?.message || error)
       }, '*');

@@ -63,8 +63,8 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The v0.10.3 emergency boundary remains a permanent invariant in v0.10.4: destructive legacy
-// requests are intercepted in MAIN world before the old page bridge can call browse/edit_playlist.
+// The v0.10.3 emergency boundary remains permanent in v0.10.5: destructive legacy requests are
+// intercepted in MAIN world before the old page bridge can call browse/edit_playlist.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
@@ -76,7 +76,9 @@ assert.match(hotfix, /#eyh-watch-later-cleanup/);
 const mainWorld = manifest.content_scripts.find(entry => entry.world === 'MAIN');
 assert.ok(mainWorld, 'MAIN-world content script is required');
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'safety boundary must load before page-bridge');
-assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('page-bridge.js'));
-assert.equal(manifest.version, '0.10.4');
+assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
+assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
+assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'));
+assert.equal(manifest.version, '0.10.5');
 
 console.log('PASS watch-later-core + fail-closed safety self-test');
