@@ -40,7 +40,9 @@ jobs:
           grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
           grep -F 'eyh-surface-watched' surface-profiles.js
           ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
-          echo 'PASS PC low-frequency maintenance + isolated renderer safety'
+          grep -F "if (key === 'shorts')" surface-profiles.js
+          grep -F 'button?.remove()' surface-profiles.js
+          echo 'PASS PC low-frequency maintenance + isolated renderer + Shorts UI safety'
       - name: Android background cleanup safety
         shell: bash
         run: |
@@ -54,6 +56,7 @@ jobs:
           toolbar="$base/EternalHistoryToolbar.java"
           tracker="$base/EternalSurfaceTracker.java"
           surface="$base/EternalSurfaceSettings.java"
+          filter="$base/EternalWatchedFilter.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
@@ -70,22 +73,24 @@ jobs:
           grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
           grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
 
-          # v1.11 runtime safety replaces the crash-prone native toolbar/fallback pair with one
-          # app-content overlay and makes every transient host navigation lookup fail-open.
+          # Real-device tab transitions must be state-only: Morphe gives us the selected button,
+          # and Eternal must not re-enter transient NavigationBar/PlayerType/search state from the
+          # callback. UI work is deferred, while Shorts carries neither E control nor dim/hide work.
           grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
           grep -F 'root.addView(control' "$toolbar"
           grep -F 'positionControl(root, control)' "$toolbar"
-          grep -F 'schedulePresentationRefresh()' "$toolbar"
-          grep -F 'notifyDataSetChanged' "$toolbar"
-          ! grep -F 'findVisibleToolbarHost' "$toolbar"
-          ! grep -F 'ensureFallbackControl' "$toolbar"
-          grep -F 'safeSearchActive()' "$tracker"
-          grep -F 'safeSelectedNavigationButton()' "$tracker"
-          grep -F 'safeBackButtonVisible()' "$tracker"
-          grep -F 'safePlayerMaximized()' "$tracker"
+          grep -F 'scheduleControlMount(220L)' "$toolbar"
+          grep -F 'Surface.SHORTS' "$toolbar"
+          grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
+          grep -F 'NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged)' "$addon"
+          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
+          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
+          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
+          ! grep -F 'getSelectedNavigationButton()' "$tracker"
+          ! grep -F 'PlayerType.getCurrent()' "$tracker"
           grep -F 'ensureDefaultProfileMigrated()' "$surface"
           grep -F 'hasExplicitProfile' "$surface"
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android opt-in/device-auth cleanup + runtime navigation/UI safety'
+          echo 'PASS Android opt-in/device-auth cleanup + cached navigation/Shorts UI safety'
