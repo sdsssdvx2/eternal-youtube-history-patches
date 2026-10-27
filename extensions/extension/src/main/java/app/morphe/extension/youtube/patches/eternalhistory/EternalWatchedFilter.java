@@ -58,17 +58,21 @@ public final class EternalWatchedFilter {
             StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
             if (pathBuilder == null) return false;
             String path = pathBuilder.toString();
+            String lowerPath = path.toLowerCase();
+
+            // v1.10.5 crash quarantine: classify only from the Litho path already passed into this
+            // filter. Never consult cached NavigationBar/browse/player state while YouTube rebuilds
+            // a bottom-tab destination. Shorts presentation remains a strict no-op.
+            EternalSurfaceSettings.Surface surface = surfaceFromComponentPath(lowerPath);
+            if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;
 
             String videoId = BufferPhraseFilter.extractVideoIdFromBuffer(buffer);
             if (videoId == null) return false;
 
-            EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.forComponent(contextInterface, path);
-            // The full-screen Shorts player has no surrounding recommendation-card surface for this
-            // feature. Do not filter or dim anything there; this also keeps Shorts navigation free
-            // of unnecessary Eternal presentation work.
-            if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;
-
-            EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
+            // Page-specific values stay stored for a future safe implementation. During quarantine,
+            // use only the migrated/common default profile so filtering is deterministic and has no
+            // dependency on host navigation lifecycle. No user preference data is rewritten here.
+            EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.defaultProfile(false);
             if (!profile.visualEnabled()) return false;
 
             EternalHistoryClient.ensureFeedCacheStarted();
@@ -98,6 +102,26 @@ public final class EternalWatchedFilter {
             Logger.printException(() -> "Eternal watched-card filter failure", t);
             return false;
         }
+    }
+
+    private static EternalSurfaceSettings.Surface surfaceFromComponentPath(String lowerPath) {
+        if (lowerPath == null || lowerPath.isEmpty()) return EternalSurfaceSettings.Surface.OTHER;
+        if (lowerPath.contains("shorts") || lowerPath.contains("reel")) {
+            return EternalSurfaceSettings.Surface.SHORTS;
+        }
+        if (lowerPath.contains("search_video")) {
+            return EternalSurfaceSettings.Surface.SEARCH;
+        }
+        if (lowerPath.contains("related_video") || lowerPath.contains("compact_video")) {
+            return EternalSurfaceSettings.Surface.WATCH;
+        }
+        if (lowerPath.contains("playlist") || lowerPath.contains("video_list_entry")) {
+            return EternalSurfaceSettings.Surface.PLAYLIST_DETAIL;
+        }
+        if (lowerPath.contains("home_video")) {
+            return EternalSurfaceSettings.Surface.HOME;
+        }
+        return EternalSurfaceSettings.Surface.OTHER;
     }
 
     private static boolean looksLikeVideoContext(String path) {
