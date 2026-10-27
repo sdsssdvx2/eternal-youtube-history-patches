@@ -68,9 +68,11 @@ async function load() {
     workerUrl: '',
     apiToken: ''
   });
-  const profile = v.watchedSurfaceDefaultProfile
-    ? normalizeProfile(v.watchedSurfaceDefaultProfile)
-    : legacyProfile(v);
+
+  // v0.10.7 stability mode deliberately returns presentation ownership to the proven 0.9.x
+  // renderer. Preserve page-profile data in storage for a future safe reimplementation, but show
+  // and edit the settings that are actually active now.
+  const profile = legacyProfile(v);
 
   $('#directWatchSeconds').value = v.directWatchSeconds;
   $('#watchedDefaultDimEnabled').checked = profile.dimEnabled;
@@ -83,7 +85,8 @@ async function load() {
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
-  $('#watchLaterAutoCleanupEnabled').checked = Boolean(v.watchLaterAutoCleanupEnabled);
+  $('#watchLaterAutoCleanupEnabled').checked = false;
+  $('#watchLaterAutoCleanupEnabled').disabled = true;
   $('#watchLaterCleanupMinProgressPct').value = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
   $('#autoHistoryPages').value = v.autoHistoryPages;
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
@@ -97,20 +100,22 @@ async function save() {
   const enabled = $('#cloudEnabled').checked;
   if (enabled && workerUrl && !(await requestWorkerPermission(workerUrl))) throw new Error('Worker 도메인 접근 권한이 필요합니다.');
   const defaultProfile = readDefaultProfileFromForm();
+  const legacyMode = defaultProfile.hideEnabled ? 'hide' : defaultProfile.dimEnabled ? 'dim' : 'none';
   const legacyThreshold = defaultProfile.linkedThresholds
     ? defaultProfile.sharedThreshold
-    : (defaultProfile.hideEnabled ? defaultProfile.hideThreshold : defaultProfile.dimThreshold);
+    : (legacyMode === 'hide' ? defaultProfile.hideThreshold : defaultProfile.dimThreshold);
   await chrome.storage.local.set({
     directWatchSeconds: Math.max(1, Math.min(120, Number($('#directWatchSeconds').value) || 5)),
-    // Keep the stable 0.9.x content script's renderer disabled. surface-profiles.js is the single
-    // owner of page/default presentation and uses a separate class namespace.
-    watchedDisplayMode: 'none',
+    // The stable renderer supports one active display mode. When both checkboxes are enabled in the
+    // preserved profile UI, hide keeps the documented precedence. Page-profile data remains stored
+    // untouched for future use, but is not executed in stability mode.
+    watchedDisplayMode: legacyMode,
     watchedMinProgressPct: legacyThreshold,
     watchedSurfaceDefaultProfile: defaultProfile,
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
-    watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked,
+    watchLaterAutoCleanupEnabled: false,
     watchLaterCleanupMinProgressPct: Math.max(1, Math.min(100, Number($('#watchLaterCleanupMinProgressPct').value) || 60)),
     autoHistoryPages: Math.max(1, Math.min(50, Number($('#autoHistoryPages').value) || 3)),
     cloudEnabled: enabled,
@@ -119,7 +124,7 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#status').textContent = '공통 기본값을 저장했습니다. 개별 설정한 페이지는 그대로 유지되고, 기본값 사용 페이지에는 즉시 반영됩니다.';
+  $('#status').textContent = '안정 표시 설정을 저장했습니다. 페이지별 프로필 값은 보존되지만 안정화 모드에서는 실행하지 않습니다.';
   await refreshStatus();
 }
 
@@ -175,7 +180,7 @@ $('#runDiagnostics').addEventListener('click', async () => {
     const page = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_DIAGNOSTICS' });
     const client = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
     const prefs = await chrome.storage.local.get({ watchedSurfaceDefaultProfile: null, watchedSurfaceProfiles: {} });
-    out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client, pageProfiles: prefs }, null, 2);
+    out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client, pageProfilesPreservedButInactive: prefs }, null, 2);
   } catch (e) {
     out.textContent = `진단 실패: ${e.message}`;
   }

@@ -179,8 +179,14 @@ async function runScan() {
     candidates = CORE.buildRecoveryCandidates(scan.evidence, snapshot.entries || [], progress);
     $('#historyEvidence').textContent = scan.evidence.length.toLocaleString();
     render();
+    const mismatchWarning = snapshot.countMismatch
+      ? ` ${snapshot.warning || `표시 ${snapshot.declaredCount}개 중 ${snapshot.parsedCount}개만 식별 가능해, 식별 가능한 현재 멤버십만 제외했습니다.`}`
+      : '';
+    const truncationWarning = scan.truncated
+      ? ' Chrome history 검색 상한에 도달해 일부 오래된 기록은 빠질 수 있습니다.'
+      : '';
     setStatus(
-      `현재 Watch Later ${currentCount}개와 비교해 복구 후보 ${candidates.length}개를 찾았습니다.${scan.truncated ? ' Chrome history 검색 상한에 도달해 일부 오래된 기록은 빠질 수 있습니다.' : ''}`
+      `현재 Watch Later ${currentCount}개와 비교해 복구 후보 ${candidates.length}개를 찾았습니다.${mismatchWarning}${truncationWarning}`
     );
   } finally {
     busy = false;

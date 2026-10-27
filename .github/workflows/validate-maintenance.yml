@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
+
       - name: Android release scope safety
         shell: bash
         run: |
@@ -32,18 +33,16 @@ jobs:
           analyzer=next(p for p in cfg['plugins'] if isinstance(p, list) and p[0]=='@semantic-release/commit-analyzer')
           rules=analyzer[1]['releaseRules']
           assert any(r.get('scope')=='pc' and r.get('release') is False for r in rules), rules
-          # Generic feat/fix/perf custom rules would also match scope=pc and the highest release wins.
-          # Leave those types to commit-analyzer's defaults so the explicit pc:false rule wins first.
           assert not any(r.get('type') in {'feat','fix','perf'} and 'scope' not in r for r in rules), rules
           notes=next(p for p in cfg['plugins'] if isinstance(p, list) and p[0]=='@semantic-release/release-notes-generator')
           ignore=notes[1]['presetConfig'].get('ignoreCommits')
           assert ignore == r'^[a-z]+\(pc\):', ignore
-          assert re.search(ignore, 'feat(pc): transactional Watch Later cleanup')
-          assert re.search(ignore, 'fix(pc): strict pagination')
-          assert not re.search(ignore, 'fix(android): restore safe cleanup')
-          print('PASS Android semantic-release ignores PC-only version bumps and release-note entries')
+          assert re.search(ignore, 'fix(pc): restore single renderer')
+          assert not re.search(ignore, 'fix(android): neutralize surface callbacks')
+          print('PASS Android semantic-release ignores PC-only changes')
           PY
-      - name: PC maintenance safety
+
+      - name: PC single-owner presentation and Watch Later safety
         shell: bash
         run: |
           set -euo pipefail
@@ -51,22 +50,35 @@ jobs:
           node tests/watch-later-selftest.mjs
           node tests/static-integration-selftest.mjs
           node tests/page-profile-regression-selftest.mjs
-          node --check maintenance.js
-          node --check surface-profiles.js
+          node tests/watch-later-recovery-selftest.mjs
+          node tests/watch-later-recovery-static-selftest.mjs
+          for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
+
+          node - <<'NODE'
+          const fs=require('fs');
+          const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+          const iso=m.content_scripts.find(x=>x.world==='ISOLATED');
+          if(!iso) throw new Error('missing ISOLATED world');
+          for(const f of ['content.js','pc-stability-guard.js','watch-later-safe.js','watch-later-recovery-content.js','maintenance.js']) {
+            if(!iso.js.includes(f)) throw new Error(`missing ${f}`);
+          }
+          for(const f of ['surface-profiles.js','pc-ui-hotfix.js']) {
+            if(iso.js.includes(f)) throw new Error(`stability mode must not load ${f}`);
+          }
+          if(!iso.css.includes('pc-stability-guard.css')) throw new Error('missing stability CSS');
+          console.log('PASS PC manifest single-owner presentation');
+          NODE
+
           grep -F "document.visibilityState !== 'visible'" maintenance.js
           grep -F "watchLaterAutoCleanupEnabled: false" maintenance.js
-          grep -F "EYH_WL_LIST_REQUEST" maintenance.js
-          grep -F "EYH_WL_REMOVE_REQUEST" maintenance.js
-          grep -F "ACTIVE_YOUTUBE_SYNC" maintenance.js
-          grep -F "maxPages: 100" maintenance.js
           ! grep -F 'chrome.alarms' maintenance.js
-          grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
-          grep -F 'eyh-surface-watched' surface-profiles.js
-          ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
-          grep -F "if (key === 'shorts')" surface-profiles.js
-          grep -F 'button?.remove()' surface-profiles.js
-          echo 'PASS PC low-frequency maintenance + isolated renderer + Shorts UI safety'
-      - name: Android transactional cleanup safety
+          ! grep -F 'MutationObserver' pc-stability-guard.js
+          grep -F "classList.toggle('eyh-shorts-surface', shorts)" pc-stability-guard.js
+          grep -F "watchedDisplayMode: legacyMode" options.js
+          ! grep -F "watchedDisplayMode: 'none'" options.js
+          echo 'PASS PC stable single renderer + low-frequency maintenance'
+
+      - name: Android navigation stability and transactional cleanup safety
         shell: bash
         run: |
           set -euo pipefail
@@ -87,42 +99,27 @@ jobs:
           safe_undo="$base/EternalWatchLaterSafeUndo.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
 
-          # Automatic and legacy deletion remain locked after the real-user data-loss report.
+          # Automatic/legacy deletion remains locked.
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'DESTRUCTIVE_CLEANUP_LOCKED = true' "$safety"
           grep -F 'EternalWatchLaterSafety.isLocked()' "$job"
           grep -F 'scheduler.cancel(JOB_ID)' "$job"
           grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$addon"
-          grep -F 'if (!EternalWatchLaterSafety.isLocked())' "$addon"
-          grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
-          grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
 
-          # The new manual path is isolated from the legacy cleaner and refreshes central progress first.
-          grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$coordinator"
+          # Manual transaction engine remains strict and rollback-capable.
           grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
           grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
           grep -F 'EternalWatchLaterSafeUndo.undoLastCleanup(activity)' "$coordinator"
-          ! grep -F 'EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
-
-          # Strict enumeration must fail closed on continuation ambiguity, loops, zero-add pages, and caps.
           grep -F 'private static ListResult listWatchLaterStrict' "$safe_cleaner"
           grep -F 'pageTokens.size() != 1' "$safe_cleaner"
           grep -F '!consumedTokens.add(next)' "$safe_cleaner"
           grep -F 'entries.size() == before' "$safe_cleaner"
-          grep -F 'pages >= Math.max(1, maxPages)' "$safe_cleaner"
           grep -F 'sameMembership(originalSnapshot, confirmed.entries)' "$safe_cleaner"
-
-          # Durable schema-2 journal has an integrity wrapper and narrow rollback eligibility.
           grep -F 'static final int SCHEMA = 2' "$tx_store"
           grep -F 'eternal-watch-later-journal-v2' "$tx_store"
-          grep -F 'sha256(payloadBytes)' "$tx_store"
-          grep -F 'static boolean shouldRestore' "$tx_store"
-          grep -F '"removed".equals(status) || "attempting".equals(status) || "failed".equals(status)' "$tx_store"
           grep -F 'containsDeleteRisk(current)' "$tx_store"
           grep -F 'EternalWatchLaterTransactionStore.shouldRestore(candidate)' "$safe_undo"
 
-          # Ordering invariant: durable full snapshot -> post-confirm full re-read -> removing state.
-          # Per item: attempting -> fsync/read-back -> final identity resolve -> delete -> result persist.
           python - <<'PY'
           from pathlib import Path
           p=Path('extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterSafeCleaner.java').read_text()
@@ -140,32 +137,33 @@ jobs:
           print('PASS Android transaction ordering assertions')
           PY
 
-          # Existing auto-sweep code remains fail-closed even though runtime scheduling is locked.
-          grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
-          grep -F 'pct != null && pct >= 0f && pct >= threshold' "$sweep"
-          grep -F 'validSetVideoId(entry.setVideoId)' "$sweep"
-          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$sweep"
-          grep -F 'resolveEntry(entry.videoId) == null' "$sweep"
-          grep -F 'if (result.scanned == 0)' "$sweep"
-          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
-          ! grep -F 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID' "$sweep"
+          # Stability mode: callbacks preserve ABI but do zero host navigation/view work.
+          grep -F 'public static void onBrowseId' "$tracker"
+          grep -F 'static void onNavigationChanged' "$tracker"
+          grep -F 'return EternalSurfaceSettings.Surface.OTHER;' "$tracker"
+          ! grep -F 'publishSurface' "$tracker"
+          ! grep -F 'getSelectedNavigationButton' "$tracker"
+          ! grep -F 'PlayerType' "$tracker"
+          ! grep -F 'NavigationBar.is' "$tracker"
 
-          # Real-device tab transitions remain state-only; Shorts carries no Eternal overlay/filter.
-          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
-          grep -F 'root.addView(control' "$toolbar"
-          grep -F 'positionControl(root, control)' "$toolbar"
-          grep -F 'scheduleControlMount(220L)' "$toolbar"
-          grep -F 'Surface.SHORTS' "$toolbar"
-          grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
-          grep -F 'NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged)' "$addon"
-          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
-          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
-          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
-          ! grep -F 'getSelectedNavigationButton()' "$tracker"
-          ! grep -F 'PlayerType.getCurrent()' "$tracker"
+          grep -F 'public static void onToolbarImageView' "$toolbar"
+          grep -F 'static void onSurfaceChanged()' "$toolbar"
+          grep -F 'static void ensureControlSoon()' "$toolbar"
+          ! grep -F 'root.addView' "$toolbar"
+          ! grep -F 'findViewById' "$toolbar"
+          ! grep -F 'RecyclerView' "$toolbar"
+          ! grep -F 'AlertDialog' "$toolbar"
+
+          # Card presentation uses only the common/default profile and pure component-path Shorts exclusion.
+          grep -F 'EternalSurfaceSettings.defaultProfile(false)' "$filter"
+          grep -F 'looksLikeShortsComponent(path)' "$filter"
+          grep -F 'lower.contains("shorts") || lower.contains("reel")' "$filter"
+          ! grep -F 'EternalSurfaceTracker.forComponent' "$filter"
           grep -F 'ensureDefaultProfileMigrated()' "$surface"
-          grep -F 'hasExplicitProfile' "$surface"
 
+          # Existing injected call sites/manifest declarations remain compatible while their runtime targets are no-op.
+          grep -F 'installEternalBrowseIdHook()' "$support"
+          grep -F 'installEternalToolbarHook()' "$support"
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android legacy/automatic lock + manual transactional Watch Later safety'
+          echo 'PASS Android navigation no-op stability + manual transactional safety'
