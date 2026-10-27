@@ -45,6 +45,16 @@ const requestPermission = recovery.indexOf('chrome.permissions.request(HISTORY_P
 const runScan = recovery.indexOf('runScan().catch');
 assert.ok(requestPermission >= 0 && runScan > requestPermission,
   'history permission request must stay directly tied to the recovery button gesture');
+assert.match(recovery, /withFreshWatchLaterTab/);
+assert.match(recovery, /chrome\.tabs\.create\(\{ url: WL_URL, active: false \}\)/);
+assert.doesNotMatch(recovery, /chrome\.tabs\.query/,
+  'recovery must never reuse an old YouTube tab whose extension context may be invalidated');
+const startupDisable = recovery.lastIndexOf("$('#scan').disabled = true");
+const startupRemove = recovery.lastIndexOf('chrome.permissions.remove(HISTORY_PERMISSION)');
+const startupEnable = recovery.lastIndexOf("$('#scan').disabled = false");
+assert.ok(startupDisable >= 0 && startupRemove > startupDisable && startupEnable > startupRemove,
+  'recovery page must finish stale history-permission cleanup before enabling a new scan');
+assert.match(recovery, /resetResults\(\);/);
 assert.match(recovery, /list=WL/);
 assert.match(recovery, /type: 'EYH_RECOVERY_GET_WL_SNAPSHOT'/);
 assert.match(recovery, /type: 'EYH_RECOVERY_ADD_ONE'/);
