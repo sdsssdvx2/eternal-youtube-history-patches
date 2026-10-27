@@ -167,6 +167,16 @@
     if (!settings || generation !== scanGeneration) return;
 
     const key = surfaceKey();
+    // The full-screen Shorts player has no recommendation-card surface that benefits from Eternal
+    // dim/hide presentation. Keep the page completely untouched and remove any style left by the
+    // preceding SPA surface before rendering the compact header state.
+    if (key === 'shorts') {
+      clearAllManaged();
+      closePanel({ restorePreview: true });
+      decorateHeader();
+      return;
+    }
+
     const profile = currentProfile(key);
     const thresholds = effectiveThresholds(profile);
     const map = new Map();
@@ -223,7 +233,15 @@
     if (!root) return;
     for (const b of root.querySelectorAll('button[data-eyh-mode]')) b.hidden = true;
     const brand = root.querySelector('.eyh-header-brand'); if (brand) brand.hidden = true;
+
+    const key = surfaceKey();
     let button = root.querySelector('#eyh-surface-settings');
+    if (key === 'shorts') {
+      button?.remove();
+      closePanel({ restorePreview: true });
+      return;
+    }
+
     if (!button) {
       button = document.createElement('button');
       button.id = 'eyh-surface-settings'; button.type = 'button';
@@ -232,7 +250,6 @@
       button.addEventListener('click', () => { if (extensionAlive()) openPanel(); });
       root.insertBefore(button, root.querySelector('.eyh-wl-only') || root.querySelector('#eyh-header-status'));
     }
-    const key = surfaceKey();
     const p = currentProfile(key), t = effectiveThresholds(p);
     const states = [];
     if (p.dimEnabled) states.push(`흐림 ${t.dim}%`);
@@ -270,7 +287,9 @@
   function openPanel() {
     closePanel({ restorePreview: true });
     if (!settings) return;
-    const key = surfaceKey(), initial = currentProfile(key), hadOverride = hasOverride(key);
+    const key = surfaceKey();
+    if (key === 'shorts') return;
+    const initial = currentProfile(key), hadOverride = hasOverride(key);
     panelRestoreProfile = { key, hadOverride, profile: initial };
     panel = document.createElement('div'); panel.id = 'eyh-surface-panel';
     const title = document.createElement('strong'); title.textContent = LABELS[key] || LABELS.other; panel.append(title);
