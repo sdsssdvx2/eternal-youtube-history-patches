@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import './watch-later-safe-transaction-selftest.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const text = name => fs.readFileSync(path.join(src, name), 'utf8');
