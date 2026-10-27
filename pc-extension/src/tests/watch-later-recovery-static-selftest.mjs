@@ -14,7 +14,7 @@ const recoveryHtml = text('recovery.html');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.6');
+assert.equal(manifest.version, '0.10.7');
 assert.deepEqual(manifest.optional_permissions, ['history'], 'history must remain optional, never install-time required');
 assert.ok(!manifest.permissions.includes('history'), 'history must not be a permanent required permission');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
@@ -35,7 +35,12 @@ assert.doesNotMatch(main, /setVideoId/,
 
 assert.match(content, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(content, /terminalReason !== 'no-continuation'/);
-assert.match(content, /declared !== entries\.length/);
+assert.match(content, /declared !== entries\.length/,
+  'recovery must fail closed until the displayed count and parsed membership count are identical');
+assert.match(content, /private\/deleted 항목인지 새 renderer 파싱 누락인지 확인되기 전에는/);
+assert.match(content, /unparsedCount: 0/);
+assert.doesNotMatch(content, /declared < entries\.length/,
+  'one-sided count checks are insufficient for a strict recovery snapshot');
 assert.match(content, /EYH_WL_RECOVERY_ADD_REQUEST/);
 assert.doesNotMatch(content, /EYH_WL_SAFE_REMOVE_REQUEST/);
 
@@ -66,4 +71,4 @@ assert.match(recoveryHtml, /삭제하지 않습니다/);
 assert.match(popupHtml, /id="recoverWatchLater"/);
 assert.match(popup, /recovery\.html/);
 
-console.log('PASS Watch Later recovery static safety self-test');
+console.log('PASS Watch Later recovery strict-completeness safety self-test');

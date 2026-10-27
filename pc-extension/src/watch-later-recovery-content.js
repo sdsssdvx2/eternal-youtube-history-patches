@@ -65,7 +65,7 @@
     else waiter.reject(new Error(message.error || `${message.type} 실패`));
   });
 
-  async function strictSnapshot() {
+  async function recoverySnapshot() {
     if (!isWatchLaterPage()) throw new Error('복구 비교는 Watch Later 페이지에서만 실행할 수 있습니다.');
     const listed = await requestPage(
       'EYH_WL_SAFE_LIST_REQUEST',
@@ -76,17 +76,23 @@
         || listed.complete !== true
         || listed.hasMore !== false
         || listed.terminalReason !== 'no-continuation') {
-      throw new Error('Watch Later 전체 목록의 안전한 끝 지점을 확인하지 못했습니다.');
+      throw new Error('Watch Later 서버 목록의 끝 지점을 안전하게 확인하지 못했습니다.');
     }
     const entries = Array.isArray(listed.entries) ? listed.entries : [];
     const declared = declaredWatchLaterCount();
     if (declared == null) throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없습니다.');
     if (declared !== entries.length) {
-      throw new Error(`YouTube 표시 개수 ${declared}개와 안전 파서 ${entries.length}개가 달라 복구 비교를 중단합니다.`);
+      throw new Error(
+        `YouTube 표시 개수 ${declared}개와 안전 파서 결과 ${entries.length}개가 일치하지 않아 복구 비교를 중단합니다. ` +
+        'private/deleted 항목인지 새 renderer 파싱 누락인지 확인되기 전에는 일부 목록으로 복구를 진행하지 않습니다.'
+      );
     }
+
     return {
       entries: entries.map(entry => ({ videoId: entry.videoId, setVideoId: entry.setVideoId })),
       declaredCount: declared,
+      parsedCount: entries.length,
+      unparsedCount: 0,
       pages: Number(listed.pages || 0)
     };
   }
@@ -105,7 +111,7 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || !['EYH_RECOVERY_GET_WL_SNAPSHOT', 'EYH_RECOVERY_ADD_ONE'].includes(message.type)) return false;
     const task = message.type === 'EYH_RECOVERY_GET_WL_SNAPSHOT'
-      ? strictSnapshot()
+      ? recoverySnapshot()
       : addOne(String(message.operationId || ''), String(message.videoId || ''));
     task.then(result => sendResponse({ ok: true, ...result }))
       .catch(error => sendResponse({ ok: false, error: String(error?.message || error) }));

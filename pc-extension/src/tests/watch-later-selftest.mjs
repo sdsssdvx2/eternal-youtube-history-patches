@@ -7,7 +7,7 @@ import '../watch-later-core.js';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const safety = fs.readFileSync(path.join(src, 'watch-later-safety-main.js'), 'utf8');
-const hotfix = fs.readFileSync(path.join(src, 'pc-ui-hotfix.js'), 'utf8');
+const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 
 const C = globalThis.EYHWatchLaterCore;
@@ -28,8 +28,6 @@ const entries = C.extractPlaylistEntries(initial);
 assert.deepEqual(entries, [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid' }, { videoId: 'lmnopqrstuv', setVideoId: 'SET_002_valid' }]);
 assert.deepEqual(C.extractContinuationTokens(initial), ['CONTINUATION_TOKEN_1']);
 
-// /next membership lookups commonly expose playlistPanelVideoRenderer.playlistSetVideoId
-// instead of playlistVideoRenderer.setVideoId. Both must resolve to the same safe tuple.
 const membership = {
   contents: {
     singleColumnWatchNextResults: {
@@ -47,6 +45,53 @@ assert.deepEqual(C.extractPlaylistEntries(membership), [
   { videoId: 'abcdefghijk', setVideoId: 'PANEL_SET_001' }
 ]);
 
+// Current YouTube Watch Later browse payloads can use lockup/view-model rows where videoId is near
+// the item root and setVideoId is buried in a menu service endpoint. Keep parity with the Android
+// conservative parser instead of silently under-counting these rows.
+const modern = {
+  contents: [
+    {
+      lockupViewModel: {
+        contentId: 'modernabc12',
+        metadata: { lockupMetadataViewModel: { title: { content: 'Modern row' } } },
+        menu: {
+          menuRenderer: {
+            items: [{ menuServiceItemRenderer: { serviceEndpoint: { playlistEditEndpoint: { actions: [
+              { setVideoId: 'LOCKUP_SET_001' }
+            ] } } } }]
+          }
+        }
+      }
+    },
+    {
+      playlistVideoViewModel: {
+        videoId: 'modernxyz34',
+        rendererContext: { commandContext: { onTap: { innertubeCommand: { playlistEditEndpoint: {
+          actions: [{ playlistSetVideoId: 'VIEWMODEL_SET_002' }]
+        } } } } }
+      }
+    },
+    {
+      // Ambiguous item: two distinct video ids share one subtree. Fail closed and do not guess.
+      videoLockupViewModel: {
+        videoId: 'ambiguous01',
+        related: { videoId: 'ambiguous02' },
+        menu: { serviceEndpoint: { setVideoId: 'AMBIG_SET_003' } }
+      }
+    }
+  ],
+  continuationContents: {
+    playlistVideoListContinuation: {
+      continuations: [{ nextContinuationData: { continuation: 'CONTINUATION_TOKEN_2' } }]
+    }
+  }
+};
+assert.deepEqual(C.extractPlaylistEntries(modern), [
+  { videoId: 'modernabc12', setVideoId: 'LOCKUP_SET_001' },
+  { videoId: 'modernxyz34', setVideoId: 'VIEWMODEL_SET_002' }
+]);
+assert.deepEqual(C.extractContinuationTokens(modern), ['CONTINUATION_TOKEN_2']);
+
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: 61.2, lmnopqrstuv: 59.9 }, 60), [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid', progressPct: 61.2 }]);
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: 60 }, 60), [{ videoId: 'abcdefghijk', setVideoId: 'SET_001_valid', progressPct: 60 }]);
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: null }, 60), []);
@@ -63,23 +108,26 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The v0.10.3 emergency boundary remains permanent in v0.10.6: destructive legacy requests are
-// intercepted in MAIN world before the old page bridge can call browse/edit_playlist. The recovery
-// feature added in v0.10.6 is a separate ADD-only path and must not reopen these messages.
+// The emergency MAIN-world boundary remains permanent. In v0.10.7 the lightweight stability
+// controller also keeps the legacy automatic preference false, without loading the old hotfix DOM
+// observer or destructive on-page coordinator.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
-assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
-assert.match(hotfix, /#eyh-watch-later-auto/);
-assert.match(hotfix, /#eyh-watch-later-cleanup/);
+assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
+assert.match(stability, /#eyh-watch-later-auto/);
+assert.match(stability, /#eyh-watch-later-cleanup/);
 
 const mainWorld = manifest.content_scripts.find(entry => entry.world === 'MAIN');
+const isolated = manifest.content_scripts.find(entry => entry.world === 'ISOLATED');
 assert.ok(mainWorld, 'MAIN-world content script is required');
+assert.ok(isolated, 'ISOLATED-world content script is required');
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'safety boundary must load before page-bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'));
-assert.equal(manifest.version, '0.10.6');
+assert.ok(!isolated.js.includes('watch-later-safe.js'), 'destructive safe-cleanup UI is intentionally dormant in stability release');
+assert.equal(manifest.version, '0.10.7');
 
-console.log('PASS watch-later-core + fail-closed safety self-test');
+console.log('PASS watch-later-core + modern lockup + fail-closed safety self-test');

@@ -25,6 +25,22 @@ function normalizeProfile(p) {
   };
 }
 
+function effectivePresentation(profile) {
+  if (profile.hideEnabled) {
+    return {
+      mode: 'hide',
+      threshold: profile.linkedThresholds ? profile.sharedThreshold : profile.hideThreshold
+    };
+  }
+  if (profile.dimEnabled) {
+    return {
+      mode: 'dim',
+      threshold: profile.linkedThresholds ? profile.sharedThreshold : profile.dimThreshold
+    };
+  }
+  return { mode: 'none', threshold: 0 };
+}
+
 function refreshDefaultThresholdRows() {
   const linked = $('#watchedDefaultLinkedThresholds').checked;
   $('#watchedDefaultSharedRow').hidden = !linked;
@@ -83,7 +99,7 @@ async function load() {
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
-  $('#watchLaterAutoCleanupEnabled').checked = Boolean(v.watchLaterAutoCleanupEnabled);
+  $('#watchLaterAutoCleanupEnabled').checked = false;
   $('#watchLaterCleanupMinProgressPct').value = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
   $('#autoHistoryPages').value = v.autoHistoryPages;
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
@@ -97,20 +113,19 @@ async function save() {
   const enabled = $('#cloudEnabled').checked;
   if (enabled && workerUrl && !(await requestWorkerPermission(workerUrl))) throw new Error('Worker 도메인 접근 권한이 필요합니다.');
   const defaultProfile = readDefaultProfileFromForm();
-  const legacyThreshold = defaultProfile.linkedThresholds
-    ? defaultProfile.sharedThreshold
-    : (defaultProfile.hideEnabled ? defaultProfile.hideThreshold : defaultProfile.dimThreshold);
+  const presentation = effectivePresentation(defaultProfile);
   await chrome.storage.local.set({
     directWatchSeconds: Math.max(1, Math.min(120, Number($('#directWatchSeconds').value) || 5)),
-    // Keep the stable 0.9.x content script's renderer disabled. surface-profiles.js is the single
-    // owner of page/default presentation and uses a separate class namespace.
-    watchedDisplayMode: 'none',
-    watchedMinProgressPct: legacyThreshold,
+    // content.js is again the sole resident card renderer. Mirror the common profile into its
+    // legacy inputs instead of disabling it; per-page overrides are remapped by pc-stability-controller.js.
+    watchedDisplayMode: presentation.mode,
+    watchedMinProgressPct: presentation.threshold,
     watchedSurfaceDefaultProfile: defaultProfile,
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
-    watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked,
+    // Automatic/destructive Watch Later cleanup remains safety-locked in the stability release.
+    watchLaterAutoCleanupEnabled: false,
     watchLaterCleanupMinProgressPct: Math.max(1, Math.min(100, Number($('#watchLaterCleanupMinProgressPct').value) || 60)),
     autoHistoryPages: Math.max(1, Math.min(50, Number($('#autoHistoryPages').value) || 3)),
     cloudEnabled: enabled,
@@ -119,7 +134,8 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#status').textContent = '공통 기본값을 저장했습니다. 개별 설정한 페이지는 그대로 유지되고, 기본값 사용 페이지에는 즉시 반영됩니다.';
+  $('#watchLaterAutoCleanupEnabled').checked = false;
+  $('#status').textContent = '공통 기본값을 저장했습니다. 기존 페이지별 설정은 유지되며 YouTube의 빠른 표시/흐림/숨김 버튼으로 현재 페이지 설정을 바꿀 수 있습니다.';
   await refreshStatus();
 }
 

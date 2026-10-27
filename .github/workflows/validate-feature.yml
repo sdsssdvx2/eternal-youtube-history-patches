@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
-      - name: Watch Later and page-profile self-tests
+      - name: Watch Later and single-renderer page-profile self-tests
         working-directory: pc-extension/src
         run: |
           set -euo pipefail
@@ -29,22 +29,31 @@ jobs:
           node tests/static-integration-selftest.mjs
           node tests/page-profile-regression-selftest.mjs
           for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
-          node -e "const m=JSON.parse(require('fs').readFileSync('manifest.json','utf8')); if(!m.content_scripts.some(x => (x.js||[]).includes('surface-profiles.js'))) process.exit(2); console.log('PASS manifest JSON + surface profile controller')"
-          grep -F "watch_later: '나중에 볼 동영상'" surface-profiles.js
-          grep -F "playlist_detail: '재생목록 상세'" surface-profiles.js
-          grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
-          grep -F 'eyh-surface-watched' surface-profiles.js
-          grep -F 'eyh-surface-hidden' surface-profiles.js
-          ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
-          ! grep -F "classList.toggle('eyh-hidden'" surface-profiles.js
-          grep -F 'scanGeneration' surface-profiles.js
-          grep -F 'watchedSurfaceProfiles' surface-profiles.js
-          grep -F 'watchedSurfaceDefaultProfile' options.js
-          grep -F "button.textContent = '⚙'" surface-profiles.js
-          grep -F 'brand.hidden = true' surface-profiles.js
-          grep -F "if (key === 'shorts')" surface-profiles.js
-          grep -F 'button?.remove()' surface-profiles.js
-          echo 'PASS PC page-scoped display + Shorts exclusion assertions'
+          node - <<'NODE'
+          const m=JSON.parse(require('fs').readFileSync('manifest.json','utf8'));
+          const iso=m.content_scripts.find(x => x.world === 'ISOLATED');
+          if (!iso) process.exit(2);
+          const js=iso.js||[];
+          for (const required of ['content.js','pc-stability-controller.js','watch-later-recovery-content.js','maintenance.js']) {
+            if (!js.includes(required)) throw new Error(`missing resident ${required}`);
+          }
+          for (const forbidden of ['surface-profiles.js','pc-ui-hotfix.js','watch-later-safe.js']) {
+            if (js.includes(forbidden)) throw new Error(`regressed resident controller ${forbidden}`);
+          }
+          console.log('PASS manifest JSON + one resident card renderer');
+          NODE
+          grep -F 'content.js is the sole card renderer' pc-stability-controller.js
+          ! grep -F 'MutationObserver' pc-stability-controller.js
+          ! grep -F 'eyh-surface-watched' pc-stability-controller.js
+          grep -F 'setCurrentSurfaceMode' pc-stability-controller.js
+          grep -F 'watchedSurfaceProfiles: profiles' pc-stability-controller.js
+          grep -F "root.querySelector('#eyh-surface-settings')?.remove()" pc-stability-controller.js
+          grep -F "root.style.display = shorts ? 'none' : ''" pc-stability-controller.js
+          grep -F 'watchLaterAutoCleanupEnabled: false' pc-stability-controller.js
+          grep -F "'lockupViewModel'" watch-later-core.js
+          grep -F 'declared !== entries.length' watch-later-recovery-content.js
+          grep -F 'unparsedCount: 0' watch-later-recovery-content.js
+          echo 'PASS PC single-renderer display + Shorts preservation + strict recovery assertions'
 
   android-compile:
     runs-on: ubuntu-latest
@@ -117,7 +126,6 @@ jobs:
           addon='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
           prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
 
-          # Legacy/automatic paths remain fail-closed; only the isolated manual path is restored.
           grep -F 'DESTRUCTIVE_CLEANUP_LOCKED = true' "$safety"
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
@@ -134,7 +142,6 @@ jobs:
           grep -F 'if (next <= previousCursor)' "$ledger"
           grep -F 'if (current >= value) return;' "$db"
 
-          # Manual transaction path must enumerate strictly, persist attempting before delete, and narrow undo.
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$safe_cleaner"
           grep -F 'pageTokens.size() != 1' "$safe_cleaner"
           grep -F '!consumedTokens.add(next)' "$safe_cleaner"
@@ -165,7 +172,6 @@ jobs:
           print('PASS Android manual transaction ordering assertions')
           PY
 
-          # Modern Watch Later payloads fail closed and old zero-row false-success state stays invalidated.
           grep -F '"lockupViewModel"' "$payload"
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
           grep -F 'if (result.scanned == 0)' "$sweep"
@@ -173,7 +179,6 @@ jobs:
           grep -F 'CURRENT_PARSER_STATE_VERSION = 2' "$migration"
           grep -F '.remove(PREF_LAST_SUCCESS)' "$migration"
 
-          # Common defaults and per-surface overrides retain the same expressive power.
           grep -F 'DEFAULT_DIM_ENABLED' "$settings"
           grep -F 'DEFAULT_HIDE_ENABLED' "$settings"
           grep -F 'DEFAULT_LINKED_THRESHOLDS' "$settings"
@@ -195,7 +200,6 @@ jobs:
           grep -F 'isPlaylistLikeSurface(surface)' "$filter"
           grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
 
-          # Real-device tab transitions are state-only and Shorts keeps no Eternal overlay/filter.
           grep -F 'lastUiSurface' "$tracker"
           grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
           ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
@@ -212,7 +216,6 @@ jobs:
           ! grep -F 'findActionMenu' "$toolbar"
           ! grep -F 'host.addView(control' "$toolbar"
 
-          # Exact subpage classification and final host manifest JobService registration stay locked.
           grep -F 'EternalBrowseIdFingerprint' "$addon"
           grep -F 'onBrowseId(Ljava/lang/String;)V' "$addon"
           grep -F 'declareWatchLaterJobService()' "$addon"

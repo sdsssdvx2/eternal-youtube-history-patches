@@ -12,14 +12,14 @@
 <label><input id="watchedThumbnailGrayscale" type="checkbox"> 시청한 영상 이미지 흑백 필터</label>
 <label><input id="watchedLinkCardInfo" type="checkbox"> 채널 이미지·제목·조회수 등 영상 정보도 썸네일과 같은 불투명도로 표시</label>
 <label>PC에서 시청으로 확정할 최소 재생 초 <input id="directWatchSeconds" type="number" min="1" max="120"></label>
-<p class="note">이 값은 <strong>공통 기본값</strong>입니다. 홈·Shorts·영상 상세/관련 영상·구독·채널·검색 결과·Watch Later·좋아요·재생목록·재생목록 상세·시청 기록·내 페이지는 필요할 때 각각 별도 설정할 수 있고, 개별 설정이 공통 기본값보다 우선합니다. 페이지의 ⚙ 버튼에서 <strong>기본값 사용</strong>을 누르면 그 페이지의 개별 설정만 지워지고 현재 공통 기본값을 다시 따릅니다.</p>
-<p class="note">흐림과 숨김은 동시에 켤 수 있으며 두 조건을 모두 만족하면 <strong>숨김이 우선</strong>합니다. 진행률 숫자는 사용자가 직접 지정합니다. <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. PC와 Android 설정은 서로 동기화하지 않습니다.</p>
+<p class="note">이 값은 <strong>공통 기본값</strong>입니다. 기존에 저장된 페이지별 설정은 그대로 보존됩니다. YouTube에서는 <strong>표시 / 흐림 / 숨김</strong> 빠른 버튼으로 현재 페이지의 표시 모드를 바꿀 수 있습니다. 안정화 버전에서는 별도의 ⚙ 페이지 패널을 띄우지 않습니다.</p>
+<p class="note">흐림과 숨김이 모두 저장된 기존 고급 설정에서는 <strong>숨김이 우선</strong>합니다. 진행률 숫자는 사용자가 직접 지정합니다. <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. PC와 Android 설정은 서로 동기화하지 않습니다. Shorts 전체 화면에서는 Eternal 헤더 표시 제어를 숨깁니다.</p>
 <p class="note">흐리게 표시는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 카드 정보도 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 CSS blur는 사용하지 않습니다.</p>
 </section>
-<section><h2>나중에 볼 동영상 자동 정리</h2>
-<label><input id="watchLaterAutoCleanupEnabled" type="checkbox"> Eternal 진행률이 기준 이상이면 Watch Later에서 자동 제거</label>
-<label>자동/수동 정리 기준 진행률 (%) <input id="watchLaterCleanupMinProgressPct" type="number" min="1" max="100" step="5"></label>
-<p class="note">기본값은 <strong>자동 정리 꺼짐 / 60%</strong>입니다. 진행률을 모르는 영상은 절대 자동 제거하지 않습니다. 자동 정리를 켜면 재생 중 기준에 도달한 영상의 Watch Later 소속 여부를 확인해 제거하고, Watch Later 페이지를 열 때 D1과 동기화한 뒤 기준 이상 항목을 한 번 정리합니다.</p>
+<section><h2>Watch Later 정리 안전 잠금</h2>
+<label><input id="watchLaterAutoCleanupEnabled" type="checkbox" disabled> 자동 정리 (현재 안전 잠금)</label>
+<label>정리 기준 진행률 (%) <input id="watchLaterCleanupMinProgressPct" type="number" min="1" max="100" step="5"></label>
+<p class="note">이 안정화 버전에서는 <strong>자동/legacy 삭제 경로를 강제로 꺼 둡니다.</strong> 과거 Watch Later 손실 원인이 완전히 검증되기 전에는 이 설정을 켤 수 없습니다. 복구 기능은 ADD-only이며, YouTube 표시 개수와 strict parser의 전체 membership 개수가 정확히 일치할 때만 후보 비교를 진행합니다.</p>
 </section>
 <section><h2>자가 진단</h2>
 <div class="row"><button id="runDiagnostics" type="button" class="secondary">현재 YouTube 탭 진단</button></div>
