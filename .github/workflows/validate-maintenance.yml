@@ -6,6 +6,7 @@ on:
       - 'pc-extension/**'
       - 'extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/**'
       - 'patches/src/main/kotlin/app/eternal/patches/youtube/history/**'
+      - '.releaserc'
       - '.github/workflows/validate-maintenance.yml'
 
 permissions:
@@ -20,6 +21,22 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
+      - name: Android release scope safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq empty .releaserc
+          python - <<'PY'
+          import json
+          cfg=json.load(open('.releaserc', encoding='utf-8'))
+          analyzer=next(p for p in cfg['plugins'] if isinstance(p, list) and p[0]=='@semantic-release/commit-analyzer')
+          rules=analyzer[1]['releaseRules']
+          assert any(r.get('scope')=='pc' and r.get('release') is False for r in rules), rules
+          # Generic feat/fix/perf custom rules would also match scope=pc and the highest release wins.
+          # Leave those types to commit-analyzer's defaults so the explicit pc:false rule wins first.
+          assert not any(r.get('type') in {'feat','fix','perf'} and 'scope' not in r for r in rules), rules
+          print('PASS Android semantic-release ignores PC-only commit scopes')
+          PY
       - name: PC maintenance safety
         shell: bash
         run: |
