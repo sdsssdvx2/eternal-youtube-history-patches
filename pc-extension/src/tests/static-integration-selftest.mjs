@@ -16,6 +16,8 @@ const core = text('watch-later-core.js');
 const options = text('options.js');
 const optionsHtml = text('options.html');
 const maintenance = text('maintenance.js');
+const popup = text('popup.js');
+const popupHtml = text('popup.html');
 
 assert.match(manifest.version, /^\d+\.\d+\.\d+$/, 'manifest version must be release semver');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
@@ -54,6 +56,12 @@ assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
 assert.match(hotfix, /watchLaterAutoCleanupEnabled: false/);
 assert.match(hotfix, /button\.disabled = true/);
+
+// Users must be able to tell whether PC background cleanup previously ran without opening devtools.
+assert.match(popupHtml, /id="watchLaterSafety"/);
+assert.match(popup, /eyhLastAutoWatchLaterSweep/);
+assert.match(popup, /최근 PC 자동 정리/);
+assert.match(popup, /현재 자동 설정/);
 
 // Page-profile presentation must never share the legacy renderer's toggle classes. v0.10.0 did,
 // so the two scanners alternately added/removed the same classes and produced visible flicker.
