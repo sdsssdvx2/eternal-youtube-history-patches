@@ -32,8 +32,6 @@ jobs:
           analyzer=next(p for p in cfg['plugins'] if isinstance(p, list) and p[0]=='@semantic-release/commit-analyzer')
           rules=analyzer[1]['releaseRules']
           assert any(r.get('scope')=='pc' and r.get('release') is False for r in rules), rules
-          # Generic feat/fix/perf custom rules would also match scope=pc and the highest release wins.
-          # Leave those types to commit-analyzer's defaults so the explicit pc:false rule wins first.
           assert not any(r.get('type') in {'feat','fix','perf'} and 'scope' not in r for r in rules), rules
           notes=next(p for p in cfg['plugins'] if isinstance(p, list) and p[0]=='@semantic-release/release-notes-generator')
           ignore=notes[1]['presetConfig'].get('ignoreCommits')
@@ -95,7 +93,6 @@ jobs:
           grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$addon"
           grep -F 'if (!EternalWatchLaterSafety.isLocked())' "$addon"
           grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
-          grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
 
           # The new manual path is isolated from the legacy cleaner and refreshes central progress first.
           grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$coordinator"
@@ -121,8 +118,6 @@ jobs:
           grep -F 'containsDeleteRisk(current)' "$tx_store"
           grep -F 'EternalWatchLaterTransactionStore.shouldRestore(candidate)' "$safe_undo"
 
-          # Ordering invariant: durable full snapshot -> post-confirm full re-read -> removing state.
-          # Per item: attempting -> fsync/read-back -> final identity resolve -> delete -> result persist.
           python - <<'PY'
           from pathlib import Path
           p=Path('extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterSafeCleaner.java').read_text()
@@ -150,22 +145,27 @@ jobs:
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
           ! grep -F 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID' "$sweep"
 
-          # Real-device tab transitions remain state-only; Shorts carries no Eternal overlay/filter.
-          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
-          grep -F 'root.addView(control' "$toolbar"
-          grep -F 'positionControl(root, control)' "$toolbar"
-          grep -F 'scheduleControlMount(220L)' "$toolbar"
-          grep -F 'Surface.SHORTS' "$toolbar"
+          # Real-device stability baseline: no Eternal overlay or navigation callback can run while
+          # YouTube rebuilds Home/Shorts/Subscriptions/Library. Component classification is pure.
+          grep -F 'Stability baseline: no Eternal callback is attached' "$addon"
+          ! grep -F 'NavigationBar.addOnNavigationButtonChangedListener' "$addon"
+          ! grep -F 'EternalHistoryToolbar.onSurfaceChanged()' "$addon"
+          ! grep -F 'EternalHistoryToolbar.ensureControlSoon()' "$addon"
+          grep -F 'no-op by design' "$toolbar"
+          ! grep -F 'root.addView' "$toolbar"
+          ! grep -F 'ViewGroup' "$toolbar"
+          ! grep -F 'scheduleControlMount' "$toolbar"
+          ! grep -F 'notifyDataSetChanged' "$toolbar"
+          grep -F 'Component classification is deliberately pure' "$tracker"
+          ! grep -F 'publishSurface' "$tracker"
+          ! grep -F 'onSurfaceChanged' "$tracker"
+          ! grep -F 'NavigationBar' "$tracker"
+          ! grep -F 'PlayerType' "$tracker"
+          grep -F 'looksLikeShorts(lower)' "$tracker"
           grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
-          grep -F 'NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged)' "$addon"
-          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
-          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
-          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
-          ! grep -F 'getSelectedNavigationButton()' "$tracker"
-          ! grep -F 'PlayerType.getCurrent()' "$tracker"
           grep -F 'ensureDefaultProfileMigrated()' "$surface"
           grep -F 'hasExplicitProfile' "$surface"
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android legacy/automatic lock + manual transactional Watch Later safety'
+          echo 'PASS Android locked cleanup + navigation-detached stability baseline'
