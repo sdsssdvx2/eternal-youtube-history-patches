@@ -22,6 +22,7 @@
       {
         "preset": "conventionalcommits",
         "presetConfig": {
+          "ignoreCommits": "^[a-z]+\\(pc\\):",
           "types": [
             { "type": "fix", "section": "🐛 Bug Fixes", "hidden": false },
             { "type": "feat", "section": "✨ New Features", "hidden": false },
