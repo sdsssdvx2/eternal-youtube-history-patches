@@ -1,3 +1,9 @@
+## [1.10.3](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.2...v1.10.3) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* **android:** fail closed on Watch Later cleanup after data-loss report ([744d042](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/744d042b33fe640ba1ab420e0c99eee79c98a1f7))
+
 ## [1.10.2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.1...v1.10.2) (2026-10-27)
 
 ### 🐛 Bug Fixes
