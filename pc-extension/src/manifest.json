@@ -50,7 +50,8 @@
         "maintenance.js"
       ],
       "css": [
-        "content.css"
+        "content.css",
+        "pc-stability-guard.css"
       ],
       "run_at": "document_idle",
       "world": "ISOLATED"
