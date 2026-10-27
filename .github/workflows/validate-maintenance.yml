@@ -49,7 +49,6 @@ jobs:
           set -euo pipefail
           base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
           settings="$base/EternalHistorySettings.java"
-          sweep="$base/EternalWatchLaterAutoSweep.java"
           payload="$base/EternalWatchLaterPayload.java"
           job="$base/EternalWatchLaterJobService.java"
           addon="$base/EternalHistoryAddOn.java"
@@ -60,6 +59,7 @@ jobs:
           safety="$base/EternalWatchLaterSafety.java"
           coordinator="$base/EternalCleanupCoordinator.java"
           safe_cleaner="$base/EternalWatchLaterSafeCleaner.java"
+          safe_undo="$base/EternalWatchLaterSafeUndo.java"
           tx_store="$base/EternalWatchLaterTransactionStore.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
 
@@ -76,11 +76,12 @@ jobs:
           grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
 
           # The manual entry point may reach only the separately audited transaction engine after
-          # a successful central-ledger refresh. The old Cleaner invocation is not executable code.
+          # a successful central-ledger refresh. Undo is routed through the narrowed policy engine.
           grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
           grep -F 'if (!result.success)' "$coordinator"
           grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
-          grep -F 'EternalWatchLaterSafeCleaner.undoLastCleanup(activity)' "$coordinator"
+          grep -F 'EternalWatchLaterSafeUndo.hasUndoableTransaction()' "$coordinator"
+          grep -F 'EternalWatchLaterSafeUndo.undoLastCleanup(activity)' "$coordinator"
           ! grep -E '^[[:space:]]*activity\.runOnUiThread\(\(\) -> EternalWatchLaterCleaner\.previewAndConfirmCleanup' "$coordinator"
 
           # Crash-safe transaction journal: AtomicFile write + fsync + read-back byte/hash equality.
@@ -111,15 +112,22 @@ jobs:
           remove=text.index('removeFreshEntry(fresh)', compare)
           persist=text.index('durable = EternalWatchLaterTransactionStore.saveVerified(durable)', remove)
           assert before < resolve < compare < remove < persist
-          add_body=text.index('PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null)')
-          assert add_body > 0
           print('PASS Android transaction source ordering')
           PY
 
-          grep -F 'resolveEntryStrict(fresh.videoId) == null' "$safe_cleaner"
-          grep -F 'resolveEntryStrict(videoId) != null' "$safe_cleaner"
-          grep -F '"undoStatus", "already_present"' "$safe_cleaner"
-          grep -F '"undoStatus", "restored"' "$safe_cleaner"
+          # Undo never re-adds entries for which cleanup provably sent no delete request.
+          grep -F '"missing".equals(status) || "identity_mismatch".equals(status)' "$safe_undo"
+          grep -F 'candidate.put("undoStatus", "not_removed")' "$safe_undo"
+          grep -F 'PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null)' "$safe_undo"
+          python - "$safe_undo" <<'PY'
+          import sys
+          text=open(sys.argv[1], encoding='utf-8').read()
+          policy=text.index('if (!shouldRestore(candidate))')
+          add=text.index('addEntry(videoId)', policy)
+          body=text.index('PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null)', add)
+          assert policy < add < body
+          print('PASS Android narrowed undo source ordering')
+          PY
 
           # Real-device tab transitions remain state-only and Shorts carries no Eternal overlay.
           grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
@@ -139,4 +147,4 @@ jobs:
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android legacy lock + transactional manual Watch Later cleanup/undo safety'
+          echo 'PASS Android legacy lock + transactional manual Watch Later cleanup/narrow undo safety'
