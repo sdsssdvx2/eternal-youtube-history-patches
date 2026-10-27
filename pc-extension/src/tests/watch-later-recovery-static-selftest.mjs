@@ -14,7 +14,7 @@ const recoveryHtml = text('recovery.html');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.6');
+assert.equal(manifest.version, '0.10.7');
 assert.deepEqual(manifest.optional_permissions, ['history'], 'history must remain optional, never install-time required');
 assert.ok(!manifest.permissions.includes('history'), 'history must not be a permanent required permission');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
@@ -35,7 +35,11 @@ assert.doesNotMatch(main, /setVideoId/,
 
 assert.match(content, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(content, /terminalReason !== 'no-continuation'/);
-assert.match(content, /declared !== entries\.length/);
+assert.match(content, /declared < entries\.length/);
+assert.match(content, /unparsedCount: declared - entries\.length/);
+assert.match(content, /Recovery is ADD-only/);
+assert.doesNotMatch(content, /declared !== entries\.length/,
+  'ADD-only recovery must tolerate YouTube header tombstones that lack a usable membership tuple');
 assert.match(content, /EYH_WL_RECOVERY_ADD_REQUEST/);
 assert.doesNotMatch(content, /EYH_WL_SAFE_REMOVE_REQUEST/);
 
