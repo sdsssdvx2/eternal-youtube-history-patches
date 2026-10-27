@@ -57,6 +57,8 @@ jobs:
           tracker="$base/EternalSurfaceTracker.java"
           surface="$base/EternalSurfaceSettings.java"
           filter="$base/EternalWatchedFilter.java"
+          safety="$base/EternalWatchLaterSafety.java"
+          coordinator="$base/EternalCleanupCoordinator.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
           grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
@@ -72,6 +74,16 @@ jobs:
           grep -F 'WATCH_LATER_AUTO_CLEANUP.get()' "$job"
           grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
           grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
+
+          # Emergency fail-closed invariant after the real-user data-loss report: no scheduled,
+          # per-video, or manual Android path may initiate deletion while recovery safety is absent.
+          grep -F 'DESTRUCTIVE_CLEANUP_LOCKED = true' "$safety"
+          grep -F 'EternalWatchLaterSafety.isLocked()' "$job"
+          grep -F 'scheduler.cancel(JOB_ID)' "$job"
+          grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$addon"
+          grep -F 'if (!EternalWatchLaterSafety.isLocked())' "$addon"
+          grep -F 'EternalWatchLaterSafety.isLocked()' "$coordinator"
+          grep -F '안전 잠금: 삭제 실행 안 함' "$coordinator"
 
           # Real-device tab transitions must be state-only: Morphe gives us the selected button,
           # and Eternal must not re-enter transient NavigationBar/PlayerType/search state from the
@@ -93,4 +105,4 @@ jobs:
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android opt-in/device-auth cleanup + cached navigation/Shorts UI safety'
+          echo 'PASS Android fail-closed Watch Later cleanup + cached navigation/Shorts UI safety'
