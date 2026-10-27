@@ -2,6 +2,16 @@
   'use strict';
 
   const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+  const ITEM_KEYS = new Set([
+    'playlistVideoRenderer',
+    'playlistPanelVideoRenderer',
+    'playlistVideoViewModel',
+    'lockupViewModel',
+    'videoViewModel',
+    'videoLockupViewModel',
+    'compactVideoViewModel',
+    'mediaLockupRenderer'
+  ]);
 
   function normalizeProgressPct(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -46,22 +56,66 @@
           if (node[i] && typeof node[i] === 'object') stack.push(node[i]);
         }
       } else {
-        for (const value of Object.values(node)) {
+        const values = Object.values(node);
+        for (let i = values.length - 1; i >= 0; i -= 1) {
+          const value = values[i];
           if (value && typeof value === 'object') stack.push(value);
         }
       }
     }
   }
 
+  function collectItemIds(root, videos, setIds, depth = 0) {
+    if (!root || typeof root !== 'object' || depth > 20 || videos.size > 1 || setIds.size > 1) return;
+    if (Array.isArray(root)) {
+      for (const child of root) collectItemIds(child, videos, setIds, depth + 1);
+      return;
+    }
+
+    const videoId = normalizeVideoId(root.videoId) || normalizeVideoId(root.contentId);
+    const setVideoId = normalizeSetVideoId(root.setVideoId) || normalizeSetVideoId(root.playlistSetVideoId);
+    if (videoId) videos.add(videoId);
+    if (setVideoId) setIds.add(setVideoId);
+    if (videos.size > 1 || setIds.size > 1) return;
+
+    for (const child of Object.values(root)) {
+      if (child && typeof child === 'object') collectItemIds(child, videos, setIds, depth + 1);
+      if (videos.size > 1 || setIds.size > 1) return;
+    }
+  }
+
+  function addPair(out, videoIdRaw, setVideoIdRaw) {
+    const videoId = normalizeVideoId(videoIdRaw);
+    const setVideoId = normalizeSetVideoId(setVideoIdRaw);
+    if (!videoId || !setVideoId || out.has(setVideoId)) return false;
+    out.set(setVideoId, { videoId, setVideoId });
+    return true;
+  }
+
   function extractPlaylistEntries(root) {
     const bySetId = new Map();
     walkJson(root, node => {
-      const renderer = node.playlistVideoRenderer || node.playlistPanelVideoRenderer || null;
-      if (!renderer || typeof renderer !== 'object') return;
-      const videoId = normalizeVideoId(renderer.videoId);
-      const setVideoId = normalizeSetVideoId(renderer.setVideoId || renderer.playlistSetVideoId);
-      if (!videoId || !setVideoId || bySetId.has(setVideoId)) return;
-      bySetId.set(setVideoId, { videoId, setVideoId });
+      // Old renderers and any model that exposes the pair on one object remain the cheapest path.
+      addPair(
+        bySetId,
+        node.videoId || node.contentId,
+        node.setVideoId || node.playlistSetVideoId
+      );
+
+      // Modern lockup/view-model rows frequently split videoId and setVideoId across descendants
+      // (for example, the set id may live in a menu service endpoint). Mirror Android's conservative
+      // parser: accept a row only when that item subtree contains exactly one valid video id and one
+      // valid setVideoId. Ambiguous rows are deliberately not guessed.
+      for (const key of ITEM_KEYS) {
+        const item = node[key];
+        if (!item || typeof item !== 'object') continue;
+        const videos = new Set();
+        const setIds = new Set();
+        collectItemIds(item, videos, setIds, 0);
+        if (videos.size === 1 && setIds.size === 1) {
+          addPair(bySetId, [...videos][0], [...setIds][0]);
+        }
+      }
     });
     return [...bySetId.values()];
   }
@@ -72,8 +126,10 @@
     walkJson(root, node => {
       const token = node?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token ||
         node?.continuationEndpoint?.continuationCommand?.token ||
-        node?.continuationCommand?.token || null;
-      if (typeof token !== 'string' || token.length < 8 || seen.has(token)) return;
+        node?.continuationCommand?.token ||
+        node?.nextContinuationData?.continuation ||
+        node?.reloadContinuationData?.continuation || null;
+      if (typeof token !== 'string' || token.length < 8 || token.length >= 8192 || seen.has(token)) return;
       seen.add(token);
       out.push(token);
     }, 80000);
