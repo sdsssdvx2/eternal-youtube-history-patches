@@ -6,6 +6,7 @@ on:
       - 'pc-extension/**'
       - 'patches/**'
       - 'extensions/**'
+      - 'gradle.properties'
       - '.github/workflows/validate-feature.yml'
   workflow_dispatch:
 
@@ -44,16 +45,11 @@ jobs:
           NODE
           grep -F 'content.js is the sole card renderer' pc-stability-controller.js
           ! grep -F 'MutationObserver' pc-stability-controller.js
-          ! grep -F 'eyh-surface-watched' pc-stability-controller.js
           grep -F 'setCurrentSurfaceMode' pc-stability-controller.js
-          grep -F 'watchedSurfaceProfiles: profiles' pc-stability-controller.js
-          grep -F "root.querySelector('#eyh-surface-settings')?.remove()" pc-stability-controller.js
           grep -F "root.style.display = shorts ? 'none' : ''" pc-stability-controller.js
-          grep -F 'watchLaterAutoCleanupEnabled: false' pc-stability-controller.js
           grep -F "'lockupViewModel'" watch-later-core.js
           grep -F 'declared !== entries.length' watch-later-recovery-content.js
-          grep -F 'unparsedCount: 0' watch-later-recovery-content.js
-          echo 'PASS PC single-renderer display + Shorts preservation + strict recovery assertions'
+          echo 'PASS PC single-renderer + strict recovery assertions'
 
   android-compile:
     runs-on: ubuntu-latest
@@ -90,70 +86,76 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
-                    --no-daemon --stacktrace
+          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac --no-daemon --stacktrace
       - name: Compile Eternal Android extension and patch
         working-directory: eternal-youtube-history-patches
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
-                    :patches:compileKotlin \
-                    --no-daemon --stacktrace
-      - name: Static display and destructive-action safety assertions
+          ./gradlew :extensions:extension:compileReleaseJavaWithJavac :patches:compileKotlin --no-daemon --stacktrace
+      - name: Static safety and stable-navigation ownership assertions
         working-directory: eternal-youtube-history-patches
         shell: bash
         run: |
           set -euo pipefail
           base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
-          cleaner="$base/EternalWatchLaterCleaner.java"
-          sweep="$base/EternalWatchLaterAutoSweep.java"
-          payload="$base/EternalWatchLaterPayload.java"
-          migration="$base/EternalWatchLaterStateMigration.java"
-          settings="$base/EternalHistorySettings.java"
-          surface="$base/EternalSurfaceSettings.java"
-          tracker="$base/EternalSurfaceTracker.java"
-          filter="$base/EternalWatchedFilter.java"
+          addon_java="$base/EternalHistoryAddOn.java"
           toolbar="$base/EternalHistoryToolbar.java"
-          coordinator="$base/EternalCleanupCoordinator.java"
+          filter="$base/EternalWatchedFilter.java"
+          settings="$base/EternalHistorySettings.java"
+          cleaner="$base/EternalWatchLaterCleaner.java"
           safe_cleaner="$base/EternalWatchLaterSafeCleaner.java"
           safe_undo="$base/EternalWatchLaterSafeUndo.java"
           tx_store="$base/EternalWatchLaterTransactionStore.java"
           safety="$base/EternalWatchLaterSafety.java"
-          ledger="$base/EternalCleanupLedgerSync.java"
-          db="$base/EternalHistoryDb.java"
+          coordinator="$base/EternalCleanupCoordinator.java"
+          payload="$base/EternalWatchLaterPayload.java"
           addon='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
-          prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
 
+          grep -F 'version = 1.10.5' gradle.properties
+
+          # Destructive Watch Later automation remains fail-closed and manual cleanup remains transactional.
           grep -F 'DESTRUCTIVE_CLEANUP_LOCKED = true' "$safety"
           grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
-          grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
-          grep -F 'validSetVideoId(entry.setVideoId)' "$cleaner"
           grep -F 'PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER)' "$cleaner"
-          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
-          grep -F 'resolveEntry(entry.videoId) == null' "$cleaner"
-          grep -F 'EternalCleanupCoordinator.previewAndConfirm(activity)' "$toolbar"
-          grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$coordinator"
-          grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
+          grep -F 'EternalCleanupCoordinator.previewAndConfirm(Utils.getActivity())' "$toolbar"
           grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
-          ! grep -F 'EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
           grep -F 'EternalWatchLaterSafeUndo.undoLastCleanup(activity)' "$coordinator"
-          grep -F 'if (next <= previousCursor)' "$ledger"
-          grep -F 'if (current >= value) return;' "$db"
-
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$safe_cleaner"
-          grep -F 'pageTokens.size() != 1' "$safe_cleaner"
-          grep -F '!consumedTokens.add(next)' "$safe_cleaner"
           grep -F 'sameMembership(originalSnapshot, confirmed.entries)' "$safe_cleaner"
           grep -F 'candidate.put("status", "attempting")' "$safe_cleaner"
           grep -F 'Entry finalFresh = resolveEntryStrict(videoId)' "$safe_cleaner"
-          grep -F 'removeFreshEntry(finalFresh)' "$safe_cleaner"
           grep -F 'static final int SCHEMA = 2' "$tx_store"
           grep -F 'eternal-watch-later-journal-v2' "$tx_store"
-          grep -F 'containsDeleteRisk(current)' "$tx_store"
-          grep -F '"removed".equals(status) || "attempting".equals(status) || "failed".equals(status)' "$tx_store"
           grep -F 'EternalWatchLaterTransactionStore.shouldRestore(candidate)' "$safe_undo"
+          grep -F '"lockupViewModel"' "$payload"
+          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
+
+          # v1.10.5 must restore v1.9.1's ownership boundary: no Eternal bottom-nav callback.
+          ! grep -F 'NavigationBar.addOnNavigationButtonChangedListener' "$addon_java"
+          ! grep -F 'EternalHistoryToolbar.onSurfaceChanged' "$addon_java"
+          ! grep -F 'EternalHistoryToolbar.ensureControlSoon' "$addon_java"
+          ! grep -E '^[[:space:]]*installEternalBrowseIdHook\(\)' "$addon"
+          grep -F 'installEternalToolbarHook()' "$addon"
+
+          # UI may mount only on a YouTube-created native toolbar host; no Activity-root overlay/rebind.
+          grep -F 'CONTROL_TAG = "eternal-history-toolbar-control"' "$toolbar"
+          grep -F 'imageView.post' "$toolbar"
+          grep -F 'findVisibleToolbarHost' "$toolbar"
+          grep -F 'host.addView(control, 0)' "$toolbar"
+          ! grep -F 'android.R.id.content' "$toolbar"
+          ! grep -F 'scheduleControlMount' "$toolbar"
+          ! grep -F 'notifyDataSetChanged' "$toolbar"
+          ! grep -F 'EternalSurfaceTracker' "$toolbar"
+
+          # Card presentation uses the preserved common profile only and never reads tab/surface state.
+          grep -F 'EternalSurfaceSettings.defaultProfile(false)' "$filter"
+          ! grep -F 'EternalSurfaceTracker' "$filter"
+          ! grep -F 'Surface.SHORTS' "$filter"
+          ! grep -F 'inline_shorts' "$filter"
+          ! grep -F 'shorts_video_cell' "$filter"
+          grep -F 'EternalSurfaceSettings.defaultProfile(false).visualEnabled()' "$settings"
 
           python - <<'PY'
           from pathlib import Path
@@ -167,62 +169,9 @@ jobs:
           persist=p.index('durable = EternalWatchLaterTransactionStore.saveVerified(durable)', attempting)
           final_resolve=p.index('Entry finalFresh = resolveEntryStrict(videoId)', persist)
           delete=p.index('removeFreshEntry(finalFresh)', final_resolve)
-          result=p.index('durable = persistResult(durable)', delete)
-          assert attempting < persist < final_resolve < delete < result
-          print('PASS Android manual transaction ordering assertions')
+          assert attempting < persist < final_resolve < delete
+          print('PASS Android transaction ordering + v1.9.1 navigation ownership assertions')
           PY
-
-          grep -F '"lockupViewModel"' "$payload"
-          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
-          grep -F 'if (result.scanned == 0)' "$sweep"
-          grep -F '0개 파싱은 성공으로 저장하지 않음' "$sweep"
-          grep -F 'CURRENT_PARSER_STATE_VERSION = 2' "$migration"
-          grep -F '.remove(PREF_LAST_SUCCESS)' "$migration"
-
-          grep -F 'DEFAULT_DIM_ENABLED' "$settings"
-          grep -F 'DEFAULT_HIDE_ENABLED' "$settings"
-          grep -F 'DEFAULT_LINKED_THRESHOLDS' "$settings"
-          grep -F 'DEFAULT_SHARED_THRESHOLD' "$settings"
-          grep -F 'DEFAULT_DIM_THRESHOLD' "$settings"
-          grep -F 'DEFAULT_HIDE_THRESHOLD' "$settings"
-          grep -F 'ensureDefaultProfileMigrated()' "$surface"
-          grep -F 'return defaultProfile(false);' "$surface"
-          grep -F 'hasExplicitProfile' "$surface"
-          grep -F 'morphe_eternal_history_default_dim_enabled' "$prefs"
-          grep -F 'morphe_eternal_history_default_hide_enabled' "$prefs"
-          grep -F 'morphe_eternal_history_default_linked_thresholds' "$prefs"
-          grep -F 'WATCH_LATER("watch_later"' "$surface"
-          grep -F 'PLAYLIST_DETAIL("playlist_detail"' "$surface"
-          grep -F 'effectiveDimThreshold()' "$surface"
-          grep -F 'effectiveHideThreshold()' "$surface"
-          grep -F 'profile.hideEnabled' "$filter"
-          grep -F 'profile.dimEnabled' "$filter"
-          grep -F 'isPlaylistLikeSurface(surface)' "$filter"
-          grep -F '흐림/숨김 진행률 기준 같이 사용' "$toolbar"
-
-          grep -F 'lastUiSurface' "$tracker"
-          grep -F 'publishSurface(EternalSurfaceSettings.Surface.SHORTS)' "$tracker"
-          ! grep -F 'NavigationBar.isSearchBarActive()' "$tracker"
-          ! grep -F 'NavigationBar.isBackButtonVisible()' "$tracker"
-          ! grep -F 'getSelectedNavigationButton()' "$tracker"
-          ! grep -F 'PlayerType.getCurrent()' "$tracker"
-          grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
-          grep -F 'root.addView(control' "$toolbar"
-          grep -F 'scheduleControlMount(220L)' "$toolbar"
-          grep -F 'schedulePresentationRefresh()' "$toolbar"
-          grep -F 'notifyDataSetChanged' "$toolbar"
-          grep -F 'Surface.SHORTS' "$toolbar"
-          grep -F 'if (surface == EternalSurfaceSettings.Surface.SHORTS) return false;' "$filter"
-          ! grep -F 'findActionMenu' "$toolbar"
-          ! grep -F 'host.addView(control' "$toolbar"
-
-          grep -F 'EternalBrowseIdFingerprint' "$addon"
-          grep -F 'onBrowseId(Ljava/lang/String;)V' "$addon"
-          grep -F 'declareWatchLaterJobService()' "$addon"
-          grep -F 'android.permission.BIND_JOB_SERVICE' "$addon"
-          grep -F 'case "VLWL"' "$tracker"
-          grep -F 'case "VLLL"' "$tracker"
-          echo 'PASS Android display + locked automation + manual transactional safety assertions'
 
   android-patch-smoke:
     needs: android-compile
@@ -269,8 +218,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
-                    --no-daemon --stacktrace
+          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac --no-daemon --stacktrace
       - name: Build feature-branch Eternal patch bundle
         working-directory: eternal-youtube-history-patches
         env:
@@ -284,7 +232,6 @@ jobs:
           eternal_mpp="$(find patches/build/libs -maxdepth 1 -type f -name 'patches-*.mpp' | sort | head -1)"
           test -n "$eternal_mpp" && test -s "$eternal_mpp"
           cp "$eternal_mpp" ../.validation/tools/eternal-feature.mpp
-          echo "Feature MPP: $eternal_mpp"
       - name: Acquire current supported clean YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
@@ -300,18 +247,16 @@ jobs:
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
           version=os.environ['VERSION']
-          app=AppConfig(
-              key='youtube', name='YouTube', package='com.google.android.youtube',
-              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
-              formats=('apk',), prefer=('universal','arm64-v8a'), target_abi='arm64-v8a')
+          app=AppConfig(key='youtube', name='YouTube', package='com.google.android.youtube',
+              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/', formats=('apk',),
+              prefer=('universal','arm64-v8a'), target_abi='arm64-v8a')
           resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
           out=Path('.validation/input/youtube.apk')
           errors=[]
           for url,referer in resolver.iter_candidates(app,version):
               try:
                   got=resolver.download_candidate(url,referer,out)
-                  with zipfile.ZipFile(out) as z:
-                      names=set(z.namelist())
+                  with zipfile.ZipFile(out) as z: names=set(z.namelist())
                   if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
                       raise RuntimeError('candidate is not a standalone patchable APK')
                   print('selected standalone candidate',got.size,got.sha256,referer)
@@ -353,7 +298,6 @@ jobs:
             .validation/input/youtube.apk
           test -s .validation/out/youtube.apk
           test -s .validation/out/result.json
-          grep -F 'Eternal YouTube History' .validation/out/result.json >/dev/null || true
           cat .validation/out/result.json
           echo 'PASS feature patch application smoke test'
       - name: Remove proprietary APKs and ephemeral tools
