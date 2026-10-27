@@ -1,3 +1,9 @@
+## [1.10.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.3...v1.10.4) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* **android:** restore manual Watch Later cleanup with transactional rollback ([8861ef2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/8861ef2ba8a764fbfc5466338dc0da4a2aca374c))
+
 ## [1.10.3](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.2...v1.10.3) (2026-10-27)
 
 ### 🐛 Bug Fixes

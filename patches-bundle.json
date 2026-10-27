@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-27T12:02:59",
-  "description": "## [1.10.3](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.2...v1.10.3) (2026-10-27)\n\n### 🐛 Bug Fixes\n\n* **android:** fail closed on Watch Later cleanup after data-loss report ([744d042](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/744d042b33fe640ba1ab420e0c99eee79c98a1f7))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.3/patches-1.10.3.mpp",
+  "created_at": "2026-10-27T14:09:02",
+  "description": "## [1.10.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.3...v1.10.4) (2026-10-27)\n\n### 🐛 Bug Fixes\n\n* **android:** restore manual Watch Later cleanup with transactional rollback ([8861ef2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/8861ef2ba8a764fbfc5466338dc0da4a2aca374c))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.4/patches-1.10.4.mpp",
   "signature_download_url": "",
-  "version": "1.10.3"
+  "version": "1.10.4"
 }
