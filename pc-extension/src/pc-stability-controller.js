@@ -84,11 +84,22 @@
     });
     const legacyMode = ['dim', 'hide', 'none'].includes(values.watchedDisplayMode)
       ? values.watchedDisplayMode : 'dim';
+    const hasStoredDefault = values.watchedSurfaceDefaultProfile
+      && typeof values.watchedSurfaceDefaultProfile === 'object';
     const defaults = normalizeProfile(
-      values.watchedSurfaceDefaultProfile,
+      hasStoredDefault ? values.watchedSurfaceDefaultProfile : null,
       legacyMode,
       values.watchedMinProgressPct
     );
+
+    // Direct upgrades from the stable 0.9.x line have no page-profile default yet. Capture the old
+    // global mode exactly once before any page override can remap watchedDisplayMode. This prevents
+    // the first quick-button choice from leaking into every other surface.
+    if (!hasStoredDefault) {
+      await chrome.storage.local.set({ watchedSurfaceDefaultProfile: defaults });
+      values.watchedSurfaceDefaultProfile = defaults;
+    }
+
     const profiles = values.watchedSurfaceProfiles && typeof values.watchedSurfaceProfiles === 'object'
       ? values.watchedSurfaceProfiles : {};
     const hasOverride = Object.prototype.hasOwnProperty.call(profiles, key);
@@ -104,8 +115,9 @@
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return false;
 
-    // Remove stale v0.10.x detailed-settings UI if this page survived an extension update.
+    // Remove stale v0.10.x detailed-settings UI if this SPA document survived an extension update.
     root.querySelector('#eyh-surface-settings')?.remove();
+    document.querySelector('#eyh-surface-panel')?.remove();
     const brand = root.querySelector('.eyh-header-brand');
     if (brand) brand.hidden = true;
 
@@ -138,13 +150,10 @@
     const generation = ++applyGeneration;
     const key = surfaceKey();
 
-    // Shorts has no useful card surface. Put the sole legacy renderer in no-op mode and hide UI.
+    // Shorts has no useful recommendation-card presentation surface. Crucially, do not write the
+    // global renderer settings here: doing so would corrupt the 0.9.x fallback/default when a user
+    // visits Shorts before a page-profile default has ever been stored.
     if (key === 'shorts') {
-      const current = await chrome.storage.local.get({ watchedDisplayMode: 'dim', watchedMinProgressPct: 0 });
-      if (generation !== applyGeneration || key !== surfaceKey()) return;
-      if (current.watchedDisplayMode !== 'none' || Number(current.watchedMinProgressPct || 0) !== 0) {
-        await chrome.storage.local.set({ watchedDisplayMode: 'none', watchedMinProgressPct: 0 });
-      }
       scheduleHeaderDecoration();
       return;
     }
