@@ -6,7 +6,7 @@ It targets the current Morphe third-party add-on API instead of maintaining a fu
 ## Available patch
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.10.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/tag/v1.10.4)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;1 patches total
+> **[v1.10.5](https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/tag/v1.10.5)**&nbsp;&nbsp;•&nbsp;&nbsp;`main`&nbsp;&nbsp;•&nbsp;&nbsp;1 patches total
 <details open>
 <summary>📦 YouTube&nbsp;&nbsp;•&nbsp;&nbsp;1 patch</summary>
 <br>

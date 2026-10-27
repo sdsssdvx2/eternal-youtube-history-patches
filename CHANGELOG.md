@@ -1,3 +1,9 @@
+## [1.10.5](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.4...v1.10.5) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* **android:** quarantine v1.10 host navigation regression ([b98af79](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/b98af7915f0ec078d0706a6752cf1dd069b326e9))
+
 ## [1.10.4](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.3...v1.10.4) (2026-10-27)
 
 ### 🐛 Bug Fixes
