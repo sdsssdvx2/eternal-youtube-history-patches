@@ -33,31 +33,22 @@ public final class EternalHistoryToolbar {
     private static final AtomicBoolean refreshPending = new AtomicBoolean();
     private static WeakReference<TextView> controlRef = new WeakReference<>(null);
 
-    /** Injection point: toolbar activity is only used as a signal that a visible YouTube UI exists. */
+    /** Injection point: the host toolbar is only a delayed remount signal, never our UI parent. */
     public static void onToolbarImageView(ImageView imageView) {
         if (imageView == null || !EternalHistorySettings.ENABLED.get()) return;
-        scheduleControlMount(80L);
+        scheduleControlMount(220L);
     }
 
+    /**
+     * Navigation/browse callbacks can run while YouTube is rebuilding its view hierarchy. Never
+     * add/remove overlay children synchronously from that host callback; defer one short beat.
+     */
     static void onSurfaceChanged() {
-        try {
-            Activity activity = Utils.getActivity();
-            if (activity == null) return;
-            activity.runOnUiThread(() -> {
-                try {
-                    refreshControl();
-                    ensureControl();
-                } catch (Throwable t) {
-                    Logger.printDebug(() -> "Eternal surface UI refresh ignored: " + safeMessage(t));
-                }
-            });
-        } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal surface UI event ignored: " + safeMessage(t));
-        }
+        scheduleControlMount(220L);
     }
 
     static void ensureControlSoon() {
-        scheduleControlMount(250L);
+        scheduleControlMount(350L);
     }
 
     private static void scheduleControlMount(long delayMs) {
@@ -68,11 +59,7 @@ public final class EternalHistoryToolbar {
         }, delayMs);
     }
 
-    /**
-     * Never insert into YouTube's native ActionMenu/Toolbar. Those containers are rebuilt during
-     * Shorts/search/tab transitions and their child positions belong to YouTube. A single overlay
-     * below the app bar avoids both overlap and host-menu lifecycle crashes.
-     */
+    /** Never insert into YouTube's native ActionMenu/Toolbar. */
     private static void ensureControl() {
         try {
             Activity activity = Utils.getActivity();
@@ -83,8 +70,16 @@ public final class EternalHistoryToolbar {
                 return;
             }
 
+            EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
+            if (surface == EternalSurfaceSettings.Surface.SHORTS) {
+                removeTaggedControls(root);
+                controlRef = new WeakReference<>(null);
+                return;
+            }
+
             TextView existing = controlRef.get();
             if (existing != null && existing.getParent() == root && existing.isAttachedToWindow()) {
+                existing.setVisibility(View.VISIBLE);
                 refreshLabel(existing);
                 positionControl(root, existing);
                 return;
@@ -130,7 +125,6 @@ public final class EternalHistoryToolbar {
             if (insets != null) topInset = insets.getSystemWindowInsetTop();
         } catch (Throwable ignored) { }
         control.setX(Math.max(Dim.dp8, root.getWidth() - control.getWidth() - Dim.dp10));
-        // Status bar + YouTube app bar. Keep the Eternal control out of the native action row.
         control.setY(topInset + Dim.dp(56));
     }
 
@@ -153,6 +147,7 @@ public final class EternalHistoryToolbar {
         Activity activity = Utils.getActivity();
         if (activity == null || activity.isFinishing()) return;
         EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
+        if (surface == EternalSurfaceSettings.Surface.SHORTS) return;
         EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
         boolean inherited = !EternalSurfaceSettings.hasExplicitProfile(surface);
 
@@ -311,13 +306,26 @@ public final class EternalHistoryToolbar {
     private static void refreshControl() {
         TextView control = controlRef.get();
         if (control == null) return;
-        try { refreshLabel(control); }
-        catch (Throwable t) { Logger.printDebug(() -> "Eternal control label ignored: " + safeMessage(t)); }
+        try {
+            if (EternalSurfaceTracker.currentForUi() == EternalSurfaceSettings.Surface.SHORTS) {
+                control.setVisibility(View.GONE);
+                return;
+            }
+            control.setVisibility(View.VISIBLE);
+            refreshLabel(control);
+        } catch (Throwable t) {
+            Logger.printDebug(() -> "Eternal control label ignored: " + safeMessage(t));
+        }
     }
 
     private static void refreshLabel(TextView control) {
         EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
+        if (surface == EternalSurfaceSettings.Surface.SHORTS) {
+            control.setVisibility(View.GONE);
+            return;
+        }
         EternalSurfaceSettings.Profile p = EternalSurfaceSettings.get(surface);
+        control.setVisibility(View.VISIBLE);
         control.setText("E");
         String state;
         if (p.dimEnabled && p.hideEnabled) {
@@ -334,12 +342,13 @@ public final class EternalHistoryToolbar {
         control.setAlpha(p.visualEnabled() ? 1.0f : 0.72f);
     }
 
-    /** Debounced live rebind: reruns Litho filtering for visible RecyclerView content without recreating Activity. */
+    /** Debounced live rebind: reruns Litho filtering without recreating Activity. */
     private static void schedulePresentationRefresh() {
         if (!refreshPending.compareAndSet(false, true)) return;
         Utils.runOnMainThreadDelayed(() -> {
             refreshPending.set(false);
             try {
+                if (EternalSurfaceTracker.currentForUi() == EternalSurfaceSettings.Surface.SHORTS) return;
                 Activity activity = Utils.getActivity();
                 if (activity == null || activity.isFinishing()) return;
                 View content = activity.findViewById(android.R.id.content);
