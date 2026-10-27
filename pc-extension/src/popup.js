@@ -2,11 +2,11 @@ const $ = s => document.querySelector(s);
 
 function formatSweep(sweep) {
   if (!sweep || typeof sweep !== 'object' || !Number(sweep.at)) {
-    return 'Watch Later 안전 잠금: 켜짐 · 기록된 PC 자동 정리 실행 없음';
+    return 'Watch Later 자동 정리 안전 잠금: 켜짐 · 기록된 PC 자동 정리 실행 없음';
   }
   const when = new Date(Number(sweep.at)).toLocaleString();
-  if (sweep.error) return `Watch Later 안전 잠금: 켜짐 · 최근 PC 자동 정리 시도 ${when} · 오류: ${String(sweep.error)}`;
-  return `Watch Later 안전 잠금: 켜짐 · 최근 PC 자동 정리 ${when} · 기준 ${Number(sweep.threshold || 0)}% · 확인 ${Number(sweep.scanned || 0)} · 대상 ${Number(sweep.qualified || 0)} · 삭제 ${Number(sweep.removed || 0)} · 실패 ${Number(sweep.failures || 0)}`;
+  if (sweep.error) return `Watch Later 자동 정리 안전 잠금: 켜짐 · 최근 PC 자동 정리 시도 ${when} · 오류: ${String(sweep.error)}`;
+  return `Watch Later 자동 정리 안전 잠금: 켜짐 · 최근 PC 자동 정리 ${when} · 기준 ${Number(sweep.threshold || 0)}% · 확인 ${Number(sweep.scanned || 0)} · 대상 ${Number(sweep.qualified || 0)} · 삭제 ${Number(sweep.removed || 0)} · 실패 ${Number(sweep.failures || 0)}`;
 }
 
 async function refresh() {
@@ -59,5 +59,9 @@ $('#openHistory').addEventListener('click', async () => {
 });
 $('#syncRecent').addEventListener('click', () => sync(3, '최근 누락 복구'));
 $('#syncFull').addEventListener('click', () => sync(500, '과거 누락 복구'));
+$('#recoverWatchLater').addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('recovery.html') });
+  window.close();
+});
 $('#options').addEventListener('click', e => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 refresh();
