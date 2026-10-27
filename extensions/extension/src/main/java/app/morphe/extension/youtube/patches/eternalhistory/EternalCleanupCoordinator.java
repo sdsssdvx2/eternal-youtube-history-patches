@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.morphe.extension.shared.Utils;
 
-/** Coordinates an explicit central-ledger refresh before manual destructive cleanup. */
+/** Coordinates an explicit central-ledger refresh before the new manual safe cleanup path. */
 final class EternalCleanupCoordinator {
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(() -> {
@@ -25,11 +25,10 @@ final class EternalCleanupCoordinator {
 
     static void previewAndConfirm(Activity activity) {
         if (activity == null) return;
-        if (EternalWatchLaterSafety.isLocked()) {
-            lastSyncStatus = "안전 잠금: 삭제 실행 안 함";
-            Utils.showToastLong(EternalWatchLaterSafety.MESSAGE);
-            return;
-        }
+        // EternalWatchLaterSafety deliberately continues to lock every legacy destructive entry
+        // point. This coordinator is allowed to reach only the separately audited safe cleaner.
+        EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
+        EternalWatchLaterJobService.refreshSchedule();
         if (!running.compareAndSet(false, true)) {
             Utils.showToastShort("Eternal 중앙 기록 동기화가 이미 진행 중입니다.");
             return;
@@ -45,7 +44,7 @@ final class EternalCleanupCoordinator {
                     return;
                 }
                 lastSyncStatus = "성공: 중앙 기록 " + result.videoCount + "개 반영";
-                activity.runOnUiThread(() -> EternalWatchLaterCleaner.previewAndConfirmCleanup(activity));
+                activity.runOnUiThread(() -> EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity));
             } finally {
                 running.set(false);
             }
@@ -53,8 +52,9 @@ final class EternalCleanupCoordinator {
     }
 
     static String diagnosticSummary() {
-        if (EternalWatchLaterSafety.isLocked()) return "중앙 정리 동기화=안전 잠금";
-        return "중앙 정리 동기화=" + (running.get() ? "진행 중" : lastSyncStatus);
+        return "중앙 정리 동기화=" + (running.get() ? "진행 중" : lastSyncStatus)
+                + "\n기존 삭제 경로=" + (EternalWatchLaterSafety.isLocked() ? "안전 잠금" : "열림")
+                + "\n" + EternalWatchLaterSafeCleaner.diagnosticSummary();
     }
 
     private EternalCleanupCoordinator() { }
