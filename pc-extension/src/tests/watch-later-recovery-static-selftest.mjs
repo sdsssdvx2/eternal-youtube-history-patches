@@ -14,15 +14,18 @@ const recoveryHtml = text('recovery.html');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.6');
+assert.equal(manifest.version, '0.10.7');
 assert.deepEqual(manifest.optional_permissions, ['history'], 'history must remain optional, never install-time required');
 assert.ok(!manifest.permissions.includes('history'), 'history must not be a permanent required permission');
-const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
-const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
-assert.ok(mainWorld.js.includes('watch-later-recovery-main.js'));
-assert.ok(isolated.js.includes('watch-later-recovery-content.js'));
-assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('watch-later-recovery-main.js'));
-assert.ok(mainWorld.js.indexOf('watch-later-recovery-main.js') < mainWorld.js.indexOf('page-bridge.js'));
+const playlistMain = manifest.content_scripts.find(cs =>
+  cs.world === 'MAIN' && cs.matches?.includes('https://www.youtube.com/playlist*'));
+const playlistIsolated = manifest.content_scripts.find(cs =>
+  cs.world === 'ISOLATED' && cs.matches?.includes('https://www.youtube.com/playlist*'));
+assert.ok(playlistMain, 'playlist-scoped MAIN recovery bridge is required');
+assert.ok(playlistIsolated, 'playlist-scoped ISOLATED recovery bridge is required');
+assert.ok(playlistMain.js.includes('watch-later-recovery-main.js'));
+assert.ok(playlistIsolated.js.includes('watch-later-recovery-content.js'));
+assert.ok(playlistMain.js.indexOf('watch-later-safe-main.js') < playlistMain.js.indexOf('watch-later-recovery-main.js'));
 
 assert.match(main, /EYH_WL_RECOVERY_ADD_REQUEST/);
 assert.match(main, /ACTION_ADD_VIDEO/);

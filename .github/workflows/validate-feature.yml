@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
-      - name: Watch Later and page-profile self-tests
+      - name: Watch Later and single-renderer profile self-tests
         working-directory: pc-extension/src
         run: |
           set -euo pipefail
@@ -29,22 +29,27 @@ jobs:
           node tests/static-integration-selftest.mjs
           node tests/page-profile-regression-selftest.mjs
           for f in *.js tests/*.mjs; do node --check "$f" >/dev/null; done
-          node -e "const m=JSON.parse(require('fs').readFileSync('manifest.json','utf8')); if(!m.content_scripts.some(x => (x.js||[]).includes('surface-profiles.js'))) process.exit(2); console.log('PASS manifest JSON + surface profile controller')"
-          grep -F "watch_later: '나중에 볼 동영상'" surface-profiles.js
-          grep -F "playlist_detail: '재생목록 상세'" surface-profiles.js
-          grep -F 'const dim = !hide && profile.dimEnabled' surface-profiles.js
-          grep -F 'eyh-surface-watched' surface-profiles.js
-          grep -F 'eyh-surface-hidden' surface-profiles.js
-          ! grep -F "classList.toggle('eyh-watched'" surface-profiles.js
-          ! grep -F "classList.toggle('eyh-hidden'" surface-profiles.js
-          grep -F 'scanGeneration' surface-profiles.js
-          grep -F 'watchedSurfaceProfiles' surface-profiles.js
-          grep -F 'watchedSurfaceDefaultProfile' options.js
-          grep -F "button.textContent = '⚙'" surface-profiles.js
-          grep -F 'brand.hidden = true' surface-profiles.js
-          grep -F "if (key === 'shorts')" surface-profiles.js
-          grep -F 'button?.remove()' surface-profiles.js
-          echo 'PASS PC page-scoped display + Shorts exclusion assertions'
+          node - <<'NODE'
+          const fs=require('fs');
+          const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+          const all=m.content_scripts.find(x => x.world==='ISOLATED' && (x.matches||[]).includes('https://www.youtube.com/*'));
+          const playlist=m.content_scripts.find(x => x.world==='ISOLATED' && (x.matches||[]).includes('https://www.youtube.com/playlist*'));
+          if(!all || !playlist) process.exit(2);
+          for (const f of ['content.js','page-profile-adapter.js','maintenance.js']) if(!(all.js||[]).includes(f)) process.exit(3);
+          for (const f of ['surface-profiles.js','pc-ui-hotfix.js','watch-later-safe.js','watch-later-recovery-content.js']) if((all.js||[]).includes(f)) process.exit(4);
+          for (const f of ['watch-later-safe.js','watch-later-recovery-content.js']) if(!(playlist.js||[]).includes(f)) process.exit(5);
+          console.log('PASS manifest single-renderer + playlist-scoped heavy scripts');
+          NODE
+          ! grep -F 'MutationObserver' page-profile-adapter.js
+          ! grep -F "querySelectorAll('a[href" page-profile-adapter.js
+          grep -F "button[data-eyh-mode]" page-profile-adapter.js
+          grep -F "if (key === 'shorts')" page-profile-adapter.js
+          grep -F "root.style.display = 'none'" page-profile-adapter.js
+          grep -F '#eyh-surface-settings' page-profile-adapter.js
+          grep -F 'watchLaterAutoCleanupEnabled: false' page-profile-adapter.js
+          grep -F 'watchedSurfaceProfiles' page-profile-adapter.js
+          grep -F 'watchedSurfaceDefaultProfile' page-profile-adapter.js
+          echo 'PASS PC single renderer + quick controls + Shorts exclusion assertions'
 
   android-compile:
     runs-on: ubuntu-latest

@@ -7,56 +7,57 @@ import './watch-later-recovery-static-selftest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
-const surface = fs.readFileSync(path.join(src, 'surface-profiles.js'), 'utf8');
-const hotfix = fs.readFileSync(path.join(src, 'pc-ui-hotfix.js'), 'utf8');
+const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
+const adapter = fs.readFileSync(path.join(src, 'page-profile-adapter.js'), 'utf8');
 const content = fs.readFileSync(path.join(src, 'content.js'), 'utf8');
-const css = fs.readFileSync(path.join(src, 'content.css'), 'utf8');
 const options = fs.readFileSync(path.join(src, 'options.js'), 'utf8');
 
-// v0.10.0 regression: two scanners toggled the exact same presentation classes.
+// The proven 0.9.x content script is again the single watched-card renderer. The two later
+// all-page mutation/scanner layers caused v0.10.x jank and UI ownership races and must not load.
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
-assert.doesNotMatch(surface, /classList\.toggle\('eyh-watched'/);
-assert.doesNotMatch(surface, /classList\.toggle\('eyh-hidden'/);
-assert.match(surface, /classList\.toggle\('eyh-surface-watched'/);
-assert.match(surface, /classList\.toggle\('eyh-surface-hidden'/);
-assert.match(css, /\.eyh-surface-watched/);
-assert.match(css, /\.eyh-surface-hidden/);
+const allPageIsolated = manifest.content_scripts.find(entry =>
+  entry.world === 'ISOLATED' && entry.matches?.includes('https://www.youtube.com/*'));
+assert.ok(allPageIsolated, 'missing all-page isolated content-script entry');
+assert.ok(allPageIsolated.js.includes('content.js'), 'stable content renderer must load');
+assert.ok(allPageIsolated.js.includes('page-profile-adapter.js'), 'lightweight profile adapter must load');
+assert.ok(!allPageIsolated.js.includes('surface-profiles.js'), 'duplicate surface scanner must not load');
+assert.ok(!allPageIsolated.js.includes('pc-ui-hotfix.js'), 'header MutationObserver hotfix must not load');
+assert.ok(!allPageIsolated.js.includes('watch-later-safe.js'), 'heavy Watch Later transaction UI must be playlist-scoped');
+assert.ok(!allPageIsolated.js.includes('watch-later-recovery-content.js'), 'recovery bridge must be playlist-scoped');
 
-// A late async response from a previous YouTube SPA surface must not repaint the new surface.
-assert.match(surface, /const generation = \+\+scanGeneration/);
-assert.match(surface, /generation !== scanGeneration \|\| key !== surfaceKey\(\)/);
+// The adapter may translate page/default profiles and bind controls, but it must never become a
+// second DOM scanner/observer. Navigation + bounded header retries are intentionally sufficient.
+assert.doesNotMatch(adapter, /MutationObserver/);
+assert.doesNotMatch(adapter, /querySelectorAll\('a\[href\*=/);
+assert.match(adapter, /watchedSurfaceProfiles/);
+assert.match(adapter, /watchedSurfaceDefaultProfile/);
+assert.match(adapter, /button\[data-eyh-mode\]/);
+assert.match(adapter, /stopImmediatePropagation\(\)/);
+assert.match(adapter, /#eyh-surface-settings/);
+assert.match(adapter, /\.remove\(\)/);
 
-// Keep redundant brand/page text out of the masthead, but never remove the proven quick controls.
-assert.match(surface, /button\.textContent = '⚙'/);
-assert.match(surface, /brand\.hidden = true/);
-assert.match(hotfix, /querySelectorAll\('button\[data-eyh-mode\]'\)/);
-assert.match(hotfix, /button\.hidden = false/);
-assert.match(hotfix, /applyQuickMode\(mode\)/);
-assert.match(hotfix, /dimEnabled: mode === 'dim'/);
-assert.match(hotfix, /hideEnabled: mode === 'hide'/);
+// Shorts has no Eternal masthead UI. Leaving Shorts restores the existing stable quick controls.
+assert.match(adapter, /if \(key === 'shorts'\)[\s\S]*root\.style\.display = 'none'/);
+assert.match(adapter, /root\.style\.removeProperty\('display'\)/);
 
-// An old tab whose extension context was invalidated must explain itself instead of silently eating
-// the gear click. A single reload is sufficient; extension removal/re-registration is never needed.
-assert.match(hotfix, /EXTENSION_CONTEXT_INVALIDATED/);
-assert.match(hotfix, /showReloadNotice\(\)/);
-assert.match(hotfix, /이 탭만 한 번 새로고침/);
+// Legacy destructive buttons stay hidden; only the playlist-scoped journaled safe transaction
+// implementation can expose cleanup/undo.
+assert.match(adapter, /#eyh-watch-later-auto/);
+assert.match(adapter, /#eyh-watch-later-cleanup/);
+assert.match(adapter, /watchLaterAutoCleanupEnabled: false/);
+const playlistIsolated = manifest.content_scripts.find(entry =>
+  entry.world === 'ISOLATED' && entry.matches?.includes('https://www.youtube.com/playlist*'));
+assert.ok(playlistIsolated?.js.includes('watch-later-safe.js'));
+assert.ok(playlistIsolated?.js.includes('watch-later-recovery-content.js'));
 
-// Shorts is a full-screen player, not a recommendation-card page. It must carry neither profile
-// rendering nor any Eternal masthead controls; leaving Shorts must still remount normal controls.
-assert.match(surface, /if \(key === 'shorts'\) \{\s*clearAllManaged\(\)/s);
-assert.match(surface, /if \(key === 'shorts'\) \{\s*button\?\.remove\(\)/s);
-assert.match(surface, /const key = surfaceKey\(\);\s*if \(key === 'shorts'\) return;/s);
-assert.match(hotfix, /if \(key === 'shorts'\)[\s\S]*root\.style\.display = 'none'/);
-assert.match(hotfix, /root\.style\.removeProperty\('display'\)/);
-
-// Common defaults and per-page overrides have identical dim/hide threshold expressiveness.
+// Common/default profile data and per-page overrides remain stored even though presentation is
+// deliberately reduced to the stable one-mode renderer for this recovery release.
 for (const token of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
-]) assert.ok(options.includes(token), `missing full default-profile field: ${token}`);
-assert.match(surface, /delete profiles\[key\]/);
-assert.match(surface, /const hide = profile\.hideEnabled/);
-assert.match(surface, /const dim = !hide && profile\.dimEnabled/);
+]) assert.ok(options.includes(token), `missing retained default-profile field: ${token}`);
+assert.match(adapter, /profiles: values\.watchedSurfaceProfiles/);
+assert.match(adapter, /\[state\.key\]: next/);
 
-console.log('PASS page-profile regression self-test');
+console.log('PASS single-renderer page-profile stability self-test');
