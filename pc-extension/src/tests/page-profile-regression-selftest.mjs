@@ -45,7 +45,7 @@ assert.match(hotfix, /이 탭만 한 번 새로고침/);
 assert.match(surface, /if \(key === 'shorts'\) \{\s*clearAllManaged\(\)/s);
 assert.match(surface, /if \(key === 'shorts'\) \{\s*button\?\.remove\(\)/s);
 assert.match(surface, /const key = surfaceKey\(\);\s*if \(key === 'shorts'\) return;/s);
-assert.match(hotfix, /if \(key === 'shorts'\) \{\s*root\.style\.display = 'none'/s);
+assert.match(hotfix, /if \(key === 'shorts'\)[\s\S]*root\.style\.display = 'none'/);
 assert.match(hotfix, /root\.style\.removeProperty\('display'\)/);
 
 // Common defaults and per-page overrides have identical dim/hide threshold expressiveness.
