@@ -44,8 +44,9 @@ private val UPDATE_VISIBLE_PACKAGES = arrayOf(
 )
 
 /**
- * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. Keeping this independent
- * avoids assuming that another optional Morphe toolbar patch happened to be enabled.
+ * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. Keeping this definition
+ * lets CI continue to verify compatibility, while the v1.10.5 crash-quarantine build deliberately
+ * does not install the hook into YouTube's host UI.
  */
 private object EternalToolbarButtonFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
@@ -84,9 +85,8 @@ private object EternalToolbarButtonFingerprint : Fingerprint(
 )
 
 /**
- * Same structural browse-id anchor used by Morphe's Change start page patch. Eternal only observes
- * the value; it never rewrites it. This makes Watch Later/Liked/playlist/channel/history profiles
- * exact instead of guessing from whichever navigation button is still selected underneath.
+ * Same structural browse-id anchor used by Morphe's Change start page patch. The definition is kept
+ * for compatibility testing, but the quarantine build does not inject onBrowseId into YouTube.
  */
 private object EternalBrowseIdFingerprint : Fingerprint(
     returnType = "L",
@@ -146,8 +146,11 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
             it.parameters.isEmpty() && AccessFlags.PUBLIC.isSet(it.accessFlags) && AccessFlags.STATIC.isSet(it.accessFlags)
     } ?: throw PatchException("Eternal History could not find AddOnManager.registerAddOns()")
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
-    installEternalBrowseIdHook()
-    installEternalToolbarHook()
+
+    // v1.10.0 added both host hooks in the same regression window as the real-device tab crashes.
+    // Keep their definitions compile-checked, but do not inject either one until crash-free runtime
+    // evidence exists. This preserves all Eternal storage/settings while restoring v1.9.1's host
+    // lifecycle boundary: registration only, no extra navigation/browse/toolbar bytecode callbacks.
 }
 
 context(context: ResourcePatchContext)

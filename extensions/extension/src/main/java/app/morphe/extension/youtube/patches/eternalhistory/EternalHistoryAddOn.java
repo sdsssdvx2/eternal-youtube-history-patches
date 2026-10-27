@@ -11,6 +11,13 @@ import app.morphe.extension.youtube.shared.NavigationBar;
 public final class EternalHistoryAddOn {
     private static final AtomicBoolean registered = new AtomicBoolean();
 
+    /**
+     * v1.10.0 introduced a host-navigation listener at the same time real devices began crashing
+     * during bottom-tab transitions. Keep the code type-checked for a future controlled re-enable,
+     * but do not register it in the crash-quarantine build. Surface preferences remain on disk.
+     */
+    private static final boolean HOST_NAVIGATION_HOOKS_ENABLED = false;
+
     public static void register() {
         if (!registered.compareAndSet(false, true)) return;
         Logger.printDebug(() -> "Registering Eternal YouTube History add-on");
@@ -30,7 +37,6 @@ public final class EternalHistoryAddOn {
                 EternalWatchLaterCleaner.onNewVideoStarted();
             }
             EternalWatchLaterJobService.refreshSchedule();
-            EternalHistoryToolbar.onSurfaceChanged();
         });
         AddOnApi.addVideoIdListener(videoId -> {
             EternalHistoryClient.onVideoIdChanged(videoId);
@@ -44,15 +50,17 @@ public final class EternalHistoryAddOn {
                 EternalWatchLaterCleaner.onVideoTimeChanged(videoTimeMs);
             }
         });
-        // Morphe already gives the newly selected navigation button to this listener. Eternal only
-        // records that value. It must not query NavigationBar/PlayerType back from inside YouTube's
-        // tab-transition callback, because those host objects are temporarily being rebuilt there.
-        NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
+
+        // Do not enter YouTube's navigation callback in the quarantine build. This exact listener
+        // did not exist in the last known stable v1.9.1 runtime architecture.
+        if (HOST_NAVIGATION_HOOKS_ENABLED) {
+            NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
+        }
+
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
         EternalWatchLaterStateMigration.migrate();
         EternalWatchLaterJobService.refreshSchedule();
-        EternalHistoryToolbar.ensureControlSoon();
     }
 
     private EternalHistoryAddOn() { }
