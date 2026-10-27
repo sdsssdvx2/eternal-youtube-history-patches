@@ -32,6 +32,11 @@ public final class EternalWatchLaterJobService extends JobService {
         if (scheduler == null) return;
 
         if (EternalWatchLaterSafety.isLocked()) {
+            // The legacy automatic path stays disabled even if an old preference UI momentarily
+            // writes true. v1.10.4 exposes only the separately audited manual safe transaction path.
+            if (EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get()) {
+                EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
+            }
             scheduler.cancel(JOB_ID);
             scheduledEnabled = Boolean.FALSE;
             return;
@@ -68,13 +73,17 @@ public final class EternalWatchLaterJobService extends JobService {
     }
 
     static void runNow() {
-        if (EternalWatchLaterSafety.isLocked()) return;
+        if (EternalWatchLaterSafety.isLocked()) {
+            EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
+            return;
+        }
         EternalWatchLaterAutoSweep.runAsync(true, null);
     }
 
     @Override
     public boolean onStartJob(JobParameters params) {
         if (EternalWatchLaterSafety.isLocked()) {
+            EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
             running.set(false);
             return false;
         }

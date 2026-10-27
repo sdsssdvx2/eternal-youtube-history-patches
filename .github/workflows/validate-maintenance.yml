@@ -43,13 +43,12 @@ jobs:
           grep -F "if (key === 'shorts')" surface-profiles.js
           grep -F 'button?.remove()' surface-profiles.js
           echo 'PASS PC low-frequency maintenance + isolated renderer + Shorts UI safety'
-      - name: Android background cleanup safety
+      - name: Android background and transactional cleanup safety
         shell: bash
         run: |
           set -euo pipefail
           base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
           settings="$base/EternalHistorySettings.java"
-          sweep="$base/EternalWatchLaterAutoSweep.java"
           payload="$base/EternalWatchLaterPayload.java"
           job="$base/EternalWatchLaterJobService.java"
           addon="$base/EternalHistoryAddOn.java"
@@ -59,35 +58,78 @@ jobs:
           filter="$base/EternalWatchedFilter.java"
           safety="$base/EternalWatchLaterSafety.java"
           coordinator="$base/EternalCleanupCoordinator.java"
+          safe_cleaner="$base/EternalWatchLaterSafeCleaner.java"
+          safe_undo="$base/EternalWatchLaterSafeUndo.java"
+          tx_store="$base/EternalWatchLaterTransactionStore.java"
           support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
-          grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
-          grep -F 'EternalCleanupLedgerSync.refresh()' "$sweep"
-          grep -F 'pct != null && pct >= 0f && pct >= threshold' "$sweep"
-          grep -F 'validSetVideoId(entry.setVideoId)' "$sweep"
-          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$sweep"
-          grep -F 'resolveEntry(entry.videoId) == null' "$sweep"
-          grep -F 'if (result.scanned == 0)' "$sweep"
-          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
-          ! grep -F 'ACTION_REMOVE_VIDEO_BY_VIDEO_ID' "$sweep"
-          grep -F 'setPeriodic(PERIOD_MS)' "$job"
-          grep -F 'scheduler.cancel(JOB_ID)' "$job"
-          grep -F 'WATCH_LATER_AUTO_CLEANUP.get()' "$job"
-          grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
-          grep -F 'EternalWatchLaterJobService.runNow()' "$toolbar"
 
-          # Emergency fail-closed invariant after the real-user data-loss report: no scheduled,
-          # per-video, or manual Android path may initiate deletion while recovery safety is absent.
+          grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
+          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
+
+          # Legacy automatic/manual destructive entry points remain permanently safety-locked.
           grep -F 'DESTRUCTIVE_CLEANUP_LOCKED = true' "$safety"
           grep -F 'EternalWatchLaterSafety.isLocked()' "$job"
+          grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$job"
           grep -F 'scheduler.cancel(JOB_ID)' "$job"
           grep -F 'EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false)' "$addon"
           grep -F 'if (!EternalWatchLaterSafety.isLocked())' "$addon"
-          grep -F 'EternalWatchLaterSafety.isLocked()' "$coordinator"
-          grep -F '안전 잠금: 삭제 실행 안 함' "$coordinator"
+          grep -F 'EternalWatchLaterJobService.refreshSchedule()' "$addon"
 
-          # Real-device tab transitions must be state-only: Morphe gives us the selected button,
-          # and Eternal must not re-enter transient NavigationBar/PlayerType/search state from the
-          # callback. UI work is deferred, while Shorts carries neither E control nor dim/hide work.
+          # The manual entry point may reach only the separately audited transaction engine after
+          # a successful central-ledger refresh. Undo is routed through the narrowed policy engine.
+          grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
+          grep -F 'if (!result.success)' "$coordinator"
+          grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
+          grep -F 'EternalWatchLaterSafeUndo.hasUndoableTransaction()' "$coordinator"
+          grep -F 'EternalWatchLaterSafeUndo.undoLastCleanup(activity)' "$coordinator"
+          ! grep -E '^[[:space:]]*activity\.runOnUiThread\(\(\) -> EternalWatchLaterCleaner\.previewAndConfirmCleanup' "$coordinator"
+
+          # Crash-safe transaction journal: AtomicFile write + fsync + read-back byte/hash equality.
+          grep -F 'AtomicFile' "$tx_store"
+          grep -F 'out.getFD().sync()' "$tx_store"
+          grep -F 'Arrays.equals(sha256(bytes), sha256(readBack))' "$tx_store"
+          grep -F 'Arrays.equals(bytes, readBack)' "$tx_store"
+          grep -F 'MAX_SNAPSHOT_ENTRIES = 5000' "$tx_store"
+          grep -F '완료되지 않은 이전 안전 정리' "$tx_store"
+
+          # Before delete #1, two independent complete list reads must agree exactly; no partial list
+          # may be processed. Pair ambiguity and oversized snapshots fail closed.
+          grep -F 'ListResult first = listWatchLater(MAX_PAGES)' "$safe_cleaner"
+          grep -F 'if (first.hasMore)' "$safe_cleaner"
+          grep -F 'ListResult second = listWatchLater(MAX_PAGES)' "$safe_cleaner"
+          grep -F 'if (second.hasMore)' "$safe_cleaner"
+          grep -F 'sameMembership(first.entries, second.entries)' "$safe_cleaner"
+          grep -F 'parsed.conflict' "$safe_cleaner"
+          grep -F 'previousSet != null && !previousSet.equals(setId)' "$safe_cleaner"
+
+          # Durable write-before-delete and per-item write-after-result are source-order locked.
+          python - "$safe_cleaner" <<'PY'
+          import sys
+          text=open(sys.argv[1], encoding='utf-8').read()
+          before=text.index('JSONObject durable = EternalWatchLaterTransactionStore.saveVerified(tx)')
+          resolve=text.index('Entry fresh = resolveEntryStrict(videoId)', before)
+          compare=text.index('!expectedSetVideoId.equals(fresh.setVideoId)', resolve)
+          remove=text.index('removeFreshEntry(fresh)', compare)
+          persist=text.index('durable = EternalWatchLaterTransactionStore.saveVerified(durable)', remove)
+          assert before < resolve < compare < remove < persist
+          print('PASS Android transaction source ordering')
+          PY
+
+          # Undo never re-adds entries for which cleanup provably sent no delete request.
+          grep -F '"missing".equals(status) || "identity_mismatch".equals(status)' "$safe_undo"
+          grep -F 'candidate.put("undoStatus", "not_removed")' "$safe_undo"
+          grep -F 'PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null)' "$safe_undo"
+          python - "$safe_undo" <<'PY'
+          import sys
+          text=open(sys.argv[1], encoding='utf-8').read()
+          policy=text.index('if (!shouldRestore(candidate))')
+          add=text.index('addEntry(videoId)', policy)
+          body=text.index('PlaylistRoutes.editPlaylistBody(videoId, WATCH_LATER, null)', add)
+          assert policy < add < body
+          print('PASS Android narrowed undo source ordering')
+          PY
+
+          # Real-device tab transitions remain state-only and Shorts carries no Eternal overlay.
           grep -F 'CONTROL_TAG = "eternal-history-floating-control"' "$toolbar"
           grep -F 'root.addView(control' "$toolbar"
           grep -F 'positionControl(root, control)' "$toolbar"
@@ -105,4 +147,4 @@ jobs:
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android fail-closed Watch Later cleanup + cached navigation/Shorts UI safety'
+          echo 'PASS Android legacy lock + transactional manual Watch Later cleanup/narrow undo safety'
