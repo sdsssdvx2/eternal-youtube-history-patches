@@ -7,7 +7,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.ImageView;
@@ -25,30 +24,62 @@ import app.morphe.extension.shared.Utils;
 import app.morphe.extension.shared.ui.Dim;
 import app.morphe.extension.shared.theme.ThemeUtils;
 
-/** Compact Eternal overlay with live page-scoped settings. */
+/** Compact Eternal control visually anchored inside YouTube's real top toolbar row. */
 @SuppressWarnings("unused")
 public final class EternalHistoryToolbar {
     private static final String CONTROL_TAG = "eternal-history-floating-control";
     private static final AtomicBoolean mountPending = new AtomicBoolean();
     private static final AtomicBoolean refreshPending = new AtomicBoolean();
     private static WeakReference<TextView> controlRef = new WeakReference<>(null);
+    private static WeakReference<ImageView> toolbarAnchorRef = new WeakReference<>(null);
 
-    /** Injection point: the host toolbar is only a delayed remount signal, never our UI parent. */
+    /**
+     * Injection point beside YouTube's own toolbar ImageView. We never add children to the native
+     * ActionMenu/Toolbar; the host view is geometry-only evidence that lets our root-level control
+     * occupy the toolbar's empty space instead of floating over video content.
+     */
     public static void onToolbarImageView(ImageView imageView) {
         if (imageView == null || !EternalHistorySettings.ENABLED.get()) return;
-        scheduleControlMount(220L);
+        imageView.post(() -> {
+            try {
+                rememberToolbarAnchor(imageView);
+                scheduleControlMount(32L);
+            } catch (Throwable t) {
+                Logger.printDebug(() -> "Eternal toolbar anchor ignored: " + safeMessage(t));
+            }
+        });
     }
 
     /**
      * Navigation/browse callbacks can run while YouTube is rebuilding its view hierarchy. Never
-     * add/remove overlay children synchronously from that host callback; defer one short beat.
+     * add/remove overlay children synchronously from such a callback; defer and require a live
+     * toolbar anchor again before showing anything.
      */
     static void onSurfaceChanged() {
-        scheduleControlMount(220L);
+        scheduleControlMount(120L);
     }
 
     static void ensureControlSoon() {
-        scheduleControlMount(350L);
+        scheduleControlMount(180L);
+    }
+
+    private static void rememberToolbarAnchor(ImageView candidate) {
+        if (candidate == null || !candidate.isAttachedToWindow() || candidate.getWidth() <= 0
+                || candidate.getHeight() <= 0 || !candidate.isShown()) return;
+        ImageView current = toolbarAnchorRef.get();
+        if (current == null || !current.isAttachedToWindow() || !current.isShown()) {
+            toolbarAnchorRef = new WeakReference<>(candidate);
+            return;
+        }
+        int[] candidateLocation = new int[2];
+        int[] currentLocation = new int[2];
+        candidate.getLocationInWindow(candidateLocation);
+        current.getLocationInWindow(currentLocation);
+        // Prefer the left-most live action icon so E sits immediately before the native action
+        // cluster, which is the widest stable empty part of YouTube's header.
+        if (candidateLocation[0] < currentLocation[0]) {
+            toolbarAnchorRef = new WeakReference<>(candidate);
+        }
     }
 
     private static void scheduleControlMount(long delayMs) {
@@ -66,7 +97,7 @@ public final class EternalHistoryToolbar {
             if (activity == null || activity.isFinishing()) return;
             View content = activity.findViewById(android.R.id.content);
             if (!(content instanceof ViewGroup root) || root.getWidth() <= 0) {
-                scheduleControlMount(350L);
+                scheduleControlMount(180L);
                 return;
             }
 
@@ -77,20 +108,31 @@ public final class EternalHistoryToolbar {
                 return;
             }
 
+            ImageView anchor = toolbarAnchorRef.get();
+            if (!isUsableToolbarAnchor(root, anchor)) {
+                // Fail closed visually: never fall back to a hard-coded content Y coordinate.
+                TextView stale = controlRef.get();
+                if (stale != null) stale.setVisibility(View.GONE);
+                return;
+            }
+
             TextView existing = controlRef.get();
             if (existing != null && existing.getParent() == root && existing.isAttachedToWindow()) {
-                existing.setVisibility(View.VISIBLE);
                 refreshLabel(existing);
-                positionControl(root, existing);
+                positionControl(root, existing, anchor);
                 return;
             }
             removeTaggedControls(root);
             TextView control = createControl(root);
+            control.setVisibility(View.INVISIBLE);
             root.addView(control, new ViewGroup.LayoutParams(Dim.dp(36), Dim.dp32));
             controlRef = new WeakReference<>(control);
-            control.post(() -> positionControl(root, control));
+            control.post(() -> {
+                ImageView liveAnchor = toolbarAnchorRef.get();
+                if (!positionControl(root, control, liveAnchor)) control.setVisibility(View.GONE);
+            });
         } catch (Throwable t) {
-            Logger.printDebug(() -> "Eternal overlay mount deferred: " + safeMessage(t));
+            Logger.printDebug(() -> "Eternal toolbar control mount deferred: " + safeMessage(t));
         }
     }
 
@@ -117,15 +159,47 @@ public final class EternalHistoryToolbar {
         return control;
     }
 
-    private static void positionControl(ViewGroup root, View control) {
-        if (root.getWidth() <= 0) return;
-        int topInset = 0;
+    private static boolean isUsableToolbarAnchor(ViewGroup root, ImageView anchor) {
+        if (root == null || anchor == null || !anchor.isAttachedToWindow() || !anchor.isShown()
+                || anchor.getWidth() <= 0 || anchor.getHeight() <= 0 || root.getWidth() <= 0) return false;
         try {
-            WindowInsets insets = root.getRootWindowInsets();
-            if (insets != null) topInset = insets.getSystemWindowInsetTop();
-        } catch (Throwable ignored) { }
-        control.setX(Math.max(Dim.dp8, root.getWidth() - control.getWidth() - Dim.dp10));
-        control.setY(topInset + Dim.dp(56));
+            int[] rootLocation = new int[2];
+            int[] anchorLocation = new int[2];
+            root.getLocationInWindow(rootLocation);
+            anchor.getLocationInWindow(anchorLocation);
+            int relativeY = anchorLocation[1] - rootLocation[1];
+            int relativeX = anchorLocation[0] - rootLocation[0];
+            return relativeX >= 0 && relativeX < root.getWidth()
+                    && relativeY >= 0 && relativeY <= Dim.dp(160);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean positionControl(ViewGroup root, View control, ImageView anchor) {
+        if (!isUsableToolbarAnchor(root, anchor) || control == null) return false;
+        try {
+            int[] rootLocation = new int[2];
+            int[] anchorLocation = new int[2];
+            root.getLocationInWindow(rootLocation);
+            anchor.getLocationInWindow(anchorLocation);
+            int width = control.getWidth() > 0 ? control.getWidth() : Dim.dp(36);
+            int height = control.getHeight() > 0 ? control.getHeight() : Dim.dp32;
+            float x = anchorLocation[0] - rootLocation[0] - width - Dim.dp8;
+            float y = anchorLocation[1] - rootLocation[1]
+                    + (anchor.getHeight() - height) / 2f;
+            if (x < Dim.dp4 || x + width > root.getWidth() - Dim.dp4 || y < 0 || y > Dim.dp(160)) {
+                control.setVisibility(View.GONE);
+                return false;
+            }
+            control.setX(x);
+            control.setY(y);
+            control.setVisibility(View.VISIBLE);
+            return true;
+        } catch (Throwable t) {
+            control.setVisibility(View.GONE);
+            return false;
+        }
     }
 
     private static void removeTaggedControls(ViewGroup host) {
@@ -214,7 +288,7 @@ public final class EternalHistoryToolbar {
             TextView wlTitle = text(activity, "나중에 볼 동영상 정리", 15, true);
             wlTitle.setPadding(0, Dim.dp12, 0, Dim.dp4);
             box.addView(wlTitle);
-            autoCleanup = check(activity, "기준 이상 시 자동 정리", EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
+            autoCleanup = check(activity, "기준 이상 시 자동 안전 정리", EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
             cleanupThreshold = threshold(activity, "자동/수동 정리 기준", EternalHistorySettings.watchLaterCleanupProgressPercent());
             box.addView(autoCleanup);
             box.addView(cleanupThreshold.root);
@@ -229,7 +303,7 @@ public final class EternalHistoryToolbar {
             };
 
             Button cleanNow = new Button(activity);
-            cleanNow.setText("지금 나중에 볼 동영상 정리…");
+            cleanNow.setText("지금 나중에 볼 동영상 안전 정리…");
             cleanNow.setOnClickListener(v -> EternalCleanupCoordinator.previewAndConfirm(activity));
             box.addView(cleanNow);
         } else {
@@ -311,9 +385,14 @@ public final class EternalHistoryToolbar {
                 control.setVisibility(View.GONE);
                 return;
             }
-            control.setVisibility(View.VISIBLE);
             refreshLabel(control);
+            View parent = (View) control.getParent();
+            ImageView anchor = toolbarAnchorRef.get();
+            if (!(parent instanceof ViewGroup root) || !positionControl(root, control, anchor)) {
+                control.setVisibility(View.GONE);
+            }
         } catch (Throwable t) {
+            control.setVisibility(View.GONE);
             Logger.printDebug(() -> "Eternal control label ignored: " + safeMessage(t));
         }
     }
@@ -325,7 +404,6 @@ public final class EternalHistoryToolbar {
             return;
         }
         EternalSurfaceSettings.Profile p = EternalSurfaceSettings.get(surface);
-        control.setVisibility(View.VISIBLE);
         control.setText("E");
         String state;
         if (p.dimEnabled && p.hideEnabled) {
