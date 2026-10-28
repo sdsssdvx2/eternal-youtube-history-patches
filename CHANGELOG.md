@@ -1,3 +1,9 @@
+## [1.10.6](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.5...v1.10.6) (2026-10-28)
+
+### 🐛 Bug Fixes
+
+* **android:** restore header E and transactional Watch Later cleanup ([4d7dadb](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/4d7dadb6f2d6d8239ebe92c05f43a0b09661317f))
+
 ## [1.10.5](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.4...v1.10.5) (2026-10-27)
 
 ### 🐛 Bug Fixes
