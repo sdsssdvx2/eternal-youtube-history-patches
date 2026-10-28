@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "morphe_patches": "v1.48.0",
-  "eternal_patches": "v1.10.5",
+  "eternal_patches": "v1.10.6",
   "youtube": {
     "version": "21.20.405",
     "min_sdk": 28
