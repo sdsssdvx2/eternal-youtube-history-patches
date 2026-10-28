@@ -1,0 +1,38 @@
+name: Apply PC Watch Later v0.10.8 guarded rewrite
+
+on:
+  push:
+    branches: [ fix/pc-watch-later-v0108 ]
+    paths:
+      - '.github/scripts/apply-pc-watch-later-v0108.py'
+      - '.github/workflows/apply-pc-watch-later-v0108.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/pc-watch-later-v0108
+      - name: Apply guarded source transformations
+        run: python3 .github/scripts/apply-pc-watch-later-v0108.py
+      - name: Run PC self-tests before commit
+        run: |
+          set -euo pipefail
+          cd pc-extension/src
+          node tests/watch-later-selftest.mjs
+          node tests/static-integration-selftest.mjs
+          node tests/page-profile-regression-selftest.mjs
+          for file in *.js tests/*.mjs; do node --check "$file"; done
+      - name: Commit rewritten product source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pc-extension/src
+          git diff --cached --check
+          git commit -m 'fix(pc): restore safe Watch Later cleanup and stable hide mode'
+          git push origin HEAD:fix/pc-watch-later-v0108
