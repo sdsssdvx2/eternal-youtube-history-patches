@@ -185,8 +185,7 @@
     await chrome.storage.local.set({
       watchedSurfaceProfiles: profiles,
       watchedDisplayMode: effective.mode,
-      watchedMinProgressPct: effective.threshold,
-      watchLaterAutoCleanupEnabled: false
+      watchedMinProgressPct: effective.threshold
     });
     scheduleHeaderDecoration();
   }
@@ -211,13 +210,10 @@
 
   if (!extensionAlive()) return;
 
-  // Keep the old destructive/automatic path truly dormant, not merely blocked at its final bridge.
-  chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false }).catch(() => {});
+  // The legacy mutation bridge remains blocked in MAIN world. The separate transactional-safe
+  // coordinator owns the user's Watch Later auto-cleanup preference and must not be overwritten here.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.watchLaterAutoCleanupEnabled?.newValue === true) {
-      chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false }).catch(() => {});
-    }
     if (changes.watchedSurfaceProfiles || changes.watchedSurfaceDefaultProfile) {
       applySurfaceProfile().catch(() => {});
     }

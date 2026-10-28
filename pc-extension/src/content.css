@@ -40,6 +40,24 @@ ytd-thumbnail.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface
   display: none !important;
 }
 
+/* Watch Later is virtualized. Removing every loaded row with display:none can prevent YouTube
+   from materializing the continuation sentinel and leave a blank page. Keep hidden rows mounted
+   as a 1px inert shell instead; other surfaces retain ordinary display:none behavior. */
+ytd-playlist-video-renderer.eyh-watch-later-hidden {
+  display: block !important;
+  box-sizing: border-box !important;
+  height: 1px !important;
+  min-height: 1px !important;
+  max-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 #eyh-header-controls {
   display: inline-flex;
   align-items: center;

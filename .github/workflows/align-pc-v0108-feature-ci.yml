@@ -1,0 +1,38 @@
+name: Align PC v0.10.8 feature CI contract
+
+on:
+  push:
+    branches: [ fix/pc-watch-later-v0108 ]
+    paths:
+      - '.github/scripts/align-pc-v0108-feature-ci.py'
+      - '.github/workflows/align-pc-v0108-feature-ci.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/pc-watch-later-v0108
+      - name: Align feature CI contract
+        run: python3 .github/scripts/align-pc-v0108-feature-ci.py
+      - name: Verify exact PC contract before commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "for (const forbidden of ['surface-profiles.js','pc-ui-hotfix.js'])" .github/workflows/validate-feature.yml
+          grep -F "safe Watch Later transaction coordinator is not resident" .github/workflows/validate-feature.yml
+          grep -F "LEGACY_WATCH_LATER_MUTATION_DISABLED = true" .github/workflows/validate-feature.yml
+          grep -F "scheduleAutomaticCleanup" .github/workflows/validate-feature.yml
+      - name: Commit CI contract
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/validate-feature.yml
+          git diff --cached --check
+          git commit -m 'test(pc): validate safe Watch Later coordinator'
+          git push origin HEAD:fix/pc-watch-later-v0108

@@ -16,10 +16,10 @@
 <p class="note">흐림과 숨김이 모두 저장된 기존 고급 설정에서는 <strong>숨김이 우선</strong>합니다. 진행률 숫자는 사용자가 직접 지정합니다. <strong>0%</strong>는 Eternal 원장에 한 번이라도 기록된 영상을 대상으로 합니다. PC와 Android 설정은 서로 동기화하지 않습니다. Shorts 전체 화면에서는 Eternal 헤더 표시 제어를 숨깁니다.</p>
 <p class="note">흐리게 표시는 기본적으로 <strong>썸네일만</strong> 불투명도를 낮춥니다. ‘영상 정보도 함께’ 옵션을 켜면 카드 정보도 같은 불투명도로 연동됩니다. 흑백 옵션을 켠 경우에만 grayscale을 적용하며 CSS blur는 사용하지 않습니다.</p>
 </section>
-<section><h2>Watch Later 정리 안전 잠금</h2>
-<label><input id="watchLaterAutoCleanupEnabled" type="checkbox" disabled> 자동 정리 (현재 안전 잠금)</label>
+<section><h2>나중에 볼 동영상 정리</h2>
+<label><input id="watchLaterAutoCleanupEnabled" type="checkbox"> 자동 정리</label>
 <label>정리 기준 진행률 (%) <input id="watchLaterCleanupMinProgressPct" type="number" min="1" max="100" step="5"></label>
-<p class="note">이 안정화 버전에서는 <strong>자동/legacy 삭제 경로를 강제로 꺼 둡니다.</strong> 과거 Watch Later 손실 원인이 완전히 검증되기 전에는 이 설정을 켤 수 없습니다. 복구 기능은 ADD-only이며, YouTube 표시 개수와 strict parser의 전체 membership 개수가 정확히 일치할 때만 후보 비교를 진행합니다.</p>
+<p class="note">기존 삭제 경로는 계속 차단합니다. 정리는 <strong>전체 목록 2회 대조 + 삭제 직전 식별자 재검증 + 영구 journal</strong>을 통과한 안전 경로만 사용하며, 이상이 생기면 즉시 중단합니다. 마지막 정리는 되돌릴 수 있습니다. 자동 정리는 나중에 볼 동영상 페이지가 열려 있을 때 실행됩니다.</p>
 </section>
 <section><h2>자가 진단</h2>
 <div class="row"><button id="runDiagnostics" type="button" class="secondary">현재 YouTube 탭 진단</button></div>

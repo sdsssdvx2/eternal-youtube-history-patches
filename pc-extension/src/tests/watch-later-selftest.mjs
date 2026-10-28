@@ -108,14 +108,13 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The emergency MAIN-world boundary remains permanent. In v0.10.7 the lightweight stability
-// controller also keeps the legacy automatic preference false, without loading the old hotfix DOM
-// observer or destructive on-page coordinator.
+// The emergency MAIN-world boundary remains permanent for historical mutation messages.
+// v0.10.8 enables only the separately journaled/revalidated safe transaction coordinator.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
-assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
+assert.doesNotMatch(stability, /watchLaterAutoCleanupEnabled: false/);
 assert.match(stability, /#eyh-watch-later-auto/);
 assert.match(stability, /#eyh-watch-later-cleanup/);
 
@@ -127,7 +126,8 @@ assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'safety boundary mus
 assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'));
-assert.ok(!isolated.js.includes('watch-later-safe.js'), 'destructive safe-cleanup UI is intentionally dormant in stability release');
-assert.equal(manifest.version, '0.10.7');
+assert.ok(isolated.js.includes('watch-later-safe-core.js'), 'safe transaction core must be resident');
+assert.ok(isolated.js.includes('watch-later-safe.js'), 'safe transaction coordinator must be resident');
+assert.equal(manifest.version, '0.10.8');
 
 console.log('PASS watch-later-core + modern lockup + fail-closed safety self-test');

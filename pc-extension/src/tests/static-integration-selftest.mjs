@@ -24,7 +24,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.7', 'stability release must be distinguishable from the regressed builds');
+assert.equal(manifest.version, '0.10.8', 'Watch Later/UI fix release must be distinguishable from prior builds');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
 const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
@@ -39,8 +39,9 @@ assert.ok(isolatedWorld.js.includes('watch-later-recovery-content.js'), 'ADD-onl
 assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in isolated YouTube pages');
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'), 'second card renderer must not load');
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'), 'whole-document hotfix observer must not load');
-assert.ok(!isolatedWorld.js.includes('watch-later-safe.js'), 'destructive coordinator UI remains dormant during recovery/stability release');
-assert.ok(!isolatedWorld.js.includes('watch-later-safe-core.js'), 'unused isolated safe core must not load');
+assert.ok(isolatedWorld.js.includes('watch-later-safe-core.js'), 'safe transaction core must load in isolated world');
+assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'safe transaction coordinator must be resident');
+assert.ok(isolatedWorld.js.includes('watch-later-safe-core.js'), 'safe transaction core must load in ISOLATED world');
 
 // The old stable renderer remains the only code that scans video cards and toggles legacy classes.
 assert.match(content, /async function scanAndMark\(\)/);
@@ -69,19 +70,23 @@ assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)|watchedDis
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/,
   'direct stable-line upgrades must snapshot the legacy default before page overrides');
 
-// Legacy auto cleanup must be dormant both at preference level and at the MAIN-world mutation edge.
-assert.match(content, /watchLaterAutoCleanupEnabled = false/);
-assert.match(options, /watchLaterAutoCleanupEnabled: false/);
-assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
-assert.match(stability, /changes\.watchLaterAutoCleanupEnabled\?\.newValue === true/);
+// Legacy mutation messages remain blocked, while the strict transaction coordinator is the only
+// resident destructive owner and may persist the user's opt-in automatic preference.
+assert.match(content, /LEGACY_WATCH_LATER_MUTATION_DISABLED = true/);
+assert.match(options, /watchLaterAutoCleanupEnabled: false,/);
+assert.ok(options.includes("watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked"));
+assert.doesNotMatch(stability, /changes\.watchLaterAutoCleanupEnabled\?\.newValue === true/);
 assert.match(stability, /#eyh-watch-later-auto/);
 assert.match(stability, /#eyh-watch-later-cleanup/);
+assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(safeCoordinator, /scheduleAutomaticCleanup/);
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_REQUEST'/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_ONE_REQUEST'/);
+assert.match(content, /eyh-watch-later-hidden/);
 
 // Keep the strict transaction implementation packaged/tested for later re-enable, but not resident.
 assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
