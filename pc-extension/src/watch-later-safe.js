@@ -174,25 +174,32 @@
     return listed;
   }
 
-  function requireDeclaredCount(expectedEntries, expectedPrevious = null) {
-    const declaredCount = declaredWatchLaterCount();
-    if (declaredCount == null) {
+  /**
+   * YouTube's visible playlist count may include unavailable/private/deleted rows that expose no
+   * usable videoId+setVideoId pair. Those rows are never destructive cleanup candidates. Cleanup
+   * may safely operate on the verified subset because every candidate is re-resolved by videoId
+   * immediately before removal. We still fail closed if parsed entries exceed the declared count,
+   * and the declared count plus unparsed gap must remain stable across both full enumerations.
+   */
+  function requireDeclaredCoverage(parsedCount, expectedDeclared = null) {
+    const declared = declaredWatchLaterCount();
+    if (declared == null) {
       throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없어 안전을 위해 삭제하지 않습니다.');
     }
-    if (declaredCount !== expectedEntries) {
-      throw new Error(`YouTube 표시 개수 ${declaredCount}개와 안전 파서 ${expectedEntries}개가 달라 삭제하지 않습니다.`);
+    if (declared < parsedCount) {
+      throw new Error(`안전 파서 ${parsedCount}개가 YouTube 표시 ${declared}개보다 많아 삭제하지 않습니다.`);
     }
-    if (expectedPrevious != null && declaredCount !== expectedPrevious) {
-      throw new Error(`사용자 확인 뒤 Watch Later 개수가 ${expectedPrevious}개에서 ${declaredCount}개로 바뀌어 삭제하지 않습니다.`);
+    if (expectedDeclared != null && declared !== expectedDeclared) {
+      throw new Error(`사용자 확인 뒤 Watch Later 표시 개수가 ${expectedDeclared}개에서 ${declared}개로 바뀌어 삭제하지 않습니다.`);
     }
-    return declaredCount;
+    return { declared, unparsed: declared - parsedCount };
   }
 
   async function createPreparedTransaction() {
     await refreshCentralLedger();
     const listed = await strictListWatchLater();
     const entries = listed.entries || [];
-    const declaredCount = requireDeclaredCount(entries.length);
+    const coverage = requireDeclaredCoverage(entries.length);
     const ledger = await readLedger(entries.map(e => e.videoId));
     const prefs = await storageGet({ watchLaterCleanupMinProgressPct: 60 });
     const progressById = {};
@@ -209,7 +216,8 @@
       pages: listed.pages,
       hasMore: Boolean(listed.hasMore)
     });
-    tx.declaredCount = declaredCount;
+    tx.declaredCount = coverage.declared;
+    tx.unparsedCount = coverage.unparsed;
     tx.snapshotTerminalReason = listed.terminalReason;
     return tx;
   }
@@ -217,9 +225,12 @@
   async function revalidatePreparedSnapshot(tx) {
     const listed = await strictListWatchLater();
     const current = CORE.normalizeSnapshot(listed.entries || []);
-    requireDeclaredCount(current.length, tx.declaredCount);
+    const coverage = requireDeclaredCoverage(current.length, tx.declaredCount);
+    if (coverage.unparsed !== Number(tx.unparsedCount || 0)) {
+      throw new Error('사용자 확인 뒤 안전하게 식별할 수 없는 Watch Later 항목 수가 바뀌어 삭제하지 않습니다.');
+    }
     if (!CORE.sameSnapshotMembership(tx.snapshot, current)) {
-      throw new Error('사용자 확인 뒤 Watch Later 멤버십이 바뀌어 삭제하지 않습니다. 목록을 다시 확인한 뒤 재시도하세요.');
+      throw new Error('사용자 확인 뒤 안전하게 식별된 Watch Later 멤버십이 바뀌어 삭제하지 않습니다. 목록을 다시 확인한 뒤 재시도하세요.');
     }
     return { pages: Number(listed.pages || 0), count: current.length };
   }
@@ -232,17 +243,23 @@
     try {
       setStatus('Watch Later 전체 목록과 Eternal 진행률을 안전하게 확인 중…');
       const tx = await createPreparedTransaction();
+      const coverageNote = tx.unparsedCount > 0
+        ? ` · 표시 ${tx.declaredCount}개 중 식별 가능한 ${tx.snapshot.length}개만 검사, 나머지 ${tx.unparsedCount}개는 건드리지 않음`
+        : '';
       if (!tx.candidates.length) {
-        setStatus(`${tx.snapshot.length}개 확인 · ${tx.threshold}%+ 정리 대상 없음`);
+        setStatus(`${tx.snapshot.length}개 안전 확인${coverageNote} · ${tx.threshold}%+ 정리 대상 없음`);
         return;
       }
 
       const preview = tx.candidates.slice(0, 6)
         .map(e => `${e.videoId} (${Math.round(e.progressPct)}%)`).join('\n');
       const more = tx.candidates.length > 6 ? `\n외 ${tx.candidates.length - 6}개` : '';
+      const unknown = tx.unparsedCount > 0
+        ? `\n\nYouTube 표시 ${tx.declaredCount}개 중 ${tx.unparsedCount}개는 유효한 videoId+setVideoId를 안전하게 확인할 수 없어 이번 정리에서 완전히 제외합니다.`
+        : '';
       if (!confirm(
         `Eternal 진행률 ${tx.threshold}% 이상인 Watch Later 영상 ${tx.candidates.length}개를 안전 정리할까요?\n\n` +
-        `${preview}${more}\n\n삭제 전에 전체 Watch Later 스냅샷과 대상 journal을 저장하고, 사용자 확인 뒤 전체 목록을 한 번 더 대조한 다음 각 항목의 현재 식별자를 다시 검증합니다. 마지막 정리는 되돌릴 수 있습니다.`
+        `${preview}${more}${unknown}\n\n삭제 전에 식별 가능한 전체 Watch Later 스냅샷과 대상 journal을 저장하고, 사용자 확인 뒤 표시 개수와 식별된 멤버십을 한 번 더 대조한 다음 각 대상의 현재 식별자를 다시 검증합니다. 마지막 정리는 되돌릴 수 있습니다.`
       )) {
         setStatus('안전 정리를 취소했습니다.');
         return;
@@ -252,7 +269,7 @@
       let durable = await persistVerified(tx);
 
       try {
-        setStatus('사용자 확인 뒤 Watch Later 전체 목록이 그대로인지 다시 확인 중…');
+        setStatus('사용자 확인 뒤 Watch Later 목록이 그대로인지 다시 확인 중…');
         const verified = await revalidatePreparedSnapshot(durable);
         durable.snapshotVerifiedAt = Date.now();
         durable.snapshotVerificationPages = verified.pages;
@@ -307,10 +324,11 @@
       durable.state = halted || durable.failureCount > 0 ? 'partial' : 'completed';
       durable.completedAt = Date.now();
       durable = await persistVerified(durable);
+      const untouched = durable.unparsedCount > 0 ? ` · 식별 불가 ${durable.unparsedCount}개는 미변경` : '';
       setStatus(
         durable.state === 'partial'
-          ? `안전 정리 중단: ${durable.removedCount}개 제거 · 이상 감지 후 추가 삭제 중지 · 되돌리기 가능`
-          : `안전 정리 완료: ${durable.removedCount}개 · 마지막 정리 되돌리기 가능`,
+          ? `안전 정리 중단: ${durable.removedCount}개 제거 · 이상 감지 후 추가 삭제 중지 · 되돌리기 가능${untouched}`
+          : `안전 정리 완료: ${durable.removedCount}개 · 마지막 정리 되돌리기 가능${untouched}`,
         durable.state === 'partial' ? 'error' : ''
       );
     } catch (error) {
@@ -436,7 +454,7 @@
     }
     const min = CORE.threshold(state.watchLaterCleanupMinProgressPct);
     cleanup.textContent = `${min}%+ 안전 정리`;
-    cleanup.title = `전체 스냅샷 2회 대조 + journal + 직전 식별자 재검증 후 ${min}% 이상 본 영상만 정리`;
+    cleanup.title = `식별 가능한 목록 2회 대조 + journal + 직전 식별자 재검증 후 ${min}% 이상 본 영상만 정리`;
     cleanup.hidden = !page;
     cleanup.disabled = busy;
 
