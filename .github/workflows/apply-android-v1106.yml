@@ -1,0 +1,96 @@
+name: Apply Android v1.10.6 guarded repair
+
+on:
+  push:
+    branches: [ fix/android-header-safe-cleanup-v1106 ]
+    paths:
+      - '.github/scripts/apply-android-v1106.py'
+      - '.github/workflows/apply-android-v1106.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite-compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Eternal branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/android-header-safe-cleanup-v1106
+          path: eternal-youtube-history-patches
+      - name: Checkout official Morphe patches
+        uses: actions/checkout@v7
+        with:
+          repository: MorpheApp/morphe-patches
+          ref: dev
+          path: morphe-patches
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Apply guarded transformations
+        working-directory: eternal-youtube-history-patches
+        run: python3 .github/scripts/apply-android-v1106.py
+      - name: Static safety contract
+        working-directory: eternal-youtube-history-patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          base=Path('extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory')
+          addon=(base/'EternalHistoryAddOn.java').read_text()
+          job=(base/'EternalWatchLaterJobService.java').read_text()
+          safe=(base/'EternalWatchLaterSafeCleaner.java').read_text()
+          toolbar=(base/'EternalHistoryToolbar.java').read_text()
+          coordinator=(base/'EternalCleanupCoordinator.java').read_text()
+          safety=(base/'EternalWatchLaterSafety.java').read_text()
+          assert 'HOST_NAVIGATION_HOOKS_ENABLED = false' in addon
+          assert 'WATCH_LATER_AUTO_CLEANUP.save(false)' not in addon
+          assert 'EternalHistoryToolbar.ensureControlSoon()' in addon
+          assert 'DESTRUCTIVE_CLEANUP_LOCKED = true' in safety
+          assert 'EternalWatchLaterAutoSweep.runAsync' not in job
+          assert 'EternalWatchLaterSafeCleaner.runAutomaticCleanup' in job
+          assert 'static void runAutomaticCleanup' in safe
+          assert 'EternalCleanupLedgerSync.refresh()' in safe
+          assert 'sameMembership(originalSnapshot, confirmed.entries)' in safe
+          assert 'candidate.put("status", "attempting")' in safe
+          assert 'Entry finalFresh = resolveEntryStrict(videoId)' in safe
+          assert 'removeFreshEntry(finalFresh)' in safe
+          assert 'control.setY(topInset + Dim.dp8)' in toolbar
+          assert 'WATCH_LATER_AUTO_CLEANUP.save(false)' not in coordinator
+          prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
+          ET.parse(prefs)
+          p=Path(prefs).read_text()
+          assert 'morphe_eternal_history_advanced_screen' in p
+          print('PASS Android v1.10.6 static safety contract')
+          PY
+      - name: Precompile official Morphe extension API
+        working-directory: morphe-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew :extensions:youtube:compileReleaseJavaWithJavac --no-daemon --stacktrace
+      - name: Compile Eternal Java and patches
+        working-directory: eternal-youtube-history-patches
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
+                    :patches:compileKotlin \
+                    --no-daemon --stacktrace
+      - name: Commit verified product source
+        working-directory: eternal-youtube-history-patches
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add extensions patches .github/workflows/validate-maintenance.yml
+          git diff --cached --check
+          git commit -m 'fix(android): restore header controls and safe Watch Later cleanup'
+          git push origin HEAD:fix/android-header-safe-cleanup-v1106
