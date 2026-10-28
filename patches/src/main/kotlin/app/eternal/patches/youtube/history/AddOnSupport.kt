@@ -44,9 +44,8 @@ private val UPDATE_VISIBLE_PACKAGES = arrayOf(
 )
 
 /**
- * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. Keeping this definition
- * lets CI continue to verify compatibility, while the v1.10.5 crash-quarantine build deliberately
- * does not install the hook into YouTube's host UI.
+ * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. This is a render-only
+ * signal: the runtime stores the ImageView solely as toolbar geometry and never mutates its parent.
  */
 private object EternalToolbarButtonFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
@@ -85,8 +84,9 @@ private object EternalToolbarButtonFingerprint : Fingerprint(
 )
 
 /**
- * Same structural browse-id anchor used by Morphe's Change start page patch. The definition is kept
- * for compatibility testing, but the quarantine build does not inject onBrowseId into YouTube.
+ * Same structural browse-id anchor used by Morphe's Change start page patch. The definition stays
+ * compile-checked, but we deliberately do not inject it because browse/navigation callbacks were
+ * part of the real-device tab-transition crash regression window.
  */
 private object EternalBrowseIdFingerprint : Fingerprint(
     returnType = "L",
@@ -147,10 +147,11 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
     } ?: throw PatchException("Eternal History could not find AddOnManager.registerAddOns()")
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
 
-    // v1.10.0 added both host hooks in the same regression window as the real-device tab crashes.
-    // Keep their definitions compile-checked, but do not inject either one until crash-free runtime
-    // evidence exists. This preserves all Eternal storage/settings while restoring v1.9.1's host
-    // lifecycle boundary: registration only, no extra navigation/browse/toolbar bytecode callbacks.
+    // Restore only the toolbar's passive render signal. Keep the crash-quarantine boundaries that
+    // matter: no NavigationBar listener and no browse-id bytecode injection. The callback does not
+    // query host navigation state and never inserts a child into YouTube's toolbar.
+    installEternalToolbarHook()
+    // Intentionally NOT: installEternalBrowseIdHook()
 }
 
 context(context: ResourcePatchContext)
