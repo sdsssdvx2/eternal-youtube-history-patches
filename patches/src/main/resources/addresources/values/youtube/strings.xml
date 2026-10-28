@@ -1,36 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <string name="morphe_eternal_history_screen_title">Eternal YouTube History</string>
-  <string name="morphe_eternal_history_screen_summary">D1 중앙 원장에 시청 기록과 진행률을 직접 동기화합니다.</string>
-  <string name="morphe_eternal_history_enabled_title">Eternal 직접 동기화</string>
-  <string name="morphe_eternal_history_enabled_summary">PC를 거치지 않고 이 기기에서 본 영상을 D1에 기록합니다.</string>
-  <string name="morphe_eternal_history_worker_url_title">Worker URL</string>
-  <string name="morphe_eternal_history_worker_url_summary">PC 확장에 저장된 동일한 https://…workers.dev 주소를 입력합니다.</string>
-  <string name="morphe_eternal_history_api_token_title">연결 토큰</string>
-  <string name="morphe_eternal_history_api_token_summary">Eternal Worker 전용 개인 연결 암호입니다. 다른 사람에게 공유하지 마세요.</string>
-  <string name="morphe_eternal_history_min_seconds_title">시청 인정 최소 시간(초)</string>
-  <string name="morphe_eternal_history_min_seconds_summary">기본값 5초. 실제 재생 누적 시간이 이 기준을 넘은 경우 정확 시각 이벤트를 기록합니다.</string>
-  <string name="morphe_eternal_history_progress_step_title">진행률 전송 간격(%p)</string>
-  <string name="morphe_eternal_history_progress_step_summary">기본값 5. 진행률이 이만큼 증가할 때만 D1에 갱신해 쓰기 사용량을 줄입니다.</string>
-  <string name="morphe_eternal_history_sync_cache_title">D1 원장 로컬 캐시</string>
-  <string name="morphe_eternal_history_sync_cache_summary">처음 한 번 전체 원장을 받고 이후 revision 변경분만 받아 피드 판정에 사용합니다.</string>
-  <string name="morphe_eternal_history_auto_update_check_title">검증된 앱 업데이트 자동 확인</string>
-  <string name="morphe_eternal_history_auto_update_check_summary">기본 켜짐. 하루 최대 2회 작은 공개 상태 파일만 확인하고, 새 Morphe/Eternal YouTube 빌드가 있으면 버전당 한 번 알려줍니다. 자동 설치는 하지 않습니다.</string>
+  <string name="morphe_eternal_history_screen_summary">시청 기록 동기화 · 표시 · 나중에 볼 동영상 정리</string>
+  <string name="morphe_eternal_history_enabled_title">Eternal 사용</string>
+  <string name="morphe_eternal_history_enabled_summary">이 기기의 YouTube 시청 기록과 진행률을 D1에 저장합니다.</string>
 
-  <string name="morphe_eternal_history_default_profile_title">시청한 영상 표시 · 공통 기본값</string>
-  <string name="morphe_eternal_history_default_profile_summary">안정화 모드에서는 모든 일반 영상 목록에 이 공통 기본값만 적용합니다. 기존 페이지별 개별 설정은 삭제하지 않고 보존되며, 탭 전환 안정성이 확인된 뒤 다시 사용할 수 있습니다.</string>
-  <string name="morphe_eternal_history_default_dim_enabled_title">기본값: 흐리게 표시</string>
-  <string name="morphe_eternal_history_default_dim_enabled_summary">켜면 Eternal 시청 기록과 아래 진행률 기준을 만족한 영상을 흐리게 표시합니다.</string>
-  <string name="morphe_eternal_history_default_hide_enabled_title">기본값: 숨기기</string>
-  <string name="morphe_eternal_history_default_hide_enabled_summary">켜면 기준을 만족한 카드 전체를 숨깁니다. 흐림과 숨김이 동시에 맞으면 숨김이 우선합니다.</string>
-  <string name="morphe_eternal_history_default_linked_thresholds_title">기본값: 흐림/숨김 진행률 기준 같이 사용</string>
-  <string name="morphe_eternal_history_default_linked_thresholds_summary">켜면 아래 공통 기준을 사용합니다. 끄면 흐림 기준과 숨김 기준을 각각 사용합니다.</string>
-  <string name="morphe_eternal_history_default_shared_threshold_title">기본 공통 최소 진행률 (%)</string>
-  <string name="morphe_eternal_history_default_shared_threshold_summary">진행률 기준 같이 사용을 켰을 때 적용합니다. 0이면 시청 기록만 있으면 조건을 만족합니다.</string>
-  <string name="morphe_eternal_history_default_dim_threshold_title">기본 흐림 최소 진행률 (%)</string>
-  <string name="morphe_eternal_history_default_dim_threshold_summary">진행률 기준 같이 사용을 껐을 때 흐림에 적용합니다. 0~100 중 직접 지정합니다.</string>
-  <string name="morphe_eternal_history_default_hide_threshold_title">기본 숨김 최소 진행률 (%)</string>
-  <string name="morphe_eternal_history_default_hide_threshold_summary">진행률 기준 같이 사용을 껐을 때 숨김에 적용합니다. 0~100 중 직접 지정합니다.</string>
+  <string name="morphe_eternal_history_display_screen_title">시청한 영상 표시</string>
+  <string name="morphe_eternal_history_display_screen_summary">흐림·숨김과 진행률 기준</string>
+  <string name="morphe_eternal_history_watch_later_screen_title">나중에 볼 동영상 정리</string>
+  <string name="morphe_eternal_history_watch_later_screen_summary">자동 안전 정리와 기준</string>
+  <string name="morphe_eternal_history_connection_screen_title">연결 · 업데이트</string>
+  <string name="morphe_eternal_history_connection_screen_summary">D1 연결, 캐시, 업데이트 확인</string>
+  <string name="morphe_eternal_history_advanced_screen_title">고급 설정</string>
+  <string name="morphe_eternal_history_advanced_screen_summary">시청 인정 시간과 전송 빈도</string>
+
+  <string name="morphe_eternal_history_worker_url_title">Worker URL</string>
+  <string name="morphe_eternal_history_worker_url_summary">PC 확장과 같은 Eternal Worker 주소입니다.</string>
+  <string name="morphe_eternal_history_api_token_title">연결 토큰</string>
+  <string name="morphe_eternal_history_api_token_summary">Eternal Worker 개인 연결 토큰입니다.</string>
+  <string name="morphe_eternal_history_min_seconds_title">시청 인정 최소 시간 (초)</string>
+  <string name="morphe_eternal_history_min_seconds_summary">기본 5초. 이 시간 이상 실제 재생된 영상을 기록합니다.</string>
+  <string name="morphe_eternal_history_progress_step_title">진행률 전송 간격 (%p)</string>
+  <string name="morphe_eternal_history_progress_step_summary">기본 5. 이만큼 진행될 때만 D1 진행률을 갱신합니다.</string>
+  <string name="morphe_eternal_history_sync_cache_title">D1 원장 로컬 캐시</string>
+  <string name="morphe_eternal_history_sync_cache_summary">시청한 카드 표시를 위해 D1 변경분을 이 기기에 저장합니다.</string>
+  <string name="morphe_eternal_history_auto_update_check_title">검증된 앱 업데이트 확인</string>
+  <string name="morphe_eternal_history_auto_update_check_summary">기본 켜짐. 새 검증 빌드가 있을 때 알립니다.</string>
+
+  <string name="morphe_eternal_history_default_profile_title">공통 표시 기본값</string>
+  <string name="morphe_eternal_history_default_profile_summary">일반 영상 목록에 적용합니다. 기존 페이지별 저장값은 그대로 보존됩니다.</string>
+  <string name="morphe_eternal_history_default_dim_enabled_title">시청한 영상 흐리게</string>
+  <string name="morphe_eternal_history_default_dim_enabled_summary">기준을 만족한 영상을 흐리게 표시합니다.</string>
+  <string name="morphe_eternal_history_default_hide_enabled_title">시청한 영상 숨기기</string>
+  <string name="morphe_eternal_history_default_hide_enabled_summary">기준을 만족한 영상 카드를 숨깁니다. 숨김이 흐림보다 우선합니다.</string>
+  <string name="morphe_eternal_history_default_linked_thresholds_title">흐림·숨김 기준 같이 사용</string>
+  <string name="morphe_eternal_history_default_linked_thresholds_summary">켜면 하나의 공통 진행률 기준을 사용합니다.</string>
+  <string name="morphe_eternal_history_default_shared_threshold_title">공통 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_shared_threshold_summary">0이면 시청 기록이 있기만 해도 조건을 만족합니다.</string>
+  <string name="morphe_eternal_history_default_dim_threshold_title">흐림 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_dim_threshold_summary">기준을 따로 쓸 때의 흐림 기준입니다.</string>
+  <string name="morphe_eternal_history_default_hide_threshold_title">숨김 최소 진행률 (%)</string>
+  <string name="morphe_eternal_history_default_hide_threshold_summary">기준을 따로 쓸 때의 숨김 기준입니다.</string>
 
   <!-- Legacy strings remain so upgrades and older preference references keep resolving. -->
   <string name="morphe_eternal_history_feed_mode_title">시청한 피드 카드 표시</string>
@@ -42,18 +52,19 @@
   <string name="morphe_eternal_history_hide_min_progress_title">숨김 최소 진행률(%)</string>
   <string name="morphe_eternal_history_hide_min_progress_summary">v1.10 이전 설정 마이그레이션용 호환 항목입니다.</string>
 
-  <string name="morphe_eternal_history_thumbnail_opacity_title">시청한 영상 불투명도 (%)</string>
-  <string name="morphe_eternal_history_thumbnail_opacity_summary">10~100, 기본 65. 실제 blur 효과는 사용하지 않고 불투명도만 조절합니다.</string>
-  <string name="morphe_eternal_history_thumbnail_grayscale_title">시청한 영상 흑백 필터</string>
-  <string name="morphe_eternal_history_thumbnail_grayscale_summary">켜면 흐리게 표시되는 영역을 흑백으로 표시합니다. 기본은 썸네일만 대상입니다.</string>
-  <string name="morphe_eternal_history_dim_card_info_title">썸네일 아래 영상 정보도 함께 흐리게</string>
-  <string name="morphe_eternal_history_dim_card_info_summary">켜면 채널 이미지·영상 제목·채널명·조회수·업로드 시점·메뉴까지 썸네일과 같은 불투명도/흑백 설정에 연동합니다.</string>
-  <string name="morphe_eternal_history_feed_note_title">안정화 모드</string>
-  <string name="morphe_eternal_history_feed_note_summary">실기기 탭 전환 crash를 격리하기 위해 YouTube host navigation/browse/toolbar hook과 페이지별 E overlay를 일시 중지했습니다. 공통 기본값은 계속 적용되고 기존 페이지별 설정은 보존됩니다. Shorts에서는 Eternal 표시 변경을 수행하지 않습니다.</string>
-  <string name="morphe_eternal_history_watch_later_auto_cleanup_title">나중에 볼 자동 정리</string>
-  <string name="morphe_eternal_history_watch_later_auto_cleanup_summary">안전 잠금 상태입니다. 데이터 손실 회귀가 완전히 검증되기 전까지 자동 삭제는 실행하지 않습니다.</string>
-  <string name="morphe_eternal_history_watch_later_cleanup_min_progress_title">나중에 볼 정리 기준 진행률 (%)</string>
-  <string name="morphe_eternal_history_watch_later_cleanup_min_progress_summary">1~100, 기본 60. 진행률을 모르는 영상은 자동/수동 정리 대상에서 항상 제외합니다.</string>
-  <string name="morphe_eternal_history_watch_later_note_title">나중에 볼 안전 잠금</string>
-  <string name="morphe_eternal_history_watch_later_note_summary">탭 전환 crash 격리 동안 페이지 E overlay가 비활성화되어 앱 내부 수동 정리 버튼도 일시 중지됩니다. 기존 Watch Later 데이터와 거래 저널은 삭제하지 않습니다.</string>
+  <string name="morphe_eternal_history_thumbnail_opacity_title">흐림 불투명도 (%)</string>
+  <string name="morphe_eternal_history_thumbnail_opacity_summary">10~100, 기본 65.</string>
+  <string name="morphe_eternal_history_thumbnail_grayscale_title">흑백으로 표시</string>
+  <string name="morphe_eternal_history_thumbnail_grayscale_summary">흐리게 표시되는 이미지에 흑백 필터를 적용합니다.</string>
+  <string name="morphe_eternal_history_dim_card_info_title">영상 정보도 함께 흐리게</string>
+  <string name="morphe_eternal_history_dim_card_info_summary">제목·채널명·조회수 등도 썸네일과 함께 흐립니다.</string>
+  <string name="morphe_eternal_history_feed_note_title">현재 적용 범위</string>
+  <string name="morphe_eternal_history_feed_note_summary">탭 안정성을 위해 일반 목록에는 공통 기본값을 사용합니다. 기존 페이지별 설정은 보존되고 Shorts는 변경하지 않습니다.</string>
+
+  <string name="morphe_eternal_history_watch_later_auto_cleanup_title">자동 안전 정리</string>
+  <string name="morphe_eternal_history_watch_later_auto_cleanup_summary">켜면 기준 이상 본 영상을 안전 transaction으로 정리합니다. 모호하거나 실패하면 즉시 중단합니다.</string>
+  <string name="morphe_eternal_history_watch_later_cleanup_min_progress_title">정리 기준 진행률 (%)</string>
+  <string name="morphe_eternal_history_watch_later_cleanup_min_progress_summary">1~100, 기본 60. 진행률을 모르는 영상은 정리하지 않습니다.</string>
+  <string name="morphe_eternal_history_watch_later_note_title">안전 장치</string>
+  <string name="morphe_eternal_history_watch_later_note_summary">전체 목록을 두 번 확인하고 삭제 직전 식별자를 다시 검증하며, 되돌리기 기록을 먼저 저장합니다.</string>
 </resources>
