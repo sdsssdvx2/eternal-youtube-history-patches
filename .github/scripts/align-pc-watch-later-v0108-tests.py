@@ -58,7 +58,7 @@ if s.count(old) != 1:
     raise SystemExit(f'static safe-core assertion expected once, found {s.count(old)}')
 s = s.replace(old, new, 1)
 old = "assert.doesNotMatch(options, /watchLaterAutoCleanupEnabled: false/);"
-new = "assert.match(options, /watchLaterAutoCleanupEnabled: false,/);\nassert.match(options, /watchLaterAutoCleanupEnabled: \\$('#watchLaterAutoCleanupEnabled'\\)\\.checked/);"
+new = "assert.match(options, /watchLaterAutoCleanupEnabled: false,/);\nassert.ok(options.includes(\"watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked\"));"
 if s.count(old) != 1:
     raise SystemExit(f'static options preference assertion expected once, found {s.count(old)}')
 s = s.replace(old, new, 1)
