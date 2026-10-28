@@ -138,16 +138,23 @@
     return listed;
   }
 
-  function requireDeclaredCount(expectedEntries, expectedPrevious = null) {
+  /**
+   * The visible YouTube count may include unavailable/private/deleted rows that intentionally have
+   * no usable videoId+setVideoId pair. Those rows are never cleanup candidates. A destructive
+   * cleanup is safe to operate on the verified subset because every candidate is re-resolved by
+   * videoId immediately before removal. We still fail closed if the parser produces MORE entries
+   * than YouTube declares, and the declared count must stay identical across both full snapshots.
+   */
+  function requireDeclaredCoverage(parsedCount, expectedDeclared = null) {
     const declared = declaredWatchLaterCount();
     if (declared == null) throw new Error('YouTube 화면의 Watch Later 전체 개수를 확인할 수 없습니다.');
-    if (declared !== expectedEntries) {
-      throw new Error(`YouTube 표시 개수 ${declared}개와 안전 파서 ${expectedEntries}개가 달라 자동 정리하지 않습니다.`);
+    if (declared < parsedCount) {
+      throw new Error(`안전 파서 ${parsedCount}개가 YouTube 표시 ${declared}개보다 많아 자동 정리하지 않습니다.`);
     }
-    if (expectedPrevious != null && declared !== expectedPrevious) {
-      throw new Error(`두 번째 확인 중 Watch Later 개수가 ${expectedPrevious}개에서 ${declared}개로 바뀌었습니다.`);
+    if (expectedDeclared != null && declared !== expectedDeclared) {
+      throw new Error(`두 번째 확인 중 Watch Later 표시 개수가 ${expectedDeclared}개에서 ${declared}개로 바뀌었습니다.`);
     }
-    return declared;
+    return { declared, unparsed: declared - parsedCount };
   }
 
   async function refreshCentralLedger() {
@@ -173,7 +180,7 @@
     await refreshCentralLedger();
     const listed = await strictListWatchLater();
     const entries = listed.entries || [];
-    const declaredCount = requireDeclaredCount(entries.length);
+    const coverage = requireDeclaredCoverage(entries.length);
     const ledger = await readLedger(entries.map(e => e.videoId));
     const prefs = await chrome.storage.local.get({ watchLaterCleanupMinProgressPct: 60 });
     const progressById = {};
@@ -190,7 +197,8 @@
       pages: listed.pages,
       hasMore: Boolean(listed.hasMore)
     });
-    tx.declaredCount = declaredCount;
+    tx.declaredCount = coverage.declared;
+    tx.unparsedCount = coverage.unparsed;
     tx.snapshotTerminalReason = listed.terminalReason;
     tx.automatic = true;
     return tx;
@@ -199,9 +207,12 @@
   async function revalidateSnapshot(tx) {
     const listed = await strictListWatchLater();
     const current = CORE.normalizeSnapshot(listed.entries || []);
-    requireDeclaredCount(current.length, tx.declaredCount);
+    const coverage = requireDeclaredCoverage(current.length, tx.declaredCount);
+    if (coverage.unparsed !== Number(tx.unparsedCount || 0)) {
+      throw new Error('두 번째 확인에서 안전하게 식별할 수 없는 Watch Later 항목 수가 바뀌었습니다.');
+    }
     if (!CORE.sameSnapshotMembership(tx.snapshot, current)) {
-      throw new Error('두 번째 확인에서 Watch Later 멤버십이 바뀌었습니다.');
+      throw new Error('두 번째 확인에서 안전하게 식별된 Watch Later 멤버십이 바뀌었습니다.');
     }
     return listed;
   }
@@ -216,8 +227,9 @@
       setStatus('자동 안전 정리 · 전체 목록과 진행률 확인 중…');
       const tx = await prepareTransaction();
       if (runGeneration !== generation || !isWatchLaterPage()) return;
+      const coverageNote = tx.unparsedCount > 0 ? ` · 식별 불가 ${tx.unparsedCount}개는 건드리지 않음` : '';
       if (!tx.candidates.length) {
-        setStatus(`${tx.snapshot.length}개 확인 · ${tx.threshold}%+ 자동 정리 대상 없음`);
+        setStatus(`${tx.snapshot.length}개 안전 확인${coverageNote} · ${tx.threshold}%+ 자동 정리 대상 없음`);
         return;
       }
 
@@ -279,10 +291,11 @@
       durable.state = halted || durable.failureCount > 0 ? 'partial' : 'completed';
       durable.completedAt = Date.now();
       await persistVerified(durable);
+      const untouched = durable.unparsedCount > 0 ? ` · 식별 불가 ${durable.unparsedCount}개 미변경` : '';
       setStatus(
         durable.state === 'completed'
-          ? `자동 안전 정리 완료 · ${durable.removedCount}개 · 되돌리기 가능`
-          : `자동 안전 정리 중단 · ${durable.removedCount}개 제거 · 되돌리기 가능`,
+          ? `자동 안전 정리 완료 · ${durable.removedCount}개 · 되돌리기 가능${untouched}`
+          : `자동 안전 정리 중단 · ${durable.removedCount}개 제거 · 되돌리기 가능${untouched}`,
         durable.state === 'completed' ? '' : 'error'
       );
     } catch (error) {
