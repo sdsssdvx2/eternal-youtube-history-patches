@@ -49,4 +49,15 @@ assert.equal(manifest.version, '0.10.8');
 if s.count(old) != 1:
     raise SystemExit(f'watch-later contract block expected once, found {s.count(old)}')
 p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+p = Path('pc-extension/src/tests/static-integration-selftest.mjs')
+s = p.read_text(encoding='utf-8')
+old = '''assert.ok(!isolatedWorld.js.includes('watch-later-safe.js'), 'destructive coordinator UI remains dormant during recovery/stability release');
+assert.ok(!isolatedWorld.js.includes('watch-later-safe-core.js'), 'unused isolated safe core must not load');'''
+new = '''assert.ok(isolatedWorld.js.includes('watch-later-safe-core.js'), 'safe transaction core must load in ISOLATED world');
+assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'safe transaction coordinator must load in ISOLATED world');'''
+if s.count(old) != 1:
+    raise SystemExit(f'static safe coordinator block expected once, found {s.count(old)}')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
 print('PASS PC Watch Later test contract migration')
