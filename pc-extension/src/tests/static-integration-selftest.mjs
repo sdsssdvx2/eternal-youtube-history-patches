@@ -132,8 +132,17 @@ const autoAttemptPersist = safeAuto.indexOf('durable = await persistVerified(dur
 const autoSafeRemove = safeAuto.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST'");
 assert.ok(autoAttempting >= 0 && autoAttemptPersist > autoAttempting && autoSafeRemove > autoAttemptPersist,
   'automatic cleanup must durably persist attempting before every destructive request');
-assert.match(safeAuto, /requireDeclaredCount\(entries\.length\)/);
-assert.match(safeAuto, /CORE\.sameSnapshotMembership/);
+
+// Cleanup is allowed to operate only on the verified videoId+setVideoId subset when YouTube's
+// display count is larger (e.g. private/deleted/unavailable rows). The declared count itself and
+// the unparsed gap must stay stable across both snapshots, and parser>declared still fails closed.
+for (const coordinator of [safeCoordinator, safeAuto]) {
+  assert.match(coordinator, /function requireDeclaredCoverage\(parsedCount, expectedDeclared = null\)/);
+  assert.match(coordinator, /if \(declared < parsedCount\)/);
+  assert.match(coordinator, /declared - parsedCount/);
+  assert.match(coordinator, /coverage\.unparsed !== Number\(tx\.unparsedCount \|\| 0\)/);
+  assert.match(coordinator, /CORE\.sameSnapshotMembership/);
+}
 assert.match(safeAuto, /archivePreviousTransaction/);
 assert.match(safeAuto, /미완료 정리 복구 기록/);
 
@@ -145,7 +154,8 @@ assert.ok(freshResolve >= 0 && exactCompare > freshResolve && destructiveAction 
 assert.match(safeMain, /ACTION_ADD_VIDEO/);
 assert.match(safeMain, /already_present/);
 
-// Recovery remains ADD-only and requires exact membership completeness after modern renderer parsing.
+// Recovery remains ADD-only and deliberately stricter than cleanup: candidate restoration is
+// allowed only when display count and parsed membership are exactly identical.
 assert.match(core, /'lockupViewModel'/);
 assert.match(core, /collectItemIds/);
 assert.match(recoveryContent, /declared !== entries\.length/);
