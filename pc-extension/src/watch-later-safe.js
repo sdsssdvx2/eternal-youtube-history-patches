@@ -249,7 +249,7 @@
       }
 
       await archivePreviousTransaction();
-      let durable = await persistVerified(tx); // Durable full snapshot + every candidate before any delete.
+      let durable = await persistVerified(tx);
 
       try {
         setStatus('사용자 확인 뒤 Watch Later 전체 목록이 그대로인지 다시 확인 중…');
@@ -272,10 +272,6 @@
       for (let i = 0; i < durable.candidates.length; i += 1) {
         const candidate = durable.candidates[i];
         setStatus(`${i + 1}/${durable.candidates.length} 안전 정리 · 삭제 직전 journal 기록 중…`);
-
-        // Critical crash-safety invariant: the candidate becomes "attempting" durably before the
-        // destructive request. If the tab/browser dies after this point, rollback is limited to this
-        // item plus previously removed/uncertain items instead of every untouched candidate.
         candidate.status = 'attempting';
         candidate.attemptStartedAt = Date.now();
         durable = await persistVerified(durable);
@@ -298,7 +294,6 @@
           candidate.resultAt = Date.now();
         }
 
-        // The next delete is forbidden until the result of this one is durably re-read and verified.
         durable = await persistVerified(durable);
         if (candidate.status !== 'removed') {
           halted = true;
@@ -465,19 +460,25 @@
     queueMicrotask(() => decorate().catch(() => { decorateQueued = false; }));
   }
 
+  function scheduleDecorateRetries() {
+    scheduleDecorate();
+    setTimeout(scheduleDecorate, 120);
+    setTimeout(scheduleDecorate, 500);
+    setTimeout(scheduleDecorate, 1400);
+  }
+
   if (!CORE || !WL) return;
-  // Automatic cleanup remains deliberately disabled in v0.10.5. Only the new explicit transaction
-  // path below can perform a destructive request; legacy remove messages stay blocked in MAIN world.
+  // Keep only the legacy unsafe preference off. v0.10.8 automatic cleanup uses a separate key and
+  // the same snapshot+journal+fresh-identity transaction protocol as manual safe cleanup.
   if (extensionAlive()) chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false }).catch(() => {});
 
-  const observer = new MutationObserver(mutations => {
-    if (mutations.some(m => m.type === 'childList' && m.addedNodes.length)) scheduleDecorate();
-  });
-  observer.observe(document.documentElement, { subtree: true, childList: true });
-  window.addEventListener('yt-navigate-finish', scheduleDecorate, true);
-  window.addEventListener('popstate', scheduleDecorate, true);
+  // Do not observe the whole YouTube document. The single card renderer already owns the one
+  // resident DOM observer; safe cleanup decorates only after navigation, preference changes and a
+  // bounded set of post-navigation retries so it cannot reintroduce the v0.10.x lag regression.
+  window.addEventListener('yt-navigate-finish', scheduleDecorateRetries, true);
+  window.addEventListener('popstate', scheduleDecorateRetries, true);
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && (changes.watchLaterCleanupMinProgressPct || changes[TX_KEY])) scheduleDecorate();
   });
-  setTimeout(scheduleDecorate, 0);
+  scheduleDecorateRetries();
 })();
