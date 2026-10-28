@@ -5,6 +5,7 @@ on:
     branches: [ fix/android-header-safe-cleanup-v1106 ]
     paths:
       - '.github/scripts/apply-android-v1106.py'
+      - '.github/scripts/prepare-android-v1106.py'
       - '.github/workflows/apply-android-v1106.yml'
 
 permissions:
@@ -30,6 +31,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Prepare guarded rewrite
+        working-directory: eternal-youtube-history-patches
+        run: python3 .github/scripts/prepare-android-v1106.py
       - name: Apply guarded transformations
         working-directory: eternal-youtube-history-patches
         run: python3 .github/scripts/apply-android-v1106.py
@@ -38,7 +42,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
           python3 - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET
@@ -65,8 +68,8 @@ jobs:
           assert 'WATCH_LATER_AUTO_CLEANUP.save(false)' not in coordinator
           prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
           ET.parse(prefs)
-          p=Path(prefs).read_text()
-          assert 'morphe_eternal_history_advanced_screen' in p
+          prefs_text=Path(prefs).read_text()
+          assert 'morphe_eternal_history_advanced_screen' in prefs_text
           print('PASS Android v1.10.6 static safety contract')
           PY
       - name: Precompile official Morphe extension API
