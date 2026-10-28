@@ -10,6 +10,9 @@
   const pending = new Map();
   let busy = false;
   let decorateQueued = false;
+  let autoTimer = null;
+  let lastAutoAttemptAt = 0;
+  const AUTO_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
   function extensionAlive() {
     try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
@@ -224,7 +227,7 @@
     return { pages: Number(listed.pages || 0), count: current.length };
   }
 
-  async function runSafeCleanup() {
+  async function runSafeCleanup({ automatic = false } = {}) {
     if (busy) return;
     if (!isWatchLaterPage()) return;
     busy = true;
@@ -240,11 +243,11 @@
       const preview = tx.candidates.slice(0, 6)
         .map(e => `${e.videoId} (${Math.round(e.progressPct)}%)`).join('\n');
       const more = tx.candidates.length > 6 ? `\n외 ${tx.candidates.length - 6}개` : '';
-      if (!confirm(
-        `Eternal 진행률 ${tx.threshold}% 이상인 Watch Later 영상 ${tx.candidates.length}개를 안전 정리할까요?\n\n` +
-        `${preview}${more}\n\n삭제 전에 전체 Watch Later 스냅샷과 대상 journal을 저장하고, 사용자 확인 뒤 전체 목록을 한 번 더 대조한 다음 각 항목의 현재 식별자를 다시 검증합니다. 마지막 정리는 되돌릴 수 있습니다.`
+      if (!automatic && !confirm(
+        `Eternal 진행률 ${tx.threshold}% 이상인 Watch Later 영상 ${tx.candidates.length}개를 정리할까요?\n\n` +
+        `${preview}${more}\n\n삭제 전·후 안전 검증과 복구 기록을 남깁니다.`
       )) {
-        setStatus('안전 정리를 취소했습니다.');
+        setStatus('정리를 취소했습니다.');
         return;
       }
 
@@ -403,8 +406,26 @@
     decorateQueued = false;
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return;
+    let auto = root.querySelector('#eyh-watch-later-safe-auto');
     let cleanup = root.querySelector('#eyh-watch-later-safe-cleanup');
     let undo = root.querySelector('#eyh-watch-later-safe-undo');
+    if (!auto) {
+      auto = document.createElement('button');
+      auto.type = 'button';
+      auto.id = 'eyh-watch-later-safe-auto';
+      auto.className = 'eyh-header-button';
+      auto.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const state = await storageGet({ watchLaterAutoCleanupEnabled: false });
+        const enabled = !Boolean(state.watchLaterAutoCleanupEnabled);
+        await storageSet({ watchLaterAutoCleanupEnabled: enabled });
+        setStatus(enabled ? '나중에 볼 자동 정리 켜짐' : '자동 정리 꺼짐');
+        scheduleDecorate();
+        if (enabled) scheduleAutomaticCleanup(700);
+      }, true);
+      root.appendChild(auto);
+    }
     if (!cleanup) {
       cleanup = document.createElement('button');
       cleanup.type = 'button';
@@ -433,14 +454,20 @@
     }
 
     const page = isWatchLaterPage();
-    const state = await storageGet({ watchLaterCleanupMinProgressPct: 60, [TX_KEY]: null }).catch(() => null);
+    const state = await storageGet({ watchLaterCleanupMinProgressPct: 60, watchLaterAutoCleanupEnabled: false, [TX_KEY]: null }).catch(() => null);
     if (!state) {
+      auto.hidden = !page;
       cleanup.hidden = !page;
       undo.hidden = true;
       return;
     }
     const min = CORE.threshold(state.watchLaterCleanupMinProgressPct);
-    cleanup.textContent = `${min}%+ 안전 정리`;
+    auto.hidden = !page;
+    auto.disabled = busy;
+    auto.textContent = state.watchLaterAutoCleanupEnabled ? '자동✓' : '자동';
+    auto.classList.toggle('eyh-active', Boolean(state.watchLaterAutoCleanupEnabled));
+    auto.title = state.watchLaterAutoCleanupEnabled ? `${min}% 이상 자동 정리 켜짐` : '안전 자동 정리 켜기';
+    cleanup.textContent = `${min}%+ 정리`;
     cleanup.title = `전체 스냅샷 2회 대조 + journal + 직전 식별자 재검증 후 ${min}% 이상 본 영상만 정리`;
     cleanup.hidden = !page;
     cleanup.disabled = busy;
@@ -465,19 +492,35 @@
     queueMicrotask(() => decorate().catch(() => { decorateQueued = false; }));
   }
 
+  function scheduleAutomaticCleanup(delay = 900) {
+    if (autoTimer) clearTimeout(autoTimer);
+    autoTimer = setTimeout(async () => {
+      autoTimer = null;
+      if (busy || !isWatchLaterPage()) return;
+      const state = await storageGet({ watchLaterAutoCleanupEnabled: false }).catch(() => null);
+      if (!state?.watchLaterAutoCleanupEnabled) return;
+      const now = Date.now();
+      if (now - lastAutoAttemptAt < AUTO_MIN_INTERVAL_MS) return;
+      lastAutoAttemptAt = now;
+      runSafeCleanup({ automatic: true }).catch(error => setStatus(error.message, 'error'));
+    }, delay);
+  }
+
   if (!CORE || !WL) return;
-  // Automatic cleanup remains deliberately disabled in v0.10.5. Only the new explicit transaction
-  // path below can perform a destructive request; legacy remove messages stay blocked in MAIN world.
-  if (extensionAlive()) chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false }).catch(() => {});
+  // Legacy remove message names stay blocked in MAIN world. Automatic cleanup, when enabled,
+  // reuses this same strict transaction path rather than the historical content.js mutation path.
 
   const observer = new MutationObserver(mutations => {
     if (mutations.some(m => m.type === 'childList' && m.addedNodes.length)) scheduleDecorate();
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
-  window.addEventListener('yt-navigate-finish', scheduleDecorate, true);
-  window.addEventListener('popstate', scheduleDecorate, true);
+  const onNavigation = () => { scheduleDecorate(); scheduleAutomaticCleanup(); };
+  window.addEventListener('yt-navigate-finish', onNavigation, true);
+  window.addEventListener('popstate', onNavigation, true);
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && (changes.watchLaterCleanupMinProgressPct || changes[TX_KEY])) scheduleDecorate();
+    if (area !== 'local') return;
+    if (changes.watchLaterCleanupMinProgressPct || changes.watchLaterAutoCleanupEnabled || changes[TX_KEY]) scheduleDecorate();
+    if (changes.watchLaterAutoCleanupEnabled?.newValue === true) scheduleAutomaticCleanup(500);
   });
-  setTimeout(scheduleDecorate, 0);
+  setTimeout(() => { scheduleDecorate(); scheduleAutomaticCleanup(); }, 0);
 })();

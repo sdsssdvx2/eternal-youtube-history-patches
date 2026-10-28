@@ -21,7 +21,8 @@ assert.ok(isolated.js.includes('content.js'));
 assert.ok(isolated.js.includes('pc-stability-controller.js'));
 assert.ok(!isolated.js.includes('surface-profiles.js'));
 assert.ok(!isolated.js.includes('pc-ui-hotfix.js'));
-assert.ok(!isolated.js.includes('watch-later-safe.js'));
+assert.ok(isolated.js.includes('watch-later-safe-core.js'));
+assert.ok(isolated.js.includes('watch-later-safe.js'));
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
 assert.match(content, /const observer = new MutationObserver/);
@@ -53,7 +54,7 @@ const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \
 assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)/,
   'Shorts must not corrupt the legacy/default presentation state');
 
-// A direct 0.9.x -> 0.10.7 upgrade snapshots the legacy default before any page override is stored.
+// A direct 0.9.x -> 0.10.8 upgrade snapshots the legacy default before any page override is stored.
 assert.match(stability, /if \(!hasStoredDefault\)/);
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/);
 
@@ -69,7 +70,8 @@ assert.match(stability, /dimThreshold/);
 assert.match(stability, /hideThreshold/);
 assert.match(options, /watchedDisplayMode: presentation\.mode/,
   'options must feed the single renderer instead of disabling it');
-assert.match(options, /watchLaterAutoCleanupEnabled: false/);
-assert.match(optionsHtml, /자동 정리 \(현재 안전 잠금\)/);
+assert.ok(options.includes("watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked"));
+assert.doesNotMatch(optionsHtml, /현재 안전 잠금/);
+assert.match(content, /eyh-watch-later-hidden/);
 
 console.log('PASS lightweight page-profile regression self-test');

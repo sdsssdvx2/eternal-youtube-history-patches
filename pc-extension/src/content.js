@@ -2,6 +2,8 @@
   const PAGE = 'eternal-youtube-history-page';
   const CONTENT = 'eternal-youtube-history-content';
   const WL = globalThis.EYHWatchLaterCore;
+  // Destructive Watch Later writes are owned exclusively by watch-later-safe.js.
+  const LEGACY_WATCH_LATER_MUTATION_DISABLED = true;
   const watchedCache = new Map();
   const progressCache = new Map();
   let watchedDisplayMode = 'dim';
@@ -209,7 +211,14 @@
         const matches = watched && matchesProgress && watchedDisplayMode !== 'none';
         const dimmed = matches && watchedDisplayMode === 'dim';
         c.classList.toggle('eyh-watched', dimmed); c.classList.toggle('eyh-watched-linked', dimmed && watchedLinkCardInfo);
-        c.classList.toggle('eyh-watched-grayscale', dimmed && watchedThumbnailGrayscale); c.classList.toggle('eyh-hidden', matches && watchedDisplayMode === 'hide');
+        c.classList.toggle('eyh-watched-grayscale', dimmed && watchedThumbnailGrayscale);
+        const hidden = matches && watchedDisplayMode === 'hide';
+        // display:none on playlist rows can make YouTube's virtualized Watch Later list stop
+        // materializing continuation rows. Collapse the row instead so the list keeps its DOM
+        // sentinel/continuation machinery while the watched item is effectively invisible.
+        const collapsedWatchLater = hidden && isWatchLaterPage() && c.matches?.('ytd-playlist-video-renderer');
+        c.classList.toggle('eyh-hidden', hidden && !collapsedWatchLater);
+        c.classList.toggle('eyh-watch-later-hidden', Boolean(collapsedWatchLater));
         c.dataset.eyhVideoId = id;
         if (effectiveProgress != null) c.dataset.eyhProgressPct = String(Math.round(effectiveProgress)); else delete c.dataset.eyhProgressPct;
       }
@@ -296,12 +305,14 @@
   }
 
   async function maybeAutoCleanupWatchLaterPage() {
+    if (LEGACY_WATCH_LATER_MUTATION_DISABLED) return;
     if (!watchLaterAutoCleanupEnabled || !isWatchLaterPage()) return;
     const key = `${location.pathname}?list=WL:${watchLaterCleanupMinProgressPct}`; if (lastAutoPageCleanupKey === key) return; lastAutoPageCleanupKey = key;
     try { await cleanupWatchLater({ manual: false }); } catch (error) { lastAutoPageCleanupKey = ''; setHeaderStatus(`자동 정리 실패: ${error.message}`, 'error'); }
   }
 
   async function maybeAutoRemoveCurrentFromWatchLater(videoId, progressPct) {
+    if (LEGACY_WATCH_LATER_MUTATION_DISABLED) return;
     if (!watchLaterAutoCleanupEnabled || !WL) return; const id = WL.normalizeVideoId(videoId); const pct = WL.normalizeProgressPct(progressPct); if (!id || pct == null || pct < watchLaterCleanupMinProgressPct) return;
     const previous = watchLaterAutoAttempted.get(id) || 0; if (Date.now() - previous < 30 * 60 * 1000) return; watchLaterAutoAttempted.set(id, Date.now());
     try { const result = await requestWatchLater('EYH_WL_REMOVE_ONE_REQUEST', { videoId: id }, 120000); if (Number(result.removed || 0) > 0) setHeaderStatus(`Watch Later에서 제거 (${Math.round(pct)}%)`); }

@@ -99,7 +99,7 @@ async function load() {
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
-  $('#watchLaterAutoCleanupEnabled').checked = false;
+  $('#watchLaterAutoCleanupEnabled').checked = Boolean(v.watchLaterAutoCleanupEnabled);
   $('#watchLaterCleanupMinProgressPct').value = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
   $('#autoHistoryPages').value = v.autoHistoryPages;
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
@@ -124,8 +124,8 @@ async function save() {
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
-    // Automatic/destructive Watch Later cleanup remains safety-locked in the stability release.
-    watchLaterAutoCleanupEnabled: false,
+    // Only the transactional-safe coordinator observes this preference; legacy writes stay blocked.
+    watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked,
     watchLaterCleanupMinProgressPct: Math.max(1, Math.min(100, Number($('#watchLaterCleanupMinProgressPct').value) || 60)),
     autoHistoryPages: Math.max(1, Math.min(50, Number($('#autoHistoryPages').value) || 3)),
     cloudEnabled: enabled,
@@ -134,8 +134,7 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#watchLaterAutoCleanupEnabled').checked = false;
-  $('#status').textContent = '공통 기본값을 저장했습니다. 기존 페이지별 설정은 유지되며 YouTube의 빠른 표시/흐림/숨김 버튼으로 현재 페이지 설정을 바꿀 수 있습니다.';
+  $('#status').textContent = '설정을 저장했습니다. 나중에 볼 자동 정리는 안전 transaction 경로만 사용합니다.';
   await refreshStatus();
 }
 
