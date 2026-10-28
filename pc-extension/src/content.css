@@ -35,8 +35,30 @@ ytd-thumbnail.eyh-surface-watched.eyh-surface-watched-grayscale:not(.eyh-surface
   filter: grayscale(1) !important;
 }
 
-.eyh-hidden,
-.eyh-surface-hidden {
+/* Hide only renderers that are known to represent one video card/row. content.js deliberately
+   falls back to an anchor parent on unknown YouTube renderers; a generic .eyh-hidden rule used to
+   hide that unknown parent and could blank an entire virtualized Watch Later list. Unknown markup
+   now fails open instead of hiding a page-level container. */
+ytd-rich-item-renderer.eyh-hidden,
+ytd-video-renderer.eyh-hidden,
+ytd-grid-video-renderer.eyh-hidden,
+ytd-compact-video-renderer.eyh-hidden,
+ytd-playlist-video-renderer.eyh-hidden,
+ytd-reel-item-renderer.eyh-hidden,
+yt-lockup-view-model.eyh-hidden,
+ytm-shorts-lockup-view-model.eyh-hidden,
+ytm-shorts-lockup-view-model-v2.eyh-hidden,
+ytd-rich-grid-media.eyh-hidden,
+ytd-rich-item-renderer.eyh-surface-hidden,
+ytd-video-renderer.eyh-surface-hidden,
+ytd-grid-video-renderer.eyh-surface-hidden,
+ytd-compact-video-renderer.eyh-surface-hidden,
+ytd-playlist-video-renderer.eyh-surface-hidden,
+ytd-reel-item-renderer.eyh-surface-hidden,
+yt-lockup-view-model.eyh-surface-hidden,
+ytm-shorts-lockup-view-model.eyh-surface-hidden,
+ytm-shorts-lockup-view-model-v2.eyh-surface-hidden,
+ytd-rich-grid-media.eyh-surface-hidden {
   display: none !important;
 }
 
@@ -115,6 +137,13 @@ ytd-app[dark] #eyh-header-controls {
   opacity: 1;
 }
 #eyh-header-controls [hidden] {
+  display: none !important;
+}
+
+/* Old direct-delete controls stay permanently out of the UI. v0.10.8 exposes only the journaled
+   safe coordinator buttons, while watch-later-safety-main.js continues blocking legacy writes. */
+#eyh-watch-later-auto,
+#eyh-watch-later-cleanup {
   display: none !important;
 }
 
