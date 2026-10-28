@@ -154,7 +154,7 @@ public final class EternalHistoryToolbar {
         control.setBackground(bg);
         control.setElevation(Dim.dp8);
         refreshLabel(control);
-        control.setOnClickListener(v -> safeShowSurfaceDialog());
+        control.setOnClickListener(v -> safeShowQuickDialog());
         control.setOnLongClickListener(v -> { safeShowDiagnostics(); return true; });
         return control;
     }
@@ -209,21 +209,25 @@ public final class EternalHistoryToolbar {
         }
     }
 
-    private static void safeShowSurfaceDialog() {
-        try { showSurfaceDialog(); }
+    private static void safeShowQuickDialog() {
+        try { showQuickDialog(); }
         catch (Throwable t) {
-            Logger.printException(() -> "Eternal page settings dialog failure", t);
-            Utils.showToastShort("Eternal 페이지 설정을 열지 못했습니다.");
+            Logger.printException(() -> "Eternal quick settings dialog failure", t);
+            Utils.showToastShort("Eternal 빠른 설정을 열지 못했습니다.");
         }
     }
 
-    private static void showSurfaceDialog() {
+    /**
+     * During the navigation-crash quarantine the renderer intentionally uses the common/default
+     * profile for normal lists, so the E dialog edits that exact effective profile instead of
+     * pretending page-specific settings are active. Existing page-specific profiles stay stored
+     * untouched for a future safe surface classifier.
+     */
+    private static void showQuickDialog() {
         Activity activity = Utils.getActivity();
         if (activity == null || activity.isFinishing()) return;
-        EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
-        if (surface == EternalSurfaceSettings.Surface.SHORTS) return;
-        EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
-        boolean inherited = !EternalSurfaceSettings.hasExplicitProfile(surface);
+        if (EternalSurfaceTracker.currentForUi() == EternalSurfaceSettings.Surface.SHORTS) return;
+        EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.defaultProfile(false);
 
         ScrollView scroll = new ScrollView(activity);
         LinearLayout box = new LinearLayout(activity);
@@ -232,15 +236,13 @@ public final class EternalHistoryToolbar {
         scroll.addView(box);
 
         TextView note = text(activity,
-                inherited
-                        ? "현재 공통 기본값을 사용 중입니다. 값을 바꾸면 이 페이지의 개별 설정으로 즉시 저장됩니다.\n흐림과 숨김을 함께 켜면 숨김 조건이 우선합니다."
-                        : "이 페이지의 개별 설정입니다. 변경 내용은 화면에 즉시 반영됩니다.\n흐림과 숨김을 함께 켜면 숨김 조건이 우선합니다.",
+                "일반 영상 목록에 실제 적용되는 공통 표시 설정입니다. 기존 페이지별 저장값은 그대로 보존됩니다.",
                 13, false);
         note.setPadding(0, 0, 0, Dim.dp8);
         box.addView(note);
 
-        CheckBox dim = check(activity, "흐리게 표시", profile.dimEnabled);
-        CheckBox hide = check(activity, "숨기기", profile.hideEnabled);
+        CheckBox dim = check(activity, "시청한 영상 흐리게", profile.dimEnabled);
+        CheckBox hide = check(activity, "시청한 영상 숨기기", profile.hideEnabled);
         CheckBox linked = check(activity, "흐림/숨김 진행률 기준 같이 사용", profile.linkedThresholds);
         box.addView(dim);
         box.addView(hide);
@@ -259,14 +261,9 @@ public final class EternalHistoryToolbar {
             hideThreshold.root.setVisibility(linked.isChecked() ? View.GONE : View.VISIBLE);
         };
         Runnable persistVisuals = () -> {
-            EternalSurfaceSettings.save(
-                    surface,
-                    dim.isChecked(),
-                    hide.isChecked(),
-                    linked.isChecked(),
-                    shared.seek.getProgress(),
-                    dimThreshold.seek.getProgress(),
-                    hideThreshold.seek.getProgress());
+            saveCommonProfile(
+                    dim.isChecked(), hide.isChecked(), linked.isChecked(),
+                    shared.seek.getProgress(), dimThreshold.seek.getProgress(), hideThreshold.seek.getProgress());
             if (dim.isChecked() || hide.isChecked()) EternalHistoryClient.ensureFeedCacheStarted();
             refreshControl();
             schedulePresentationRefresh();
@@ -282,58 +279,56 @@ public final class EternalHistoryToolbar {
         hideThreshold.onUserChange = persistVisuals;
         refreshThresholdRows.run();
 
-        final CheckBox autoCleanup;
-        final ThresholdRow cleanupThreshold;
-        if (surface == EternalSurfaceSettings.Surface.WATCH_LATER) {
-            TextView wlTitle = text(activity, "나중에 볼 동영상 정리", 15, true);
-            wlTitle.setPadding(0, Dim.dp12, 0, Dim.dp4);
-            box.addView(wlTitle);
-            autoCleanup = check(activity, "기준 이상 시 자동 안전 정리", EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
-            cleanupThreshold = threshold(activity, "자동/수동 정리 기준", EternalHistorySettings.watchLaterCleanupProgressPercent());
-            box.addView(autoCleanup);
-            box.addView(cleanupThreshold.root);
-            autoCleanup.setOnCheckedChangeListener((button, checked) -> {
-                EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(checked);
-                EternalWatchLaterJobService.refreshSchedule();
-                if (checked) EternalWatchLaterJobService.runNow();
-            });
-            cleanupThreshold.onUserChange = () -> {
-                EternalHistorySettings.WATCH_LATER_CLEANUP_MIN_PROGRESS.save(cleanupThreshold.seek.getProgress());
-                EternalWatchLaterJobService.refreshSchedule();
-            };
+        TextView wlTitle = text(activity, "나중에 볼 동영상 정리", 15, true);
+        wlTitle.setPadding(0, Dim.dp12, 0, Dim.dp4);
+        box.addView(wlTitle);
+        CheckBox autoCleanup = check(activity, "기준 이상 시 자동 안전 정리",
+                EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get());
+        ThresholdRow cleanupThreshold = threshold(activity, "자동/수동 정리 기준",
+                EternalHistorySettings.watchLaterCleanupProgressPercent());
+        box.addView(autoCleanup);
+        box.addView(cleanupThreshold.root);
+        autoCleanup.setOnCheckedChangeListener((button, checked) -> {
+            EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(checked);
+            EternalWatchLaterJobService.refreshSchedule();
+            if (checked) EternalWatchLaterJobService.runNow();
+        });
+        cleanupThreshold.onUserChange = () -> {
+            EternalHistorySettings.WATCH_LATER_CLEANUP_MIN_PROGRESS.save(cleanupThreshold.seek.getProgress());
+            EternalWatchLaterJobService.refreshSchedule();
+        };
 
-            Button cleanNow = new Button(activity);
-            cleanNow.setText("지금 나중에 볼 동영상 안전 정리…");
-            cleanNow.setOnClickListener(v -> EternalCleanupCoordinator.previewAndConfirm(activity));
-            box.addView(cleanNow);
-        } else {
-            autoCleanup = null;
-            cleanupThreshold = null;
-        }
-
-        Button reset = new Button(activity);
-        reset.setText("이 페이지 설정을 기본값으로 되돌리기");
-        box.addView(reset);
+        Button cleanNow = new Button(activity);
+        cleanNow.setText("지금 나중에 볼 동영상 안전 정리…");
+        cleanNow.setOnClickListener(v -> EternalCleanupCoordinator.previewAndConfirm(activity));
+        box.addView(cleanNow);
 
         Button diagnostics = new Button(activity);
-        diagnostics.setText("Eternal 진단 정보");
+        diagnostics.setText("진단 정보");
         box.addView(diagnostics);
 
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle(surface.label)
+                .setTitle("Eternal 빠른 설정")
                 .setView(scroll)
                 .setNegativeButton("닫기", null)
                 .create();
-
-        reset.setOnClickListener(v -> {
-            EternalSurfaceSettings.reset(surface);
-            Utils.showToastShort(surface.label + " 페이지가 공통 기본값을 다시 사용합니다.");
-            dialog.dismiss();
-            refreshControl();
-            schedulePresentationRefresh();
-        });
         diagnostics.setOnClickListener(v -> safeShowDiagnostics());
         dialog.show();
+    }
+
+    private static void saveCommonProfile(boolean dimEnabled, boolean hideEnabled,
+                                          boolean linkedThresholds, int sharedThreshold,
+                                          int dimThreshold, int hideThreshold) {
+        EternalHistorySettings.DEFAULT_DIM_ENABLED.save(dimEnabled);
+        EternalHistorySettings.DEFAULT_HIDE_ENABLED.save(hideEnabled);
+        EternalHistorySettings.DEFAULT_LINKED_THRESHOLDS.save(linkedThresholds);
+        EternalHistorySettings.DEFAULT_SHARED_THRESHOLD.save(clamp(sharedThreshold));
+        EternalHistorySettings.DEFAULT_DIM_THRESHOLD.save(clamp(dimThreshold));
+        EternalHistorySettings.DEFAULT_HIDE_THRESHOLD.save(clamp(hideThreshold));
+    }
+
+    private static int clamp(int value) {
+        return Math.max(0, Math.min(100, value));
     }
 
     private static ThresholdRow threshold(Activity activity, String label, int progress) {
@@ -398,12 +393,11 @@ public final class EternalHistoryToolbar {
     }
 
     private static void refreshLabel(TextView control) {
-        EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
-        if (surface == EternalSurfaceSettings.Surface.SHORTS) {
+        if (EternalSurfaceTracker.currentForUi() == EternalSurfaceSettings.Surface.SHORTS) {
             control.setVisibility(View.GONE);
             return;
         }
-        EternalSurfaceSettings.Profile p = EternalSurfaceSettings.get(surface);
+        EternalSurfaceSettings.Profile p = EternalSurfaceSettings.defaultProfile(false);
         control.setText("E");
         String state;
         if (p.dimEnabled && p.hideEnabled) {
@@ -415,8 +409,7 @@ public final class EternalHistoryToolbar {
         } else {
             state = "표시 변경 없음";
         }
-        String scope = p.explicit ? "개별 설정" : "공통 기본값";
-        control.setContentDescription("Eternal · " + surface.label + " · " + scope + " · " + state);
+        control.setContentDescription("Eternal · 공통 표시 설정 · " + state);
         control.setAlpha(p.visualEnabled() ? 1.0f : 0.72f);
     }
 
@@ -487,15 +480,16 @@ public final class EternalHistoryToolbar {
     private static void showDiagnostics() {
         Activity activity = Utils.getActivity();
         if (activity == null || activity.isFinishing()) return;
-        EternalSurfaceSettings.Surface surface = EternalSurfaceTracker.currentForUi();
-        EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.get(surface);
+        EternalSurfaceSettings.Surface surfaceHint = EternalSurfaceTracker.currentForUi();
+        EternalSurfaceSettings.Profile profile = EternalSurfaceSettings.defaultProfile(false);
         activity.runOnUiThread(() -> new AlertDialog.Builder(activity)
                 .setTitle("Eternal 진단")
-                .setMessage("현재 페이지=" + surface.label
-                        + "\n설정 범위=" + (profile.explicit ? "페이지 개별" : "공통 기본값")
+                .setMessage("표시 설정 범위=공통 기본값"
+                        + "\n현재 페이지 힌트=" + surfaceHint.label
                         + "\n흐림=" + profile.dimEnabled + " (" + profile.effectiveDimThreshold() + "%+)"
                         + "\n숨김=" + profile.hideEnabled + " (" + profile.effectiveHideThreshold() + "%+)"
                         + "\n진행률 기준 연동=" + profile.linkedThresholds
+                        + "\n기존 페이지별 설정=보존됨(현재 crash 격리 중 미적용)"
                         + "\n" + EternalWatchLaterCleaner.diagnosticSummary()
                         + "\n" + EternalCleanupCoordinator.diagnosticSummary()
                         + "\n" + EternalWatchLaterAutoSweep.diagnosticSummary())
