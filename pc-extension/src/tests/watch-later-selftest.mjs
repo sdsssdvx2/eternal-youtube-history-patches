@@ -8,6 +8,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const safety = fs.readFileSync(path.join(src, 'watch-later-safety-main.js'), 'utf8');
 const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
+const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
+const safeAuto = fs.readFileSync(path.join(src, 'watch-later-safe-auto.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 
 const C = globalThis.EYHWatchLaterCore;
@@ -108,9 +110,8 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The emergency MAIN-world boundary remains permanent. In v0.10.7 the lightweight stability
-// controller also keeps the legacy automatic preference false, without loading the old hotfix DOM
-// observer or destructive on-page coordinator.
+// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.8
+// makes only the separately journaled SAFE protocol resident; the old preference/buttons stay off.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
@@ -118,16 +119,24 @@ assert.match(safety, /blocked-by-safety-lock/);
 assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
 assert.match(stability, /#eyh-watch-later-auto/);
 assert.match(stability, /#eyh-watch-later-cleanup/);
+assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.doesNotMatch(safeCoordinator, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
+assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 
 const mainWorld = manifest.content_scripts.find(entry => entry.world === 'MAIN');
 const isolated = manifest.content_scripts.find(entry => entry.world === 'ISOLATED');
 assert.ok(mainWorld, 'MAIN-world content script is required');
 assert.ok(isolated, 'ISOLATED-world content script is required');
-assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'safety boundary must load before page-bridge');
+assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'legacy safety boundary must load before page-bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'));
-assert.ok(!isolated.js.includes('watch-later-safe.js'), 'destructive safe-cleanup UI is intentionally dormant in stability release');
-assert.equal(manifest.version, '0.10.7');
+assert.ok(isolated.js.includes('watch-later-safe-core.js'), 'transaction core must be resident for safe cleanup');
+assert.ok(isolated.js.includes('watch-later-safe.js'), 'manual journaled cleanup must be resident');
+assert.ok(isolated.js.includes('watch-later-safe-auto.js'), 'opt-in journaled automatic cleanup must be resident');
+assert.equal(manifest.version, '0.10.8');
 
-console.log('PASS watch-later-core + modern lockup + fail-closed safety self-test');
+console.log('PASS watch-later-core + modern lockup + legacy-blocked/safe-resident self-test');

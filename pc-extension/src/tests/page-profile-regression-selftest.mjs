@@ -10,24 +10,30 @@ const src = path.resolve(here, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
 const content = fs.readFileSync(path.join(src, 'content.js'), 'utf8');
+const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
+const safeAuto = fs.readFileSync(path.join(src, 'watch-later-safe-auto.js'), 'utf8');
 const options = fs.readFileSync(path.join(src, 'options.js'), 'utf8');
 const optionsHtml = fs.readFileSync(path.join(src, 'options.html'), 'utf8');
 
 const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(isolated, 'missing isolated world content script');
 
-// Regression contract: one and only one resident video-card renderer.
+// Regression contract: one and only one resident video-card renderer. Safe Watch Later coordinators
+// may be resident because they never observe arbitrary card mutations or toggle presentation classes.
 assert.ok(isolated.js.includes('content.js'));
 assert.ok(isolated.js.includes('pc-stability-controller.js'));
+assert.ok(isolated.js.includes('watch-later-safe.js'));
+assert.ok(isolated.js.includes('watch-later-safe-auto.js'));
 assert.ok(!isolated.js.includes('surface-profiles.js'));
 assert.ok(!isolated.js.includes('pc-ui-hotfix.js'));
-assert.ok(!isolated.js.includes('watch-later-safe.js'));
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
 assert.match(content, /const observer = new MutationObserver/);
 assert.doesNotMatch(stability, /MutationObserver/);
 assert.doesNotMatch(stability, /classList\.toggle/);
 assert.doesNotMatch(stability, /querySelectorAll\('a\[href/);
+assert.doesNotMatch(safeCoordinator, /classList\.toggle|new\s+MutationObserver/);
+assert.doesNotMatch(safeAuto, /classList\.toggle|new\s+MutationObserver/);
 
 // Familiar quick controls remain, but their choice is persisted as the current page profile.
 assert.match(content, /\['none','표시'\]/);
@@ -43,7 +49,7 @@ assert.match(stability, /#eyh-surface-settings/);
 assert.match(stability, /#eyh-surface-panel/);
 assert.doesNotMatch(stability, /openPanel/);
 assert.doesNotMatch(stability, /eyh-surface-compact/);
-assert.match(optionsHtml, /안정화 버전에서는 별도의 ⚙ 페이지 패널을 띄우지 않습니다/);
+assert.doesNotMatch(optionsHtml, /⚙ 페이지 패널/);
 
 // Shorts carries no Eternal masthead UI and, importantly, never rewrites the global legacy mode.
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
@@ -53,7 +59,7 @@ const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \
 assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)/,
   'Shorts must not corrupt the legacy/default presentation state');
 
-// A direct 0.9.x -> 0.10.7 upgrade snapshots the legacy default before any page override is stored.
+// A direct 0.9.x -> 0.10.x upgrade snapshots the legacy default before any page override is stored.
 assert.match(stability, /if \(!hasStoredDefault\)/);
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/);
 
@@ -69,7 +75,9 @@ assert.match(stability, /dimThreshold/);
 assert.match(stability, /hideThreshold/);
 assert.match(options, /watchedDisplayMode: presentation\.mode/,
   'options must feed the single renderer instead of disabling it');
-assert.match(options, /watchLaterAutoCleanupEnabled: false/);
-assert.match(optionsHtml, /자동 정리 \(현재 안전 잠금\)/);
+assert.match(options, /watchLaterSafeAutoCleanupEnabled/);
+assert.doesNotMatch(options, /watchLaterAutoCleanupEnabled:\s*false/);
+assert.match(optionsHtml, /자동 안전 정리/);
+assert.doesNotMatch(optionsHtml, /현재 안전 잠금/);
 
-console.log('PASS lightweight page-profile regression self-test');
+console.log('PASS lightweight page-profile + safe cleanup coexistence regression self-test');

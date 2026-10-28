@@ -77,7 +77,7 @@ async function load() {
     watchedThumbnailOpacityPct: 65,
     watchedThumbnailGrayscale: false,
     watchedLinkCardInfo: false,
-    watchLaterAutoCleanupEnabled: false,
+    watchLaterSafeAutoCleanupEnabled: false,
     watchLaterCleanupMinProgressPct: 60,
     autoHistoryPages: 3,
     cloudEnabled: false,
@@ -99,7 +99,7 @@ async function load() {
   $('#watchedThumbnailOpacityPct').value = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
   $('#watchedThumbnailGrayscale').checked = Boolean(v.watchedThumbnailGrayscale);
   $('#watchedLinkCardInfo').checked = Boolean(v.watchedLinkCardInfo);
-  $('#watchLaterAutoCleanupEnabled').checked = false;
+  $('#watchLaterAutoCleanupEnabled').checked = Boolean(v.watchLaterSafeAutoCleanupEnabled);
   $('#watchLaterCleanupMinProgressPct').value = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
   $('#autoHistoryPages').value = v.autoHistoryPages;
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
@@ -124,8 +124,9 @@ async function save() {
     watchedThumbnailOpacityPct: Math.max(10, Math.min(100, Number($('#watchedThumbnailOpacityPct').value) || 65)),
     watchedThumbnailGrayscale: $('#watchedThumbnailGrayscale').checked,
     watchedLinkCardInfo: $('#watchedLinkCardInfo').checked,
-    // Automatic/destructive Watch Later cleanup remains safety-locked in the stability release.
-    watchLaterAutoCleanupEnabled: false,
+    // Legacy direct-delete messages remain blocked. This opt-in belongs only to the v0.10.8
+    // snapshot+journal+fresh-identity safe coordinator.
+    watchLaterSafeAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked,
     watchLaterCleanupMinProgressPct: Math.max(1, Math.min(100, Number($('#watchLaterCleanupMinProgressPct').value) || 60)),
     autoHistoryPages: Math.max(1, Math.min(50, Number($('#autoHistoryPages').value) || 3)),
     cloudEnabled: enabled,
@@ -134,8 +135,7 @@ async function save() {
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
-  $('#watchLaterAutoCleanupEnabled').checked = false;
-  $('#status').textContent = '공통 기본값을 저장했습니다. 기존 페이지별 설정은 유지되며 YouTube의 빠른 표시/흐림/숨김 버튼으로 현재 페이지 설정을 바꿀 수 있습니다.';
+  $('#status').textContent = '설정을 저장했습니다. 페이지별 표시 설정과 Watch Later 안전 정리 기록은 그대로 유지됩니다.';
   await refreshStatus();
 }
 
@@ -190,7 +190,13 @@ $('#runDiagnostics').addEventListener('click', async () => {
     }
     const page = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_DIAGNOSTICS' });
     const client = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
-    const prefs = await chrome.storage.local.get({ watchedSurfaceDefaultProfile: null, watchedSurfaceProfiles: {} });
+    const prefs = await chrome.storage.local.get({
+      watchedSurfaceDefaultProfile: null,
+      watchedSurfaceProfiles: {},
+      watchLaterSafeAutoCleanupEnabled: false,
+      watchLaterCleanupMinProgressPct: 60,
+      eyhWatchLaterSafeTransactionV1: null
+    });
     out.textContent = JSON.stringify({ generatedAt: new Date().toISOString(), page, client, pageProfiles: prefs }, null, 2);
   } catch (e) {
     out.textContent = `진단 실패: ${e.message}`;

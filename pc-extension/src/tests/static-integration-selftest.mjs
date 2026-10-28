@@ -8,6 +8,7 @@ const src = path.resolve(here, '..');
 const text = name => fs.readFileSync(path.join(src, name), 'utf8');
 const manifest = JSON.parse(text('manifest.json'));
 const content = text('content.js');
+const css = text('content.css');
 const stability = text('pc-stability-controller.js');
 const surface = text('surface-profiles.js');
 const hotfix = text('pc-ui-hotfix.js');
@@ -15,6 +16,7 @@ const safety = text('watch-later-safety-main.js');
 const safeCore = text('watch-later-safe-core.js');
 const safeMain = text('watch-later-safe-main.js');
 const safeCoordinator = text('watch-later-safe.js');
+const safeAuto = text('watch-later-safe-auto.js');
 const bridge = text('page-bridge.js');
 const core = text('watch-later-core.js');
 const recoveryContent = text('watch-later-recovery-content.js');
@@ -24,7 +26,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.7', 'stability release must be distinguishable from the regressed builds');
+assert.equal(manifest.version, '0.10.8', 'safe Watch Later runtime release must have a distinct version');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
 const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
@@ -32,17 +34,18 @@ assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'legacy destructive 
 assert.ok(mainWorld.js.indexOf('watch-later-core.js') < mainWorld.js.indexOf('watch-later-safe-core.js'), 'Watch Later parser must precede safe core in MAIN world');
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'), 'safe core must precede safe write bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexOf('page-bridge.js'), 'safe bridge must be isolated from the legacy page bridge');
-assert.equal(isolatedWorld.js[0], 'watch-later-core.js', 'core must load first in ISOLATED world');
+assert.equal(isolatedWorld.js[0], 'watch-later-core.js', 'Watch Later parser must load first in ISOLATED world');
+assert.ok(isolatedWorld.js.indexOf('watch-later-core.js') < isolatedWorld.js.indexOf('watch-later-safe-core.js'), 'safe transaction core must load before isolated coordinators');
 assert.ok(isolatedWorld.js.includes('content.js'), 'legacy content.js must remain the sole card renderer');
 assert.ok(isolatedWorld.js.includes('pc-stability-controller.js'), 'lightweight stability/profile adapter must load');
+assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'manual safe Watch Later coordinator must be resident');
+assert.ok(isolatedWorld.js.includes('watch-later-safe-auto.js'), 'automatic safe Watch Later coordinator must be resident');
 assert.ok(isolatedWorld.js.includes('watch-later-recovery-content.js'), 'ADD-only Watch Later recovery bridge must load');
 assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in isolated YouTube pages');
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'), 'second card renderer must not load');
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'), 'whole-document hotfix observer must not load');
-assert.ok(!isolatedWorld.js.includes('watch-later-safe.js'), 'destructive coordinator UI remains dormant during recovery/stability release');
-assert.ok(!isolatedWorld.js.includes('watch-later-safe-core.js'), 'unused isolated safe core must not load');
 
-// The old stable renderer remains the only code that scans video cards and toggles legacy classes.
+// The old stable renderer remains the only code that scans video cards and toggles presentation classes.
 assert.match(content, /async function scanAndMark\(\)/);
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
@@ -53,7 +56,14 @@ assert.doesNotMatch(stability, /eyh-surface-watched/);
 assert.doesNotMatch(stability, /eyh-surface-hidden/);
 assert.match(stability, /content\.js is the sole card renderer/);
 
-// Restore the familiar quick buttons, remove the broken gear, and hide the masthead on Shorts.
+// Hide mode must never apply display:none to an arbitrary fallback parent. Only known one-video
+// renderer tags are allowed to disappear; unknown YouTube markup fails open instead of blanking a list.
+assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
+assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
+assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
+assert.match(css, /Unknown markup\s+now fails open/i);
+
+// Familiar quick buttons remain, broken detailed panel remains absent, and Shorts stays untouched.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
@@ -69,38 +79,73 @@ assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)|watchedDis
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/,
   'direct stable-line upgrades must snapshot the legacy default before page overrides');
 
-// Legacy auto cleanup must be dormant both at preference level and at the MAIN-world mutation edge.
+// Old direct-delete paths stay dormant and blocked at the MAIN-world edge.
 assert.match(content, /watchLaterAutoCleanupEnabled = false/);
-assert.match(options, /watchLaterAutoCleanupEnabled: false/);
 assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
 assert.match(stability, /changes\.watchLaterAutoCleanupEnabled\?\.newValue === true/);
 assert.match(stability, /#eyh-watch-later-auto/);
 assert.match(stability, /#eyh-watch-later-cleanup/);
+assert.match(css, /#eyh-watch-later-auto[\s\S]*#eyh-watch-later-cleanup[\s\S]*display:\s*none\s*!important/);
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
 assert.match(safety, /stopImmediatePropagation\(\)/);
 assert.match(safety, /blocked-by-safety-lock/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_REQUEST'/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_ONE_REQUEST'/);
+assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 
-// Keep the strict transaction implementation packaged/tested for later re-enable, but not resident.
+// Safe manual and automatic cleanup both use the strict transaction bridge.
 assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(safeAuto, /watchLaterSafeAutoCleanupEnabled/);
+assert.match(options, /watchLaterSafeAutoCleanupEnabled/);
+assert.doesNotMatch(optionsHtml, /watchLaterAutoCleanupEnabled" type="checkbox" disabled/);
+assert.doesNotMatch(optionsHtml, /안전 잠금/);
+assert.match(optionsHtml, /자동 안전 정리/);
 assert.match(safeMain, /strictListWatchLater/);
 assert.match(safeMain, /SAFE\.paginationDecision/);
 assert.match(safeCore, /continuation이 반복/);
 assert.match(safeCore, /continuation 후보가 둘 이상/);
 assert.match(safeCore, /continuation은 남았지만 새 항목이 없어/);
 assert.match(safeCore, /안전 페이지 한도/);
+
 const persistBeforeSecondSnapshot = safeCoordinator.indexOf('let durable = await persistVerified(tx)');
 const secondSnapshot = safeCoordinator.indexOf('revalidatePreparedSnapshot(durable)');
 const enteringRemoving = safeCoordinator.indexOf("durable.state = 'removing'");
 assert.ok(persistBeforeSecondSnapshot >= 0 && secondSnapshot > persistBeforeSecondSnapshot && enteringRemoving > secondSnapshot,
-  'durable journal and second full snapshot verification must precede removing state');
+  'manual cleanup must persist journal and verify a second full snapshot before removing state');
 const firstAttempting = safeCoordinator.indexOf("candidate.status = 'attempting'");
 const persistAttempting = safeCoordinator.indexOf('durable = await persistVerified(durable)', firstAttempting);
 const firstSafeRemove = safeCoordinator.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST'");
 assert.ok(firstAttempting >= 0 && persistAttempting > firstAttempting && firstSafeRemove > persistAttempting,
-  'attempting journal state must be durably verified before every destructive request');
+  'manual cleanup must durably persist attempting before every destructive request');
+
+const autoPersist = safeAuto.indexOf('let durable = await persistVerified(tx)');
+const autoSecondSnapshot = safeAuto.indexOf('revalidateSnapshot(durable)');
+const autoRemoving = safeAuto.indexOf("durable.state = 'removing'");
+assert.ok(autoPersist >= 0 && autoSecondSnapshot > autoPersist && autoRemoving > autoSecondSnapshot,
+  'automatic cleanup must persist journal and verify a second full snapshot before removing state');
+const autoAttempting = safeAuto.indexOf("candidate.status = 'attempting'");
+const autoAttemptPersist = safeAuto.indexOf('durable = await persistVerified(durable)', autoAttempting);
+const autoSafeRemove = safeAuto.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST'");
+assert.ok(autoAttempting >= 0 && autoAttemptPersist > autoAttempting && autoSafeRemove > autoAttemptPersist,
+  'automatic cleanup must durably persist attempting before every destructive request');
+
+// Cleanup is allowed to operate only on the verified videoId+setVideoId subset when YouTube's
+// display count is larger (e.g. private/deleted/unavailable rows). The declared count itself and
+// the unparsed gap must stay stable across both snapshots, and parser>declared still fails closed.
+for (const coordinator of [safeCoordinator, safeAuto]) {
+  assert.match(coordinator, /function requireDeclaredCoverage\(parsedCount, expectedDeclared = null\)/);
+  assert.match(coordinator, /if \(declared < parsedCount\)/);
+  assert.match(coordinator, /declared - parsedCount/);
+  assert.match(coordinator, /coverage\.unparsed !== Number\(tx\.unparsedCount \|\| 0\)/);
+  assert.match(coordinator, /CORE\.sameSnapshotMembership/);
+}
+assert.match(safeAuto, /archivePreviousTransaction/);
+assert.match(safeAuto, /미완료 정리 복구 기록/);
+
 const freshResolve = safeMain.indexOf('const fresh = await resolveEntry(id)');
 const exactCompare = safeMain.indexOf('fresh.setVideoId !== expected');
 const destructiveAction = safeMain.indexOf("action: 'ACTION_REMOVE_VIDEO'");
@@ -109,7 +154,8 @@ assert.ok(freshResolve >= 0 && exactCompare > freshResolve && destructiveAction 
 assert.match(safeMain, /ACTION_ADD_VIDEO/);
 assert.match(safeMain, /already_present/);
 
-// Recovery remains ADD-only and now requires exact membership completeness after modern renderer parsing.
+// Recovery remains ADD-only and deliberately stricter than cleanup: candidate restoration is
+// allowed only when display count and parsed membership are exactly identical.
 assert.match(core, /'lockupViewModel'/);
 assert.match(core, /collectItemIds/);
 assert.match(recoveryContent, /declared !== entries\.length/);
@@ -141,4 +187,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc single-renderer integration self-test');
+console.log('PASS pc v0.10.8 safe Watch Later integration self-test');
