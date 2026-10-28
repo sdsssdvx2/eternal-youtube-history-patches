@@ -1,18 +1,26 @@
 package app.morphe.extension.youtube.patches.eternalhistory;
 
 /**
- * Emergency fail-closed boundary for destructive Watch Later maintenance.
+ * Fail-closed boundary for Watch Later maintenance.
  *
- * Cleanup stays locked until every delete has a durable pre-delete playlist snapshot, an exact
- * videoId/setVideoId journal, a fresh identity revalidation immediately before edit_playlist, and
- * a tested restore path. Read-only Eternal history/progress features remain available.
+ * Legacy direct-delete paths stay permanently locked. The newer safe path is allowed only because
+ * it writes a crash-safe full snapshot/journal before deletion, re-enumerates the complete playlist,
+ * revalidates videoId/setVideoId immediately before every request, stops on the first anomaly, and
+ * preserves an undo path. Keeping these capabilities separate prevents a UI unlock from silently
+ * reopening the old destructive implementation.
  */
 final class EternalWatchLaterSafety {
-    static final boolean DESTRUCTIVE_CLEANUP_LOCKED = true;
-    static final String MESSAGE = "나중에 볼 정리는 복구 안전장치가 준비될 때까지 잠겨 있습니다.";
+    static final boolean LEGACY_DESTRUCTIVE_CLEANUP_LOCKED = true;
+    static final boolean SAFE_TRANSACTIONAL_CLEANUP_AVAILABLE = true;
+    static final String MESSAGE = "기존 직접 삭제 경로는 잠겨 있고, 검증·저널·되돌리기가 있는 안전 정리만 사용합니다.";
 
+    /** Compatibility name used by legacy per-video cleanup. Intentionally remains true. */
     static boolean isLocked() {
-        return DESTRUCTIVE_CLEANUP_LOCKED;
+        return LEGACY_DESTRUCTIVE_CLEANUP_LOCKED;
+    }
+
+    static boolean safeCleanupAvailable() {
+        return SAFE_TRANSACTIONAL_CLEANUP_AVAILABLE;
     }
 
     private EternalWatchLaterSafety() { }

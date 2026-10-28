@@ -14,7 +14,7 @@ public final class EternalHistoryAddOn {
     /**
      * v1.10.0 introduced a host-navigation listener at the same time real devices began crashing
      * during bottom-tab transitions. Keep the code type-checked for a future controlled re-enable,
-     * but do not register it in the crash-quarantine build. Surface preferences remain on disk.
+     * but do not register it. Surface preferences remain on disk.
      */
     private static final boolean HOST_NAVIGATION_HOOKS_ENABLED = false;
 
@@ -24,15 +24,9 @@ public final class EternalHistoryAddOn {
         EternalHistorySettings.ENABLED.get();
         EternalSurfaceSettings.ensureDefaultProfileMigrated();
 
-        if (EternalWatchLaterSafety.isLocked()) {
-            // Preserve the user's preference value for future migration, but disable every runtime
-            // entry point that could delete from Watch Later. refreshSchedule() also cancels any
-            // periodic JobScheduler job left behind by an older installed build.
-            EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
-        }
-
         AddOnApi.addNewVideoStartedListener(() -> {
             EternalHistoryClient.onNewVideoStarted();
+            // The historical per-video direct-delete implementation stays permanently locked.
             if (!EternalWatchLaterSafety.isLocked()) {
                 EternalWatchLaterCleaner.onNewVideoStarted();
             }
@@ -51,8 +45,9 @@ public final class EternalHistoryAddOn {
             }
         });
 
-        // Do not enter YouTube's navigation callback in the quarantine build. This exact listener
-        // did not exist in the last known stable v1.9.1 runtime architecture.
+        // Keep the real-device crash quarantine: never re-enter YouTube navigation state from the
+        // bottom-tab callback. The toolbar render signal is restored separately at the bytecode
+        // layer and does not enable this listener or the browse-id hook.
         if (HOST_NAVIGATION_HOOKS_ENABLED) {
             NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged);
         }
@@ -60,6 +55,8 @@ public final class EternalHistoryAddOn {
         EternalHistoryClient.initialize();
         EternalUpdateChecker.schedule();
         EternalWatchLaterStateMigration.migrate();
+        // Safe automatic cleanup owns its own transaction boundary; do not overwrite the user's
+        // preference merely because the unrelated legacy direct-delete path remains locked.
         EternalWatchLaterJobService.refreshSchedule();
     }
 

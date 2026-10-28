@@ -26,12 +26,14 @@ final class EternalCleanupCoordinator {
 
     static void previewAndConfirm(Activity activity) {
         if (activity == null) return;
+        if (!EternalWatchLaterSafety.safeCleanupAvailable()) {
+            Utils.showToastLong("Watch Later 안전 정리를 사용할 수 없습니다.");
+            return;
+        }
 
-        // v1.10.3's emergency boundary remains intact for every legacy/automatic destructive path.
-        // Manual cleanup may proceed only through EternalWatchLaterSafeCleaner below.
-        EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.save(false);
-        EternalWatchLaterJobService.refreshSchedule();
-
+        // The legacy direct-delete path remains locked independently. Manual cleanup always enters
+        // the snapshot+journal+fresh-identity safe cleaner below and never changes the user's safe
+        // automatic-cleanup preference.
         if (EternalWatchLaterSafeUndo.hasUndoableTransaction()) {
             new AlertDialog.Builder(activity)
                     .setTitle("Watch Later 안전 정리")
@@ -76,7 +78,8 @@ final class EternalCleanupCoordinator {
 
     static String diagnosticSummary() {
         return "중앙 정리 동기화=" + (running.get() ? "진행 중" : lastSyncStatus)
-                + "\n기존/자동 삭제 경로=" + (EternalWatchLaterSafety.isLocked() ? "안전 잠금 유지" : "열림")
+                + "\n기존 직접 삭제 경로=" + (EternalWatchLaterSafety.isLocked() ? "잠김" : "열림")
+                + "\n안전 transaction 정리=" + (EternalWatchLaterSafety.safeCleanupAvailable() ? "사용 가능" : "잠김")
                 + "\n" + EternalWatchLaterSafeCleaner.diagnosticSummary()
                 + "\n" + EternalWatchLaterSafeUndo.diagnosticSummary();
     }

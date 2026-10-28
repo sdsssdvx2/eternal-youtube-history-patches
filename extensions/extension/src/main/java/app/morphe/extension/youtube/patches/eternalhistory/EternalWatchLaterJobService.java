@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
 
-/** Opt-in low-frequency device-side Watch Later maintenance. */
+/** Opt-in low-frequency device-side Watch Later maintenance through the transactional safe path. */
 @SuppressWarnings("unused")
 public final class EternalWatchLaterJobService extends JobService {
     static final int JOB_ID = 0x45594857;
@@ -31,13 +31,8 @@ public final class EternalWatchLaterJobService extends JobService {
         JobScheduler scheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (scheduler == null) return;
 
-        if (EternalWatchLaterSafety.isLocked()) {
-            scheduler.cancel(JOB_ID);
-            scheduledEnabled = Boolean.FALSE;
-            return;
-        }
-
-        boolean enabled = EternalHistorySettings.ENABLED.get()
+        boolean enabled = EternalWatchLaterSafety.safeCleanupAvailable()
+                && EternalHistorySettings.ENABLED.get()
                 && EternalHistorySettings.WATCH_LATER_AUTO_CLEANUP.get();
         if (scheduledEnabled != null && scheduledEnabled == enabled) return;
 
@@ -68,13 +63,13 @@ public final class EternalWatchLaterJobService extends JobService {
     }
 
     static void runNow() {
-        if (EternalWatchLaterSafety.isLocked()) return;
+        if (!EternalWatchLaterSafety.safeCleanupAvailable()) return;
         EternalWatchLaterAutoSweep.runAsync(true, null);
     }
 
     @Override
     public boolean onStartJob(JobParameters params) {
-        if (EternalWatchLaterSafety.isLocked()) {
+        if (!EternalWatchLaterSafety.safeCleanupAvailable()) {
             running.set(false);
             return false;
         }
