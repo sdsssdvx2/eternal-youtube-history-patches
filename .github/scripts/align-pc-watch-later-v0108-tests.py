@@ -72,4 +72,12 @@ if s.count(old) != 1:
     raise SystemExit(f'page-profile options preference assertion expected once, found {s.count(old)}')
 p.write_text(s.replace(old, new, 1), encoding='utf-8')
 
+p = Path('pc-extension/src/tests/watch-later-recovery-static-selftest.mjs')
+s = p.read_text(encoding='utf-8')
+old = "assert.equal(manifest.version, '0.10.7');"
+new = "assert.equal(manifest.version, '0.10.8');"
+if s.count(old) != 1:
+    raise SystemExit(f'recovery version assertion expected once, found {s.count(old)}')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
 print('PASS PC Watch Later test contract migration')
