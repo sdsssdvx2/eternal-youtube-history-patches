@@ -56,6 +56,12 @@ old = "assert.ok(!isolatedWorld.js.includes('watch-later-safe-core.js'), 'unused
 new = "assert.ok(isolatedWorld.js.includes('watch-later-safe-core.js'), 'safe transaction core must load in ISOLATED world');"
 if s.count(old) != 1:
     raise SystemExit(f'static safe-core assertion expected once, found {s.count(old)}')
-p.write_text(s.replace(old, new, 1), encoding='utf-8')
+s = s.replace(old, new, 1)
+old = "assert.doesNotMatch(options, /watchLaterAutoCleanupEnabled: false/);"
+new = "assert.match(options, /watchLaterAutoCleanupEnabled: false,/);\nassert.match(options, /watchLaterAutoCleanupEnabled: \\$('#watchLaterAutoCleanupEnabled'\\)\\.checked/);"
+if s.count(old) != 1:
+    raise SystemExit(f'static options preference assertion expected once, found {s.count(old)}')
+s = s.replace(old, new, 1)
+p.write_text(s, encoding='utf-8')
 
 print('PASS PC Watch Later test contract migration')
