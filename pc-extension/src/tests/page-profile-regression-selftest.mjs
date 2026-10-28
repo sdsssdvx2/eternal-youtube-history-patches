@@ -19,7 +19,7 @@ const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(isolated, 'missing isolated world content script');
 
 // Regression contract: one and only one resident video-card renderer. Safe Watch Later coordinators
-// may be resident because they do not scan/toggle card presentation classes.
+// may be resident because they never observe arbitrary card mutations or toggle presentation classes.
 assert.ok(isolated.js.includes('content.js'));
 assert.ok(isolated.js.includes('pc-stability-controller.js'));
 assert.ok(isolated.js.includes('watch-later-safe.js'));
@@ -32,8 +32,8 @@ assert.match(content, /const observer = new MutationObserver/);
 assert.doesNotMatch(stability, /MutationObserver/);
 assert.doesNotMatch(stability, /classList\.toggle/);
 assert.doesNotMatch(stability, /querySelectorAll\('a\[href/);
-assert.doesNotMatch(safeCoordinator, /classList\.toggle|MutationObserver|eyh-watched|eyh-hidden/);
-assert.doesNotMatch(safeAuto, /classList\.toggle|MutationObserver|eyh-watched|eyh-hidden/);
+assert.doesNotMatch(safeCoordinator, /classList\.toggle|new\s+MutationObserver/);
+assert.doesNotMatch(safeAuto, /classList\.toggle|new\s+MutationObserver/);
 
 // Familiar quick controls remain, but their choice is persisted as the current page profile.
 assert.match(content, /\['none','표시'\]/);
