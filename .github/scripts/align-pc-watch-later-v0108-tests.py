@@ -64,4 +64,12 @@ if s.count(old) != 1:
 s = s.replace(old, new, 1)
 p.write_text(s, encoding='utf-8')
 
+p = Path('pc-extension/src/tests/page-profile-regression-selftest.mjs')
+s = p.read_text(encoding='utf-8')
+old = "assert.match(options, /watchLaterAutoCleanupEnabled: \\$('#watchLaterAutoCleanupEnabled'\\)\\.checked/);"
+new = "assert.ok(options.includes(\"watchLaterAutoCleanupEnabled: $('#watchLaterAutoCleanupEnabled').checked\"));"
+if s.count(old) != 1:
+    raise SystemExit(f'page-profile options preference assertion expected once, found {s.count(old)}')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
 print('PASS PC Watch Later test contract migration')
