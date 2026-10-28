@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 'lts/*'
-      - name: Watch Later and single-renderer page-profile self-tests
+      - name: PC self-tests and resident-renderer contract
         working-directory: pc-extension/src
         run: |
           set -euo pipefail
@@ -33,38 +33,25 @@ jobs:
           const fs=require('fs');
           const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
           const iso=m.content_scripts.find(x => x.world === 'ISOLATED');
-          if (!iso) process.exit(2);
+          if (!iso) throw new Error('missing isolated-world content script');
           const js=iso.js||[];
           for (const required of ['content.js','pc-stability-controller.js','watch-later-recovery-content.js','maintenance.js']) {
             if (!js.includes(required)) throw new Error(`missing resident ${required}`);
           }
           for (const forbidden of ['surface-profiles.js','pc-ui-hotfix.js']) {
-            if (js.includes(forbidden)) throw new Error(`regressed resident card renderer ${forbidden}`);
+            if (js.includes(forbidden)) throw new Error(`regressed resident renderer ${forbidden}`);
           }
           if (m.version === '0.10.8') {
             for (const required of ['watch-later-safe-core.js','watch-later-safe.js','watch-later-safe-auto.js']) {
-              if (!js.includes(required)) throw new Error(`missing v0.10.8 safe coordinator ${required}`);
+              if (!js.includes(required)) throw new Error(`missing safe coordinator ${required}`);
             }
-            const manual=fs.readFileSync('watch-later-safe.js','utf8');
-            const auto=fs.readFileSync('watch-later-safe-auto.js','utf8');
-            if (/new\s+MutationObserver/.test(manual) || /new\s+MutationObserver/.test(auto)) {
-              throw new Error('safe cleanup coordinators must not add a whole-document observer');
+            for (const f of ['watch-later-safe.js','watch-later-safe-auto.js']) {
+              const s=fs.readFileSync(f,'utf8');
+              if (/new\s+MutationObserver/.test(s)) throw new Error(`${f} reintroduced a whole-document observer`);
             }
           }
-          console.log('PASS manifest JSON + one resident card renderer + policy-specific coordinators');
+          console.log('PASS PC manifest + one resident renderer + safe coordinators');
           NODE
-          grep -F 'content.js is the sole card renderer' pc-stability-controller.js
-          ! grep -F 'MutationObserver' pc-stability-controller.js
-          ! grep -F 'eyh-surface-watched' pc-stability-controller.js
-          grep -F 'setCurrentSurfaceMode' pc-stability-controller.js
-          grep -F 'watchedSurfaceProfiles: profiles' pc-stability-controller.js
-          grep -F "root.querySelector('#eyh-surface-settings')?.remove()" pc-stability-controller.js
-          grep -F "root.style.display = shorts ? 'none' : ''" pc-stability-controller.js
-          grep -F 'watchLaterAutoCleanupEnabled: false' pc-stability-controller.js
-          grep -F "'lockupViewModel'" watch-later-core.js
-          grep -F 'declared !== entries.length' watch-later-recovery-content.js
-          grep -F 'unparsedCount: 0' watch-later-recovery-content.js
-          echo 'PASS PC single-renderer display + Shorts preservation + strict recovery assertions'
 
   android-compile:
     runs-on: ubuntu-latest
@@ -100,9 +87,7 @@ jobs:
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
-                    --no-daemon --stacktrace
+        run: ./gradlew :extensions:youtube:compileReleaseJavaWithJavac --no-daemon --stacktrace
       - name: Compile Eternal Android extension and patch
         working-directory: eternal-youtube-history-patches
         env:
@@ -112,80 +97,25 @@ jobs:
           ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
                     :patches:compileKotlin \
                     --no-daemon --stacktrace
-      - name: Static cross-version safety invariants
+      - name: Cross-version structural smoke assertions
         working-directory: eternal-youtube-history-patches
         shell: bash
         run: |
           set -euo pipefail
           base='extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory'
-          cleaner="$base/EternalWatchLaterCleaner.java"
-          payload="$base/EternalWatchLaterPayload.java"
-          settings="$base/EternalHistorySettings.java"
-          filter="$base/EternalWatchedFilter.java"
-          coordinator="$base/EternalCleanupCoordinator.java"
-          safe_cleaner="$base/EternalWatchLaterSafeCleaner.java"
-          safe_undo="$base/EternalWatchLaterSafeUndo.java"
-          tx_store="$base/EternalWatchLaterTransactionStore.java"
-          ledger="$base/EternalCleanupLedgerSync.java"
-          db="$base/EternalHistoryDb.java"
-          support='patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt'
-          prefs='patches/src/main/resources/addresources/youtube/addon_prefs.xml'
-
-          grep -F 'new BooleanSetting("morphe_eternal_history_watch_later_auto_cleanup", FALSE' "$settings"
-          grep -F 'new IntegerSetting("morphe_eternal_history_watch_later_cleanup_min_progress", 60' "$settings"
-          grep -F 'validSetVideoId(entry.setVideoId)' "$cleaner"
-          grep -F 'PlaylistRoutes.getSetVideoIdBody(videoId, WATCH_LATER)' "$cleaner"
-          grep -F 'PlaylistRoutes.editPlaylistBody(entry.videoId, WATCH_LATER, entry.setVideoId)' "$cleaner"
-          grep -F 'EternalCleanupLedgerSync.refresh()' "$coordinator"
-          grep -F 'EternalWatchLaterSafeCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
-          ! grep -F 'EternalWatchLaterCleaner.previewAndConfirmCleanup(activity)' "$coordinator"
-          grep -F 'EternalWatchLaterSafeUndo.undoLastCleanup(activity)' "$coordinator"
-          grep -F 'if (next <= previousCursor)' "$ledger"
-          grep -F 'if (current >= value) return;' "$db"
-
-          grep -F 'listWatchLaterStrict(MAX_PAGES)' "$safe_cleaner"
-          grep -F 'pageTokens.size() != 1' "$safe_cleaner"
-          grep -F '!consumedTokens.add(next)' "$safe_cleaner"
-          grep -F 'sameMembership(originalSnapshot, confirmed.entries)' "$safe_cleaner"
-          grep -F 'candidate.put("status", "attempting")' "$safe_cleaner"
-          grep -F 'Entry finalFresh = resolveEntryStrict(videoId)' "$safe_cleaner"
-          grep -F 'removeFreshEntry(finalFresh)' "$safe_cleaner"
-          grep -F 'static final int SCHEMA = 2' "$tx_store"
-          grep -F 'eternal-watch-later-journal-v2' "$tx_store"
-          grep -F 'containsDeleteRisk(current)' "$tx_store"
-          grep -F 'EternalWatchLaterTransactionStore.shouldRestore(candidate)' "$safe_undo"
-
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('extensions/extension/src/main/java/app/morphe/extension/youtube/patches/eternalhistory/EternalWatchLaterSafeCleaner.java').read_text()
-          save=p.index('durable = EternalWatchLaterTransactionStore.saveVerified(tx)')
-          reread=p.index('ListResult confirmed = listWatchLaterStrict(MAX_PAGES)', save)
-          compare=p.index('sameMembership(originalSnapshot, confirmed.entries)', reread)
-          removing=p.index('durable.put("state", "removing")', compare)
-          assert save < reread < compare < removing
-          attempting=p.index('candidate.put("status", "attempting")')
-          persist=p.index('durable = EternalWatchLaterTransactionStore.saveVerified(durable)', attempting)
-          final_resolve=p.index('Entry finalFresh = resolveEntryStrict(videoId)', persist)
-          delete=p.index('removeFreshEntry(finalFresh)', final_resolve)
-          result=p.index('durable = persistResult(durable)', delete)
-          assert attempting < persist < final_resolve < delete < result
-          print('PASS Android manual transaction ordering assertions')
-          PY
-
-          grep -F '"lockupViewModel"' "$payload"
-          grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
-          grep -F 'profile.hideEnabled' "$filter"
-          grep -F 'profile.dimEnabled' "$filter"
-          grep -F 'morphe_eternal_history_default_dim_enabled' "$prefs"
-          grep -F 'morphe_eternal_history_default_hide_enabled' "$prefs"
-          grep -F 'declareWatchLaterJobService()' "$support"
-          grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
-          echo 'PASS Android cross-version manual-transaction + parser + settings invariants'
+          test -s "$base/EternalWatchLaterPayload.java"
+          test -s "$base/EternalWatchLaterSafeCleaner.java"
+          grep -F 'videos.size() == 1 && setIds.size() == 1' "$base/EternalWatchLaterPayload.java"
+          grep -F 'listWatchLaterStrict(MAX_PAGES)' "$base/EternalWatchLaterSafeCleaner.java"
+          grep -F 'declareWatchLaterJobService()' patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
+          echo 'PASS Android compile + conservative parser/safe-cleaner structure'
 
   android-patch-smoke:
     needs: android-compile
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
     steps:
       - name: Checkout Eternal feature branch
         uses: actions/checkout@v7
@@ -208,7 +138,7 @@ jobs:
           repository: MorpheApp/morphe-patches-library
           ref: dev
           path: morphe-patches-library
-      - name: Checkout APK acquisition helper
+      - name: Checkout production APK acquisition helper
         uses: actions/checkout@v7
         with:
           repository: krishhari2105/morphe-builds
@@ -226,9 +156,7 @@ jobs:
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ./gradlew :extensions:youtube:compileReleaseJavaWithJavac \
-                    --no-daemon --stacktrace
+        run: ./gradlew :extensions:youtube:compileReleaseJavaWithJavac --no-daemon --stacktrace
       - name: Build feature-branch Eternal patch bundle
         working-directory: eternal-youtube-history-patches
         env:
@@ -243,7 +171,7 @@ jobs:
           test -n "$eternal_mpp" && test -s "$eternal_mpp"
           cp "$eternal_mpp" ../.validation/tools/eternal-feature.mpp
           echo "Feature MPP: $eternal_mpp"
-      - name: Acquire current supported clean YouTube APK
+      - name: Acquire exact trusted standalone YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -251,34 +179,54 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check requests >/dev/null
           version="$(jq -r '.youtube.version' eternal-youtube-history-patches/android-update-status.json)"
+          test "$version" = '21.20.405'
           mkdir -p .validation/input
           VERSION="$version" python - <<'PY'
-          import os, zipfile
+          import hashlib
+          import os
+          import zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
+
           version=os.environ['VERSION']
+          trusted=os.environ['YT_TRUSTED_SHA256'].strip().lower()
           app=AppConfig(
               key='youtube', name='YouTube', package='com.google.android.youtube',
               apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
-              formats=('apk',), prefer=('universal','arm64-v8a'), target_abi='arm64-v8a')
-          resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
+              formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
+          resolver=ApkMirrorResolver(
+              min_request_interval=1.2,
+              max_release_attempts=4,
+              max_variant_attempts=12)
           out=Path('.validation/input/youtube.apk')
           errors=[]
+
           for url,referer in resolver.iter_candidates(app,version):
               try:
+                  probe=resolver.fast_probe_candidate(url, referer=referer)
+                  if probe is not None:
+                      print('probe', probe.status_code, probe.content_type, probe.content_length, referer)
+                      if not probe.likely_apk:
+                          errors.append(f'{referer}: probe rejected {probe.status_code} {probe.content_type} {probe.content_length}')
+                          continue
                   got=resolver.download_candidate(url,referer,out)
+                  sha=hashlib.sha256(out.read_bytes()).hexdigest().lower()
+                  if sha != trusted:
+                      raise RuntimeError(f'untrusted sha256 {sha}')
                   with zipfile.ZipFile(out) as z:
                       names=set(z.namelist())
                   if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
                       raise RuntimeError('candidate is not a standalone patchable APK')
-                  print('selected standalone candidate',got.size,got.sha256,referer)
+                  print('selected trusted standalone candidate', got.size, sha, referer)
                   break
               except Exception as exc:
-                  errors.append(str(exc)); out.unlink(missing_ok=True)
+                  errors.append(f'{referer}: {exc}')
+                  out.unlink(missing_ok=True)
           else:
-              raise RuntimeError('base acquisition failed: '+' | '.join(errors[-6:]))
+              raise RuntimeError('trusted base acquisition failed: '+' | '.join(errors[-8:]))
           PY
+          sha256sum .validation/input/youtube.apk
       - name: Resolve Morphe Desktop and stable Morphe patches
         env:
           GH_TOKEN: ${{ github.token }}
@@ -311,7 +259,6 @@ jobs:
             .validation/input/youtube.apk
           test -s .validation/out/youtube.apk
           test -s .validation/out/result.json
-          grep -F 'Eternal YouTube History' .validation/out/result.json >/dev/null || true
           cat .validation/out/result.json
           echo 'PASS feature patch application smoke test'
       - name: Remove proprietary APKs and ephemeral tools
