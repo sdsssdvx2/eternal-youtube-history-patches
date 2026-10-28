@@ -23,6 +23,21 @@ replacement = [
     "             ': \\\"이 페이지 전용 설정 · 숨김이 흐림보다 우선합니다.\\\",', 'toolbar explicit note')",
 ]
 lines[start:end + 1] = replacement
+
+# Drop the cosmetic coordinator diagnostic-label rewrite; it is unrelated to behavior and the exact
+# Korean string changed during prior maintenance. Safety is asserted independently in CI.
+start = None
+end = None
+for i, line in enumerate(lines):
+    if start is None and line == "s = once(s," and i + 3 < len(lines) and any("기존/자동 삭제 경로" in x for x in lines[i:i+5]):
+        start = i
+    if start is not None and "'coordinator diagnostic')" in line:
+        end = i
+        break
+if start is None or end is None:
+    raise SystemExit(f'could not locate coordinator diagnostic helper block: start={start}, end={end}')
+del lines[start:end + 1]
+
 text = '\n'.join(lines) + '\n'
 
 # The same long-toast line appears three times in the source. Change only the executeCleanup success
