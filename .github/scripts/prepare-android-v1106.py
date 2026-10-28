@@ -25,10 +25,10 @@ replacement = [
 lines[start:end + 1] = replacement
 text = '\n'.join(lines) + '\n'
 
-# The source contains three long-toast sites. Convert all three to the null-safe helper, then let the
-# later contextual rewrite inject the helper methods exactly once.
+# The same long-toast line appears three times in the source. Change only the executeCleanup success
+# toast here; the following contextual catch/finally rewrite remains unique and injects helpers.
 old = """s = once(s,\n'''            activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));''',\n'''            postToastLong(activity, lastStatus);''', 'safe cleaner success toast')"""
-new = """_long_toast = '            activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));'\nif s.count(_long_toast) != 3:\n    raise SystemExit(f'safe cleaner long toast: expected 3 matches, found {s.count(_long_toast)}')\ns = s.replace(_long_toast, '            postToastLong(activity, lastStatus);')"""
+new = """_long_toast = '            activity.runOnUiThread(() -> Utils.showToastLong(lastStatus));'\n_success_anchor = '            lastStatus = allRemoved'\n_anchor_pos = s.find(_success_anchor)\nif _anchor_pos < 0:\n    raise SystemExit('safe cleaner success anchor missing')\n_toast_pos = s.find(_long_toast, _anchor_pos)\nif _toast_pos < 0:\n    raise SystemExit('safe cleaner success toast after anchor missing')\ns = s[:_toast_pos] + '            postToastLong(activity, lastStatus);' + s[_toast_pos + len(_long_toast):]"""
 if text.count(old) != 1:
     raise SystemExit(f'could not locate long-toast helper rewrite: found {text.count(old)}')
 text = text.replace(old, new, 1)
