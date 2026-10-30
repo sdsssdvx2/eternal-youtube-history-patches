@@ -11,6 +11,7 @@ const content = text('content.js');
 const css = text('content.css');
 const stability = text('pc-stability-controller.js');
 const inlineControls = text('pc-inline-controls.js');
+const spaLifecycle = text('pc-spa-lifecycle.js');
 const surface = text('surface-profiles.js');
 const hotfix = text('pc-ui-hotfix.js');
 const safety = text('watch-later-safety-main.js');
@@ -27,7 +28,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.9', 'inline settings/safe cleanup UI release must have a distinct version');
+assert.equal(manifest.version, '0.10.10', 'SPA lifecycle recovery release must have a distinct version');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
 const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
@@ -42,7 +43,9 @@ assert.ok(isolatedWorld.js.includes('pc-stability-controller.js'), 'lightweight 
 assert.ok(isolatedWorld.js.includes('watch-later-safe.js'), 'manual safe Watch Later coordinator must be resident');
 assert.ok(isolatedWorld.js.includes('watch-later-safe-auto.js'), 'automatic safe Watch Later coordinator must be resident');
 assert.ok(isolatedWorld.js.includes('pc-inline-controls.js'), 'lightweight inline settings/Watch Later UI must be resident');
+assert.ok(isolatedWorld.js.includes('pc-spa-lifecycle.js'), 'bounded SPA lifecycle reconciler must be resident');
 assert.ok(isolatedWorld.js.indexOf('watch-later-safe-auto.js') < isolatedWorld.js.indexOf('pc-inline-controls.js'), 'inline UI must load after safe cleanup coordinators');
+assert.ok(isolatedWorld.js.indexOf('pc-inline-controls.js') < isolatedWorld.js.indexOf('pc-spa-lifecycle.js'), 'SPA reconciler must load after the UI listeners it refreshes');
 assert.ok(isolatedWorld.js.includes('watch-later-recovery-content.js'), 'ADD-only Watch Later recovery bridge must load');
 assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in isolated YouTube pages');
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'), 'second card renderer must not load');
@@ -62,6 +65,18 @@ assert.doesNotMatch(inlineControls, /MutationObserver/);
 assert.doesNotMatch(inlineControls, /querySelectorAll\('a\[href|classList\.toggle\('eyh-(?:watched|hidden|surface)/,
   'inline UI must never become another video-card renderer');
 
+// v0.10.10 repairs missed YouTube SPA completion signals without bringing back a whole-document
+// observer. It compares only URL + one fixed header id twice per second, and replays the existing
+// lightweight completion event only when one of those identities actually changes.
+assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
+assert.match(spaLifecycle, /location\.pathname/);
+assert.match(spaLifecycle, /location\.search/);
+assert.match(spaLifecycle, /document\.getElementById\('eyh-header-controls'\)/);
+assert.match(spaLifecycle, /window\.dispatchEvent\(new Event\('yt-navigate-finish'\)\)/);
+assert.match(spaLifecycle, /setInterval\(\(\) => reconcile\(false\), HEARTBEAT_MS\)/);
+assert.doesNotMatch(spaLifecycle, /MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
+  'SPA lifecycle reconciler must stay O(1) and must not scan cards or mutate settings');
+
 // Hide mode must never apply display:none to an arbitrary fallback parent. Only known one-video
 // renderer tags are allowed to disappear; unknown YouTube markup fails open instead of blanking a list.
 assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
@@ -69,8 +84,8 @@ assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// Familiar quick buttons remain. The old multi-renderer gear/panel stays purged, while v0.10.9
-// provides a new lightweight settings panel that only edits stored profiles and safe cleanup state.
+// Familiar quick buttons remain. The old multi-renderer gear/panel stays purged, while the current
+// lightweight settings panel only edits stored profiles and safe cleanup state.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
@@ -88,6 +103,10 @@ assert.match(inlineControls, /지금 안전 정리/);
 assert.match(inlineControls, /#eyh-watch-later-safe-cleanup/);
 assert.match(inlineControls, /watchLaterSafeAutoCleanupEnabled/);
 assert.match(inlineControls, /AUTO_BUTTON_ID = 'eyh-watch-later-safe-auto'/);
+assert.match(inlineControls, /offerReloadForStaleContext/);
+assert.match(inlineControls, /confirm\(/);
+assert.match(inlineControls, /location\.reload\(\)/);
+assert.match(inlineControls, /이 YouTube 탭만 새로고침/);
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
 assert.match(stability, /root\.style\.display = shorts \? 'none' : ''/);
 assert.match(inlineControls, /path\.startsWith\('\/shorts\/'\)/);
@@ -206,4 +225,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.9 inline settings + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.10 SPA lifecycle + inline settings + safe Watch Later integration self-test');
