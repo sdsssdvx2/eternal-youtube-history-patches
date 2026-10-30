@@ -30,7 +30,8 @@ assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
 assert.match(content, /const observer = new MutationObserver/);
 assert.doesNotMatch(stability, /MutationObserver/);
-assert.doesNotMatch(stability, /classList\.toggle/);
+assert.doesNotMatch(stability, /classList\.toggle\('eyh-(?:watched|hidden|surface)/,
+  'stability adapter may paint header controls but must never toggle video-card presentation classes');
 assert.doesNotMatch(stability, /querySelectorAll\('a\[href/);
 assert.doesNotMatch(safeCoordinator, /classList\.toggle|new\s+MutationObserver/);
 assert.doesNotMatch(safeAuto, /classList\.toggle|new\s+MutationObserver/);
