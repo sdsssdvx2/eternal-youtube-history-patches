@@ -18,8 +18,6 @@ const optionsHtml = fs.readFileSync(path.join(src, 'options.html'), 'utf8');
 const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(isolated, 'missing isolated world content script');
 
-// Regression contract: one and only one resident video-card renderer. Safe Watch Later coordinators
-// may be resident because they never observe arbitrary card mutations or toggle presentation classes.
 assert.ok(isolated.js.includes('content.js'));
 assert.ok(isolated.js.includes('pc-stability-controller.js'));
 assert.ok(isolated.js.includes('watch-later-safe.js'));
@@ -36,23 +34,24 @@ assert.doesNotMatch(stability, /querySelectorAll\('a\[href/);
 assert.doesNotMatch(safeCoordinator, /classList\.toggle|new\s+MutationObserver/);
 assert.doesNotMatch(safeAuto, /classList\.toggle|new\s+MutationObserver/);
 
-// Familiar quick controls remain, but their choice is persisted as the current page profile.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
-assert.match(stability, /setCurrentSurfaceMode/);
+assert.match(stability, /chooseCurrentSurfaceMode/);
+assert.match(stability, /persistCurrentSurfaceMode/);
+assert.match(stability, /pendingModeBySurface/);
+assert.match(stability, /quickModeSeqBySurface/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
 assert.match(stability, /dimEnabled: mode === 'dim'/);
 assert.match(stability, /hideEnabled: mode === 'hide'/);
+assert.doesNotMatch(stability, /quickModeGeneration|quickModeWrite/);
 
-// The broken gear/panel layer is not resident. Stale remnants are actively removed.
 assert.match(stability, /#eyh-surface-settings/);
 assert.match(stability, /#eyh-surface-panel/);
 assert.doesNotMatch(stability, /openPanel/);
 assert.doesNotMatch(stability, /eyh-surface-compact/);
 assert.doesNotMatch(optionsHtml, /⚙ 페이지 패널/);
 
-// Shorts carries no Eternal masthead UI and, importantly, never rewrites the global legacy mode.
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
 assert.match(stability, /root\.style\.display = shorts \? 'none' : ''/);
 assert.match(stability, /if \(key === 'shorts'\) \{[\s\S]*?scheduleHeaderDecoration\(\);[\s\S]*?return;[\s\S]*?\}/);
@@ -60,11 +59,9 @@ const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \
 assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)/,
   'Shorts must not corrupt the legacy/default presentation state');
 
-// A direct 0.9.x -> 0.10.x upgrade snapshots the legacy default before any page override is stored.
 assert.match(stability, /if \(!hasStoredDefault\)/);
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/);
 
-// Common defaults and page overrides still retain full threshold expressiveness in storage.
 for (const token of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
@@ -81,4 +78,4 @@ assert.doesNotMatch(options, /watchLaterAutoCleanupEnabled:\s*false/);
 assert.match(optionsHtml, /자동 안전 정리/);
 assert.doesNotMatch(optionsHtml, /현재 안전 잠금/);
 
-console.log('PASS lightweight page-profile + safe cleanup coexistence regression self-test');
+console.log('PASS lightweight page-profile + uncancelled quick-mode + safe cleanup coexistence regression self-test');
