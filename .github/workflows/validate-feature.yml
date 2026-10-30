@@ -6,6 +6,8 @@ on:
       - 'pc-extension/**'
       - 'patches/**'
       - 'extensions/**'
+      - 'android-update-status.json'
+      - '.github/scripts/sync_morphe_compat.py'
       - '.github/workflows/validate-feature.yml'
   workflow_dispatch:
 
@@ -106,7 +108,19 @@ jobs:
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$base/EternalWatchLaterPayload.java"
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$base/EternalWatchLaterSafeCleaner.java"
           grep -F 'declareWatchLaterJobService()' patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
-          echo 'PASS Android compile + conservative parser/safe-cleaner structure'
+          pinned="$(jq -r '.youtube.version' android-update-status.json)"
+          PINNED_VERSION="$pinned" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          version=os.environ['PINNED_VERSION']
+          text=Path('patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt').read_text()
+          block=text[text.index('// MORPHE_COMPAT_START'):text.index('// MORPHE_COMPAT_END')]
+          count=len(re.findall(r'version\s*=\s*"'+re.escape(version)+r'"', block))
+          if count != 1:
+              raise SystemExit(f'pinned server target {version} must occur exactly once; found {count}')
+          print('Pinned target present exactly once:', version)
+          PY
+          echo 'PASS Android compile + conservative parser/safe-cleaner/pinned-target structure'
 
   android-patch-smoke:
     needs: android-compile
@@ -268,7 +282,15 @@ jobs:
           test -s .validation/out/youtube.apk
           test -s .validation/out/result.json
           cat .validation/out/result.json
-          echo 'PASS feature patch application smoke test'
+          version="$(jq -r '.youtube.version' eternal-youtube-history-patches/android-update-status.json)"
+          jq -e --arg version "$version" '
+            .success == true
+            and .packageName == "com.google.android.youtube"
+            and .packageVersion == $version
+            and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS Eternal YouTube History actually applied to trusted YouTube $version"
       - name: Remove proprietary APKs and ephemeral tools
         if: always()
         run: rm -rf .validation/input .validation/out .validation/tools
