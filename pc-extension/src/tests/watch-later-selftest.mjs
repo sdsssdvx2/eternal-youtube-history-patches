@@ -10,6 +10,7 @@ const safety = fs.readFileSync(path.join(src, 'watch-later-safety-main.js'), 'ut
 const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
 const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
 const safeAuto = fs.readFileSync(path.join(src, 'watch-later-safe-auto.js'), 'utf8');
+const inlineControls = fs.readFileSync(path.join(src, 'pc-inline-controls.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 
 const C = globalThis.EYHWatchLaterCore;
@@ -110,7 +111,7 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.8
+// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.9
 // makes only the separately journaled SAFE protocol resident; the old preference/buttons stay off.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
@@ -123,6 +124,9 @@ assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
 assert.match(safeAuto, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(safeAuto, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(inlineControls, /watchLaterSafeAutoCleanupEnabled/);
+assert.match(inlineControls, /#eyh-watch-later-safe-cleanup/);
+assert.doesNotMatch(inlineControls, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 assert.doesNotMatch(safeCoordinator, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 
@@ -137,6 +141,7 @@ assert.ok(mainWorld.js.indexOf('watch-later-safe-main.js') < mainWorld.js.indexO
 assert.ok(isolated.js.includes('watch-later-safe-core.js'), 'transaction core must be resident for safe cleanup');
 assert.ok(isolated.js.includes('watch-later-safe.js'), 'manual journaled cleanup must be resident');
 assert.ok(isolated.js.includes('watch-later-safe-auto.js'), 'opt-in journaled automatic cleanup must be resident');
-assert.equal(manifest.version, '0.10.8');
+assert.ok(isolated.js.includes('pc-inline-controls.js'), 'working inline settings/safe cleanup UI must be resident');
+assert.equal(manifest.version, '0.10.9');
 
-console.log('PASS watch-later-core + modern lockup + legacy-blocked/safe-resident self-test');
+console.log('PASS watch-later-core + modern lockup + legacy-blocked/safe-resident + inline-controls self-test');
