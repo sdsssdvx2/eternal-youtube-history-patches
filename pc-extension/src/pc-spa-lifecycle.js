@@ -6,7 +6,7 @@
   // document tree. It only compares the URL and the single Eternal header root twice per second.
   // When either changes, replay the same completion signal our lightweight coordinators already
   // consume. This repairs page-profile, Watch Later and inline-control lifecycle state without a
-  // second MutationObserver or another renderer.
+  // second DOM observer or another renderer.
   const HEARTBEAT_MS = 500;
   let lastRoute = `${location.pathname}${location.search}`;
   let lastHeaderRoot = document.getElementById('eyh-header-controls');
