@@ -20,6 +20,14 @@
     try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
   }
 
+  function offerReloadForStaleContext() {
+    const reload = confirm(
+      'Eternal 확장이 업데이트되어 이 YouTube 탭의 이전 확장 컨텍스트가 끊겼습니다.\n\n' +
+      '확장이나 설정을 다시 설치할 필요는 없습니다. 이 YouTube 탭만 새로고침하면 현재 설정을 그대로 유지한 채 다시 연결됩니다.\n\n지금 이 탭을 새로고침할까요?'
+    );
+    if (reload) location.reload();
+  }
+
   function surfaceKey() {
     const path = location.pathname;
     const query = new URLSearchParams(location.search);
@@ -148,7 +156,11 @@
 
   async function openPanel() {
     closePanel();
-    if (!extensionAlive() || surfaceKey() === 'shorts') return;
+    if (surfaceKey() === 'shorts') return;
+    if (!extensionAlive()) {
+      offerReloadForStaleContext();
+      return;
+    }
     ensurePanelStyles();
     const state = await readState();
     if (state.key !== surfaceKey() || state.key === 'shorts') return;
@@ -319,6 +331,10 @@
       autoButton.addEventListener('click', async event => {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (!extensionAlive()) {
+          offerReloadForStaleContext();
+          return;
+        }
         const current = await chrome.storage.local.get({ [AUTO_KEY]: false });
         const enabled = !Boolean(current[AUTO_KEY]);
         await chrome.storage.local.set({ [AUTO_KEY]: enabled });
