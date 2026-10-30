@@ -10,6 +10,10 @@ on:
       - '.github/workflows/validate-feature.yml'
   workflow_dispatch:
 
+concurrency:
+  group: validate-feature-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -153,7 +157,7 @@ jobs:
           ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
                     :patches:compileKotlin \
                     --no-daemon --stacktrace
-      - name: Cross-version structural smoke assertions
+      - name: Cross-version structural and hot-path smoke assertions
         working-directory: eternal-youtube-history-patches
         shell: bash
         run: |
@@ -164,6 +168,37 @@ jobs:
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$base/EternalWatchLaterPayload.java"
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$base/EternalWatchLaterSafeCleaner.java"
           grep -F 'declareWatchLaterJobService()' patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
+
+          client="$base/EternalHistoryClient.java"
+          filter="$base/EternalWatchedFilter.java"
+          grep -F 'private static final AtomicBoolean feedCacheStarted = new AtomicBoolean();' "$client"
+          grep -F 'if (feedCacheStarted.compareAndSet(false, true))' "$client"
+          CLIENT="$client" FILTER="$filter" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+
+          client = Path(os.environ['CLIENT']).read_text()
+          method = re.search(r'static void ensureFeedCacheStarted\(\) \{(.*?)\n    \}', client, re.S)
+          if not method:
+              raise SystemExit('ensureFeedCacheStarted method not found')
+          if 'WATCHED_CACHE.isEmpty()' in method.group(1):
+              raise SystemExit('empty watched cache must not be used as a feed-cache initialization signal')
+          if method.group(1).count('feedCacheStarted.compareAndSet(false, true)') != 1:
+              raise SystemExit('feed cache startup must be guarded exactly once in ensureFeedCacheStarted')
+
+          watched_filter = Path(os.environ['FILTER']).read_text()
+          count = watched_filter.count('toLowerCase(Locale.ROOT)')
+          if count != 1:
+              raise SystemExit(f'Litho path must be normalized exactly once per decision; found {count} source call sites')
+          for helper in ('looksLikeVideoContext', 'looksLikeWholeVideoCard', 'looksLikeThumbnailComponent'):
+              block = re.search(r'private static boolean ' + helper + r'\(.*?\) \{(.*?)\n    \}', watched_filter, re.S)
+              if not block:
+                  raise SystemExit(f'{helper} not found')
+              if 'toLowerCase' in block.group(1):
+                  raise SystemExit(f'{helper} reintroduced per-card path normalization')
+          print('PASS Android feed hot-path startup + single-normalization invariants')
+          PY
+
           TARGET='${{ needs.android-targets.outputs.youtube_version }}' python3 - <<'PY'
           import os, re
           from pathlib import Path
