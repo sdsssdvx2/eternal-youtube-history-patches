@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.11', 'single-click/settings reliability release must have a distinct version');
+assert.equal(manifest.version, '0.10.12', 'masthead-event reliability release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -60,7 +60,6 @@ assert.ok(isolatedWorld.js.includes('maintenance.js'), 'maintenance must load in
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'), 'second card renderer must not load');
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'), 'whole-document hotfix observer must not load');
 
-// The old stable renderer remains the only code that scans video cards and toggles presentation classes.
 assert.match(content, /async function scanAndMark\(\)/);
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
@@ -74,8 +73,6 @@ assert.doesNotMatch(inlineControls, /MutationObserver/);
 assert.doesNotMatch(inlineControls, /querySelectorAll\('a\[href|classList\.toggle\('eyh-(?:watched|hidden|surface)/,
   'inline UI must never become another video-card renderer');
 
-// The bounded SPA guard repairs missed YouTube completion signals without bringing back another
-// whole-document observer. It compares only URL + one fixed header id twice per second.
 assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
 assert.match(spaLifecycle, /location\.pathname/);
 assert.match(spaLifecycle, /location\.search/);
@@ -85,24 +82,27 @@ assert.match(spaLifecycle, /setInterval\(\(\) => reconcile\(false\), HEARTBEAT_M
 assert.doesNotMatch(spaLifecycle, /MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
   'SPA lifecycle reconciler must stay O(1) and must not scan cards or mutate settings');
 
-// Hide mode must never apply display:none to an arbitrary fallback parent. Only known one-video
-// renderer tags are allowed to disappear; unknown YouTube markup fails open instead of blanking a list.
 assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
 assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// Familiar quick buttons remain. v0.10.11 paints the selected button synchronously and serializes
-// profile writes, while the inline gear replaces any stale button left by an older script instance.
+// v0.10.12: only a newer physical click may supersede an in-flight quick-mode choice. Lifecycle
+// signals can refresh the same surface but must not cancel it. Gear/safe-auto are delegated at
+// document capture level so YouTube's masthead handlers cannot swallow them.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
 assert.match(stability, /button\[data-eyh-mode\]/);
 assert.match(stability, /paintQuickMode/);
-assert.match(stability, /quickModeGeneration/);
-assert.match(stability, /quickModeWrite = quickModeWrite/);
-assert.match(stability, /setCurrentSurfaceMode/);
+assert.match(stability, /quickModeSeqBySurface/);
+assert.match(stability, /pendingModeBySurface/);
+assert.match(stability, /chooseCurrentSurfaceMode/);
+assert.match(stability, /persistCurrentSurfaceMode/);
+assert.match(stability, /watchedDisplayMode: mode/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
+assert.doesNotMatch(stability, /quickModeGeneration|quickModeWrite/,
+  'navigation generations or serialized promise chains must not cancel a physical quick-mode click');
 assert.match(stability, /root\.querySelector\('#eyh-surface-settings'\)\?\.remove\(\)/);
 assert.match(stability, /document\.querySelector\('#eyh-surface-panel'\)\?\.remove\(\)/);
 assert.match(inlineControls, /PANEL_ID = 'eyh-inline-settings-panel'/);
@@ -110,7 +110,13 @@ assert.match(inlineControls, /GEAR_ID = 'eyh-inline-settings'/);
 assert.match(inlineControls, /INSTANCE_TOKEN = crypto\.randomUUID\(\)/);
 assert.match(inlineControls, /gear\.dataset\.eyhInstance = INSTANCE_TOKEN/);
 assert.match(inlineControls, /gear\.dataset\.eyhInstance !== INSTANCE_TOKEN/);
-assert.match(inlineControls, /gear\?\.remove\(\)/);
+assert.match(inlineControls, /routeIdentity/);
+assert.match(inlineControls, /panelRoute/);
+assert.match(inlineControls, /document\.documentElement\.appendChild\(panel\)/);
+assert.match(inlineControls, /document\.addEventListener\('click',[\s\S]*?#\$\{GEAR_ID\}[\s\S]*?stopImmediatePropagation\(\)/,
+  'gear action must be delegated at document capture level');
+assert.match(inlineControls, /#\$\{AUTO_BUTTON_ID\}/);
+assert.match(inlineControls, /toggleSafeAuto/);
 assert.match(inlineControls, /watchedSurfaceProfiles/);
 assert.match(inlineControls, /watchedSurfaceDefaultProfile/);
 assert.match(inlineControls, /공통 기본값 사용/);
@@ -132,7 +138,6 @@ assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)|watchedDis
 assert.match(stability, /watchedSurfaceDefaultProfile: defaults/,
   'direct stable-line upgrades must snapshot the legacy default before page overrides');
 
-// Old direct-delete paths stay dormant and blocked at the MAIN-world edge.
 assert.match(content, /watchLaterAutoCleanupEnabled = false/);
 assert.match(stability, /watchLaterAutoCleanupEnabled: false/);
 assert.match(stability, /changes\.watchLaterAutoCleanupEnabled\?\.newValue === true/);
@@ -147,7 +152,6 @@ assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_REQUEST'/);
 assert.doesNotMatch(safeCoordinator, /requestPage\('EYH_WL_REMOVE_ONE_REQUEST'/);
 assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 
-// Safe manual and automatic cleanup both use the strict transaction bridge.
 assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
 assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
 assert.match(safeAuto, /EYH_WL_SAFE_LIST_REQUEST/);
@@ -186,9 +190,6 @@ const autoSafeRemove = safeAuto.indexOf("requestPage('EYH_WL_SAFE_REMOVE_REQUEST
 assert.ok(autoAttempting >= 0 && autoAttemptPersist > autoAttempting && autoSafeRemove > autoAttemptPersist,
   'automatic cleanup must durably persist attempting before every destructive request');
 
-// Cleanup is allowed to operate only on the verified videoId+setVideoId subset when YouTube's
-// display count is larger (e.g. private/deleted/unavailable rows). The declared count itself and
-// the unparsed gap must stay stable across both snapshots, and parser>declared still fails closed.
 for (const coordinator of [safeCoordinator, safeAuto]) {
   assert.match(coordinator, /function requireDeclaredCoverage\(parsedCount, expectedDeclared = null\)/);
   assert.match(coordinator, /if \(declared < parsedCount\)/);
@@ -207,15 +208,12 @@ assert.ok(freshResolve >= 0 && exactCompare > freshResolve && destructiveAction 
 assert.match(safeMain, /ACTION_ADD_VIDEO/);
 assert.match(safeMain, /already_present/);
 
-// Recovery remains ADD-only and deliberately stricter than cleanup: candidate restoration is
-// allowed only when display count and parsed membership are exactly identical.
 assert.match(core, /'lockupViewModel'/);
 assert.match(core, /collectItemIds/);
 assert.match(recoveryContent, /declared !== entries\.length/);
 assert.match(recoveryContent, /unparsedCount: 0/);
 assert.doesNotMatch(recoveryContent, /declared < entries\.length/);
 
-// Existing history/diagnostic infrastructure stays intact.
 assert.match(content, /GET_PAGE_DIAGNOSTICS/);
 assert.match(maintenance, /EYH_REQUEST_HISTORY/);
 assert.match(maintenance, /document\.visibilityState !== 'visible'/);
@@ -224,7 +222,6 @@ assert.match(bridge, /setVideoId/);
 assert.match(popupHtml, /id="watchLaterSafety"/);
 assert.match(popup, /eyhLastAutoWatchLaterSweep/);
 
-// Common defaults retain full profile data; the adapter maps them into the single renderer.
 for (const id of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
@@ -234,10 +231,9 @@ assert.match(options, /watchedDisplayMode: presentation\.mode/);
 assert.match(stability, /watchedSurfaceDefaultProfile/);
 assert.match(stability, /effectivePresentation/);
 
-// Historical regression files may remain packaged for audit, but they must not be resident.
 assert.match(surface, /MutationObserver/);
 assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.11 one-click controls + stale-context reconnect + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.12 masthead capture + uncancelled quick modes + safe Watch Later integration self-test');
