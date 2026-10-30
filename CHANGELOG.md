@@ -1,3 +1,9 @@
+## [1.10.7](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.6...v1.10.7) (2026-10-30)
+
+### 🐛 Bug Fixes
+
+* **android:** hide E with native header and on Shorts ([6210e98](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/6210e982d5149fbeb48d3aa58915e6f011ca027e))
+
 ## [1.10.6](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.5...v1.10.6) (2026-10-28)
 
 ### 🐛 Bug Fixes

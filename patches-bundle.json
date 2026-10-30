@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-28T16:01:33",
-  "description": "## [1.10.6](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.5...v1.10.6) (2026-10-28)\n\n### 🐛 Bug Fixes\n\n* **android:** restore header E and transactional Watch Later cleanup ([4d7dadb](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/4d7dadb6f2d6d8239ebe92c05f43a0b09661317f))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.6/patches-1.10.6.mpp",
+  "created_at": "2026-10-30T10:30:09",
+  "description": "## [1.10.7](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.6...v1.10.7) (2026-10-30)\n\n### 🐛 Bug Fixes\n\n* **android:** hide E with native header and on Shorts ([6210e98](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/6210e982d5149fbeb48d3aa58915e6f011ca027e))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.7/patches-1.10.7.mpp",
   "signature_download_url": "",
-  "version": "1.10.6"
+  "version": "1.10.7"
 }
