@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.12', 'masthead-event reliability release must have a distinct version');
+assert.equal(manifest.version, '0.10.13', 'startup-stability/performance release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -87,22 +87,33 @@ assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// v0.10.12: only a newer physical click may supersede an in-flight quick-mode choice. Lifecycle
-// signals can refresh the same surface but must not cancel it. Gear/safe-auto are delegated at
-// document capture level so YouTube's masthead handlers cannot swallow them.
+// v0.10.13 keeps one visible quick-mode painter during startup. content.js may retain its legacy
+// compatibility class, but the profile controller owns the visible class and commits one storage
+// transaction per physical click. Retry ladders are coalesced instead of accumulating timers.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
-assert.match(stability, /button\[data-eyh-mode\]/);
-assert.match(stability, /paintQuickMode/);
+assert.match(stability, /PROFILE_ACTIVE_CLASS = 'eyh-profile-active'/);
+assert.match(stability, /document\.documentElement\.dataset\.eyhProfileController = '1'/);
+assert.match(stability, /button\.classList\.toggle\(PROFILE_ACTIVE_CLASS, active\)/);
+assert.match(css, /data-eyh-profile-controller="1"[\s\S]*button\[data-eyh-mode\]\.eyh-active/);
+assert.match(css, /button\[data-eyh-mode\]\.eyh-profile-active/);
 assert.match(stability, /quickModeSeqBySurface/);
 assert.match(stability, /pendingModeBySurface/);
 assert.match(stability, /chooseCurrentSurfaceMode/);
 assert.match(stability, /persistCurrentSurfaceMode/);
-assert.match(stability, /watchedDisplayMode: mode/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
+assert.doesNotMatch(stability, /chrome\.storage\.local\.set\(\{\s*watchedDisplayMode: mode,\s*watchLaterAutoCleanupEnabled: false\s*\}\)/,
+  'quick mode must not perform the old preliminary storage write before canonical profile persistence');
+assert.match(stability, /decorationTimers/);
+assert.match(stability, /for \(const timer of decorationTimers\) clearTimeout\(timer\)/);
+assert.match(inlineControls, /renderRetryTimers/);
+assert.match(inlineControls, /for \(const timer of renderRetryTimers\) clearTimeout\(timer\)/);
+assert.match(stability, /chrome\.storage\.local\.get\(\{ watchLaterAutoCleanupEnabled: false \}\)/,
+  'legacy unsafe auto key must be checked before migration write');
 assert.doesNotMatch(stability, /quickModeGeneration|quickModeWrite/,
   'navigation generations or serialized promise chains must not cancel a physical quick-mode click');
+
 assert.match(stability, /root\.querySelector\('#eyh-surface-settings'\)\?\.remove\(\)/);
 assert.match(stability, /document\.querySelector\('#eyh-surface-panel'\)\?\.remove\(\)/);
 assert.match(inlineControls, /PANEL_ID = 'eyh-inline-settings-panel'/);
@@ -236,4 +247,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.12 masthead capture + uncancelled quick modes + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.13 startup-stable single-painter + coalesced retries + safe Watch Later integration self-test');
