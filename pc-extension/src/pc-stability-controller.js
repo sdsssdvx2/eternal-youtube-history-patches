@@ -1,12 +1,14 @@
 (() => {
   'use strict';
 
-  // Presentation stability controller for v0.10.7.
+  // Presentation stability controller for v0.10.11.
   // IMPORTANT: this file never scans or mutates video cards. content.js is the sole card renderer.
   // It only maps the stored page profile onto the legacy renderer inputs and decorates the header.
 
   const RETRY_DELAYS = [0, 180, 700, 1800];
   let applyGeneration = 0;
+  let quickModeGeneration = 0;
+  let quickModeWrite = Promise.resolve();
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -111,6 +113,16 @@
     };
   }
 
+  function paintQuickMode(mode) {
+    const root = document.querySelector('#eyh-header-controls');
+    if (!root) return;
+    for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
+      const active = button.dataset.eyhMode === mode;
+      button.classList.toggle('eyh-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+
   function decorateHeader() {
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return false;
@@ -161,6 +173,7 @@
     const state = await readProfileState(key);
     if (generation !== applyGeneration || key !== surfaceKey()) return;
     const effective = effectivePresentation(state.profile);
+    paintQuickMode(effective.mode);
     const patch = {};
     if (state.values.watchedDisplayMode !== effective.mode) patch.watchedDisplayMode = effective.mode;
     if (Number(state.values.watchedMinProgressPct || 0) !== effective.threshold) {
@@ -170,11 +183,11 @@
     scheduleHeaderDecoration();
   }
 
-  async function setCurrentSurfaceMode(mode) {
+  async function setCurrentSurfaceMode(mode, key, generation) {
     if (!extensionAlive() || !['none', 'dim', 'hide'].includes(mode)) return;
-    const key = surfaceKey();
-    if (key === 'shorts') return;
+    if (key === 'shorts' || key !== surfaceKey() || generation !== quickModeGeneration) return;
     const state = await readProfileState(key);
+    if (key !== surfaceKey() || generation !== quickModeGeneration) return;
     const profile = {
       ...state.profile,
       dimEnabled: mode === 'dim',
@@ -182,17 +195,30 @@
     };
     const profiles = { ...state.profiles, [key]: profile };
     const effective = effectivePresentation(profile);
+    paintQuickMode(effective.mode);
     await chrome.storage.local.set({
       watchedSurfaceProfiles: profiles,
       watchedDisplayMode: effective.mode,
       watchedMinProgressPct: effective.threshold,
       watchLaterAutoCleanupEnabled: false
     });
+    paintQuickMode(effective.mode);
     scheduleHeaderDecoration();
   }
 
+  function queueCurrentSurfaceMode(mode) {
+    const key = surfaceKey();
+    const generation = ++quickModeGeneration;
+    paintQuickMode(mode);
+    quickModeWrite = quickModeWrite
+      .catch(() => {})
+      .then(() => setCurrentSurfaceMode(mode, key, generation));
+    return quickModeWrite;
+  }
+
   // Capture the three lightweight legacy buttons before content.js's old global-mode handler.
-  // This preserves the familiar UI while storing the choice as the current page override.
+  // Paint the selected state synchronously, then serialize profile writes so one physical click
+  // always produces one visible mode change and rapid clicks cannot complete out of order.
   document.addEventListener('click', event => {
     const button = event.target?.closest?.('#eyh-header-controls button[data-eyh-mode]');
     if (!button) return;
@@ -200,11 +226,14 @@
     if (!['none', 'dim', 'hide'].includes(mode) || surfaceKey() === 'shorts') return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    setCurrentSurfaceMode(mode).catch(() => {});
+    queueCurrentSurfaceMode(mode).catch(() => {
+      applySurfaceProfile().catch(() => {});
+    });
   }, true);
 
   function onNavigation() {
     applyGeneration += 1;
+    quickModeGeneration += 1;
     applySurfaceProfile().catch(() => {});
     scheduleHeaderDecoration();
   }

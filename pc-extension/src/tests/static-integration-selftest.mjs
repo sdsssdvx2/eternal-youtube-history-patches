@@ -7,6 +7,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const text = name => fs.readFileSync(path.join(src, name), 'utf8');
 const manifest = JSON.parse(text('manifest.json'));
+const backgroundEntry = text('background-entry.js');
+const updateReconnect = text('pc-update-reconnect.js');
 const content = text('content.js');
 const css = text('content.css');
 const stability = text('pc-stability-controller.js');
@@ -28,7 +30,14 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.10', 'SPA lifecycle recovery release must have a distinct version');
+assert.equal(manifest.version, '0.10.11', 'single-click/settings reliability release must have a distinct version');
+assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
+assert.match(backgroundEntry, /import '\.\/background\.js'/);
+assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
+assert.match(updateReconnect, /details\?\.reason !== 'update'/);
+assert.match(updateReconnect, /chrome\.storage\.session/);
+assert.match(updateReconnect, /chrome\.tabs\.reload/);
+assert.match(updateReconnect, /chrome\.tabs\.onActivated/);
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
 const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
 assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
@@ -65,9 +74,8 @@ assert.doesNotMatch(inlineControls, /MutationObserver/);
 assert.doesNotMatch(inlineControls, /querySelectorAll\('a\[href|classList\.toggle\('eyh-(?:watched|hidden|surface)/,
   'inline UI must never become another video-card renderer');
 
-// v0.10.10 repairs missed YouTube SPA completion signals without bringing back a whole-document
-// observer. It compares only URL + one fixed header id twice per second, and replays the existing
-// lightweight completion event only when one of those identities actually changes.
+// The bounded SPA guard repairs missed YouTube completion signals without bringing back another
+// whole-document observer. It compares only URL + one fixed header id twice per second.
 assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
 assert.match(spaLifecycle, /location\.pathname/);
 assert.match(spaLifecycle, /location\.search/);
@@ -84,18 +92,25 @@ assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// Familiar quick buttons remain. The old multi-renderer gear/panel stays purged, while the current
-// lightweight settings panel only edits stored profiles and safe cleanup state.
+// Familiar quick buttons remain. v0.10.11 paints the selected button synchronously and serializes
+// profile writes, while the inline gear replaces any stale button left by an older script instance.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
 assert.match(stability, /button\[data-eyh-mode\]/);
+assert.match(stability, /paintQuickMode/);
+assert.match(stability, /quickModeGeneration/);
+assert.match(stability, /quickModeWrite = quickModeWrite/);
 assert.match(stability, /setCurrentSurfaceMode/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
 assert.match(stability, /root\.querySelector\('#eyh-surface-settings'\)\?\.remove\(\)/);
 assert.match(stability, /document\.querySelector\('#eyh-surface-panel'\)\?\.remove\(\)/);
 assert.match(inlineControls, /PANEL_ID = 'eyh-inline-settings-panel'/);
 assert.match(inlineControls, /GEAR_ID = 'eyh-inline-settings'/);
+assert.match(inlineControls, /INSTANCE_TOKEN = crypto\.randomUUID\(\)/);
+assert.match(inlineControls, /gear\.dataset\.eyhInstance = INSTANCE_TOKEN/);
+assert.match(inlineControls, /gear\.dataset\.eyhInstance !== INSTANCE_TOKEN/);
+assert.match(inlineControls, /gear\?\.remove\(\)/);
 assert.match(inlineControls, /watchedSurfaceProfiles/);
 assert.match(inlineControls, /watchedSurfaceDefaultProfile/);
 assert.match(inlineControls, /공통 기본값 사용/);
@@ -225,4 +240,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.10 SPA lifecycle + inline settings + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.11 one-click controls + stale-context reconnect + safe Watch Later integration self-test');

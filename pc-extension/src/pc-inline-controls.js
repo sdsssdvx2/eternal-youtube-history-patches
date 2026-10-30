@@ -6,6 +6,7 @@
   const GEAR_ID = 'eyh-inline-settings';
   const AUTO_BUTTON_ID = 'eyh-watch-later-safe-auto';
   const RETRY_DELAYS = [0, 120, 500, 1400];
+  const INSTANCE_TOKEN = crypto.randomUUID();
   let renderQueued = false;
 
   const LABELS = {
@@ -167,6 +168,7 @@
 
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
+    panel.dataset.eyhInstance = INSTANCE_TOKEN;
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Eternal 현재 페이지 설정');
 
@@ -284,6 +286,21 @@
     document.body.appendChild(panel);
   }
 
+  function createGear() {
+    const gear = document.createElement('button');
+    gear.type = 'button';
+    gear.id = GEAR_ID;
+    gear.className = 'eyh-header-button eyh-surface-compact';
+    gear.textContent = '⚙';
+    gear.dataset.eyhInstance = INSTANCE_TOKEN;
+    gear.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openPanel().catch(error => setStatus(`설정 열기 실패: ${error.message}`, 'error'));
+    }, true);
+    return gear;
+  }
+
   async function render() {
     renderQueued = false;
     const root = document.querySelector('#eyh-header-controls');
@@ -297,17 +314,9 @@
     }
 
     let gear = root.querySelector(`#${GEAR_ID}`);
-    if (!gear) {
-      gear = document.createElement('button');
-      gear.type = 'button';
-      gear.id = GEAR_ID;
-      gear.className = 'eyh-header-button eyh-surface-compact';
-      gear.textContent = '⚙';
-      gear.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        openPanel().catch(error => setStatus(`설정 열기 실패: ${error.message}`, 'error'));
-      }, true);
+    if (!gear || gear.dataset.eyhInstance !== INSTANCE_TOKEN) {
+      gear?.remove();
+      gear = createGear();
       root.insertBefore(gear, root.querySelector('#eyh-header-status'));
     }
     const state = await readState().catch(() => null);
