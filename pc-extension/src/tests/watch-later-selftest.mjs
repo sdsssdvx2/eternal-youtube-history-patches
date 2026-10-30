@@ -111,7 +111,7 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.10
+// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.11
 // keeps only the separately journaled SAFE protocol resident; the old preference/buttons stay off.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
@@ -143,6 +143,6 @@ assert.ok(isolated.js.includes('watch-later-safe.js'), 'manual journaled cleanup
 assert.ok(isolated.js.includes('watch-later-safe-auto.js'), 'opt-in journaled automatic cleanup must be resident');
 assert.ok(isolated.js.includes('pc-inline-controls.js'), 'working inline settings/safe cleanup UI must be resident');
 assert.ok(isolated.js.includes('pc-spa-lifecycle.js'), 'missed SPA route changes must be reconciled');
-assert.equal(manifest.version, '0.10.10');
+assert.equal(manifest.version, '0.10.11');
 
 console.log('PASS watch-later-core + modern lockup + legacy-blocked/safe-resident + inline-controls self-test');
