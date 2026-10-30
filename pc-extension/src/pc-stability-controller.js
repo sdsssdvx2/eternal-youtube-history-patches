@@ -1,14 +1,14 @@
 (() => {
   'use strict';
 
-  // Presentation stability controller for v0.10.11.
+  // Presentation stability controller for v0.10.12.
   // IMPORTANT: this file never scans or mutates video cards. content.js is the sole card renderer.
   // It only maps the stored page profile onto the legacy renderer inputs and decorates the header.
 
   const RETRY_DELAYS = [0, 180, 700, 1800];
   let applyGeneration = 0;
-  let quickModeGeneration = 0;
-  let quickModeWrite = Promise.resolve();
+  const quickModeSeqBySurface = new Map();
+  const pendingModeBySurface = new Map();
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -60,8 +60,6 @@
   }
 
   function effectivePresentation(profile) {
-    // Keep the historic mutually-exclusive quick modes. If an old advanced profile has both enabled,
-    // hide wins, matching the prior page-profile renderer's effective presentation.
     if (profile.hideEnabled) {
       return {
         mode: 'hide',
@@ -94,9 +92,6 @@
       values.watchedMinProgressPct
     );
 
-    // Direct upgrades from the stable 0.9.x line have no page-profile default yet. Capture the old
-    // global mode exactly once before any page override can remap watchedDisplayMode. This prevents
-    // the first quick-button choice from leaking into every other surface.
     if (!hasStoredDefault) {
       await chrome.storage.local.set({ watchedSurfaceDefaultProfile: defaults });
       values.watchedSurfaceDefaultProfile = defaults;
@@ -127,7 +122,6 @@
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return false;
 
-    // Remove stale v0.10.x detailed-settings UI if this SPA document survived an extension update.
     root.querySelector('#eyh-surface-settings')?.remove();
     document.querySelector('#eyh-surface-panel')?.remove();
     const brand = root.querySelector('.eyh-header-brand');
@@ -141,8 +135,6 @@
       button.disabled = shorts;
     }
 
-    // Destructive legacy controls stay unavailable. The old MAIN-world message names are also
-    // independently blocked by watch-later-safety-main.js, so stale tabs cannot reopen deletion.
     for (const selector of ['#eyh-watch-later-auto', '#eyh-watch-later-cleanup']) {
       const button = root.querySelector(selector);
       if (!button) continue;
@@ -162,9 +154,6 @@
     const generation = ++applyGeneration;
     const key = surfaceKey();
 
-    // Shorts has no useful recommendation-card presentation surface. Crucially, do not write the
-    // global renderer settings here: doing so would corrupt the 0.9.x fallback/default when a user
-    // visits Shorts before a page-profile default has ever been stored.
     if (key === 'shorts') {
       scheduleHeaderDecoration();
       return;
@@ -172,6 +161,17 @@
 
     const state = await readProfileState(key);
     if (generation !== applyGeneration || key !== surfaceKey()) return;
+
+    // Never let a same-page lifecycle refresh repaint a user's just-clicked choice from the old
+    // profile while its storage transaction is still in flight. Only a newer click on this surface
+    // is allowed to supersede it.
+    const pending = pendingModeBySurface.get(key);
+    if (pending) {
+      paintQuickMode(pending.mode);
+      scheduleHeaderDecoration();
+      return;
+    }
+
     const effective = effectivePresentation(state.profile);
     paintQuickMode(effective.mode);
     const patch = {};
@@ -183,11 +183,11 @@
     scheduleHeaderDecoration();
   }
 
-  async function setCurrentSurfaceMode(mode, key, generation) {
-    if (!extensionAlive() || !['none', 'dim', 'hide'].includes(mode)) return;
-    if (key === 'shorts' || key !== surfaceKey() || generation !== quickModeGeneration) return;
+  async function persistCurrentSurfaceMode(mode, key, seq) {
+    if (!extensionAlive() || !['none', 'dim', 'hide'].includes(mode) || key === 'shorts') return;
     const state = await readProfileState(key);
-    if (key !== surfaceKey() || generation !== quickModeGeneration) return;
+    if (quickModeSeqBySurface.get(key) !== seq) return;
+
     const profile = {
       ...state.profile,
       dimEnabled: mode === 'dim',
@@ -195,30 +195,50 @@
     };
     const profiles = { ...state.profiles, [key]: profile };
     const effective = effectivePresentation(profile);
-    paintQuickMode(effective.mode);
-    await chrome.storage.local.set({
+    const patch = {
       watchedSurfaceProfiles: profiles,
-      watchedDisplayMode: effective.mode,
-      watchedMinProgressPct: effective.threshold,
       watchLaterAutoCleanupEnabled: false
-    });
-    paintQuickMode(effective.mode);
+    };
+    if (surfaceKey() === key) {
+      patch.watchedDisplayMode = effective.mode;
+      patch.watchedMinProgressPct = effective.threshold;
+    }
+    await chrome.storage.local.set(patch);
+
+    if (quickModeSeqBySurface.get(key) !== seq) return;
+    pendingModeBySurface.delete(key);
+    if (surfaceKey() === key) {
+      paintQuickMode(effective.mode);
+      applySurfaceProfile().catch(() => {});
+    }
     scheduleHeaderDecoration();
   }
 
-  function queueCurrentSurfaceMode(mode) {
+  function chooseCurrentSurfaceMode(mode) {
     const key = surfaceKey();
-    const generation = ++quickModeGeneration;
+    if (key === 'shorts') return;
+    const seq = (quickModeSeqBySurface.get(key) || 0) + 1;
+    quickModeSeqBySurface.set(key, seq);
+    pendingModeBySurface.set(key, { seq, mode });
+
+    // Give both the user and the sole renderer immediate feedback. The richer per-surface profile
+    // is persisted immediately afterward, but navigation signals can no longer cancel this click.
     paintQuickMode(mode);
-    quickModeWrite = quickModeWrite
-      .catch(() => {})
-      .then(() => setCurrentSurfaceMode(mode, key, generation));
-    return quickModeWrite;
+    chrome.storage.local.set({
+      watchedDisplayMode: mode,
+      watchLaterAutoCleanupEnabled: false
+    }).catch(() => {});
+
+    persistCurrentSurfaceMode(mode, key, seq).catch(() => {
+      if (quickModeSeqBySurface.get(key) === seq) {
+        pendingModeBySurface.delete(key);
+        applySurfaceProfile().catch(() => {});
+      }
+    });
   }
 
-  // Capture the three lightweight legacy buttons before content.js's old global-mode handler.
-  // Paint the selected state synchronously, then serialize profile writes so one physical click
-  // always produces one visible mode change and rapid clicks cannot complete out of order.
+  // YouTube's masthead has its own event machinery. Handle Eternal's quick buttons at document
+  // capture level so one physical click always reaches us before any page-level handler can swallow it.
   document.addEventListener('click', event => {
     const button = event.target?.closest?.('#eyh-header-controls button[data-eyh-mode]');
     if (!button) return;
@@ -226,21 +246,17 @@
     if (!['none', 'dim', 'hide'].includes(mode) || surfaceKey() === 'shorts') return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    queueCurrentSurfaceMode(mode).catch(() => {
-      applySurfaceProfile().catch(() => {});
-    });
+    chooseCurrentSurfaceMode(mode);
   }, true);
 
   function onNavigation() {
     applyGeneration += 1;
-    quickModeGeneration += 1;
     applySurfaceProfile().catch(() => {});
     scheduleHeaderDecoration();
   }
 
   if (!extensionAlive()) return;
 
-  // Keep the old destructive/automatic path truly dormant, not merely blocked at its final bridge.
   chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false }).catch(() => {});
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
