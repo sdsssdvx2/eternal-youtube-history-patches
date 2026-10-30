@@ -40,30 +40,11 @@ jobs:
           path: .morphe-official
           fetch-depth: 1
 
-      - name: Sync stable YouTube targets while preserving server pin
-        shell: bash
+      - name: Sync stable YouTube targets
         run: |
-          set -euo pipefail
           python3 .github/scripts/sync_morphe_compat.py \
             .morphe-official/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt \
-            patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt \
-            android-update-status.json
-
-          pinned_version="$(jq -r '.youtube.version' android-update-status.json)"
-          PINNED_VERSION="$pinned_version" python3 - <<'PY'
-          import os, re
-          from pathlib import Path
-
-          version = os.environ['PINNED_VERSION']
-          text = Path('patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt').read_text()
-          start = text.index('// MORPHE_COMPAT_START')
-          end = text.index('// MORPHE_COMPAT_END', start)
-          block = text[start:end]
-          matches = re.findall(r'version\s*=\s*"' + re.escape(version) + r'"', block)
-          if len(matches) != 1:
-              raise SystemExit(f'pinned server target {version} must occur exactly once in compatibility block; found {len(matches)}')
-          print(f'Pinned server target preserved: {version}')
-          PY
+            patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
 
       - name: Commit if compatibility changed
         shell: bash

@@ -59,10 +59,6 @@ private val YOUTUBE = Compatibility(
             minSdk = 28
         ),
         AppTarget(
-            version = "21.20.405",
-            minSdk = 28
-        ),
-        AppTarget(
             version = "20.51.39",
             minSdk = 28
         ),
