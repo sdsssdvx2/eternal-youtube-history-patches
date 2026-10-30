@@ -35,7 +35,7 @@ private const val UPDATER_PROVIDER_AUTHORITY = "app.morphe.android.youtube.etern
 private const val WATCH_LATER_JOB_SERVICE_CLASS =
     "app.morphe.extension.youtube.patches.eternalhistory.EternalWatchLaterJobService"
 private const val ETERNAL_TOOLBAR_CLASS =
-    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalHistoryToolbar;"
+    "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalToolbarVisibilityGuard;"
 private const val ETERNAL_SURFACE_TRACKER_CLASS =
     "Lapp/morphe/extension/youtube/patches/eternalhistory/EternalSurfaceTracker;"
 private val UPDATE_VISIBLE_PACKAGES = arrayOf(
@@ -44,8 +44,9 @@ private val UPDATE_VISIBLE_PACKAGES = arrayOf(
 )
 
 /**
- * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. This is a render-only
- * signal: the runtime stores the ImageView solely as toolbar geometry and never mutates its parent.
+ * Mirrors Morphe's current toolbar fingerprint but calls Eternal directly. This remains a passive
+ * render-only signal: the visibility guard forwards it to EternalHistoryToolbar, stores geometry,
+ * and never inserts a child into YouTube's native toolbar hierarchy.
  */
 private object EternalToolbarButtonFingerprint : Fingerprint(
     accessFlags = listOf(AccessFlags.PUBLIC, AccessFlags.FINAL),
@@ -148,8 +149,8 @@ internal fun registerAddOn(registrationMethodDescriptor: String) {
     method.addInstruction(0, "invoke-static { }, $registrationMethodDescriptor")
 
     // Restore only the toolbar's passive render signal. Keep the crash-quarantine boundaries that
-    // matter: no NavigationBar listener and no browse-id bytecode injection. The callback does not
-    // query host navigation state and never inserts a child into YouTube's toolbar.
+    // matter: no NavigationBar listener and no browse-id bytecode injection. The guard tracks only
+    // live toolbar geometry plus Morphe's cached ShortsPlayerState and does not query host navigation.
     installEternalToolbarHook()
     // Intentionally NOT: installEternalBrowseIdHook()
 }
@@ -195,8 +196,7 @@ private fun declareAddOnPreferences() {
     if (!declarationFile.exists()) {
         declarationFile.parentFile?.mkdirs()
         declarationFile.writeText(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
-                "<morphe-add-on-preferences xmlns:android=\"http://schemas.android.com/apk/res/android\"/>"
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><morphe-add-on-preferences xmlns:android=\"http://schemas.android.com/apk/res/android\"/>"
         )
     }
 
