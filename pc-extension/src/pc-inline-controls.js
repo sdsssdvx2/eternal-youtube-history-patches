@@ -8,6 +8,7 @@
   const RETRY_DELAYS = [0, 120, 500, 1400];
   const INSTANCE_TOKEN = crypto.randomUUID();
   let renderQueued = false;
+  let panelRoute = '';
 
   const LABELS = {
     home: '홈', watch: '영상 상세 · 관련 영상', subscriptions: '구독', channel: '채널',
@@ -19,6 +20,10 @@
 
   function extensionAlive() {
     try { return Boolean(globalThis.chrome?.runtime?.id); } catch { return false; }
+  }
+
+  function routeIdentity() {
+    return `${location.pathname}${location.search}`;
   }
 
   function offerReloadForStaleContext() {
@@ -111,7 +116,7 @@
     const style = document.createElement('style');
     style.id = 'eyh-inline-settings-style';
     style.textContent = `
-      #${PANEL_ID}{position:fixed;z-index:2147483646;top:64px;right:18px;width:min(380px,calc(100vw - 36px));box-sizing:border-box;padding:16px;border:1px solid rgba(0,0,0,.16);border-radius:14px;background:#fff;color:#0f0f0f;box-shadow:0 10px 34px rgba(0,0,0,.28);font:14px/1.4 Roboto,Arial,sans-serif}
+      #${PANEL_ID}{position:fixed;pointer-events:auto;z-index:2147483647;top:64px;right:18px;width:min(380px,calc(100vw - 36px));box-sizing:border-box;padding:16px;border:1px solid rgba(0,0,0,.16);border-radius:14px;background:#fff;color:#0f0f0f;box-shadow:0 10px 34px rgba(0,0,0,.28);font:14px/1.4 Roboto,Arial,sans-serif}
       html[dark] #${PANEL_ID},body[dark] #${PANEL_ID},ytd-app[dark] #${PANEL_ID}{border-color:rgba(255,255,255,.18);background:#212121;color:#f1f1f1}
       #${PANEL_ID}>strong{display:block;margin-bottom:6px;font-size:16px}
       #${PANEL_ID} .eyh-inline-note{margin-bottom:10px;opacity:.72;font-size:12px}
@@ -127,6 +132,7 @@
 
   function closePanel() {
     document.getElementById(PANEL_ID)?.remove();
+    panelRoute = '';
   }
 
   function field(label, input) {
@@ -162,9 +168,10 @@
       offerReloadForStaleContext();
       return;
     }
+    const openingRoute = routeIdentity();
     ensurePanelStyles();
     const state = await readState();
-    if (state.key !== surfaceKey() || state.key === 'shorts') return;
+    if (state.key !== surfaceKey() || state.key === 'shorts' || openingRoute !== routeIdentity()) return;
 
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
@@ -283,7 +290,8 @@
 
     actions.append(reset, cancel, save);
     panel.appendChild(actions);
-    document.body.appendChild(panel);
+    panelRoute = openingRoute;
+    document.documentElement.appendChild(panel);
   }
 
   function createGear() {
@@ -293,12 +301,19 @@
     gear.className = 'eyh-header-button eyh-surface-compact';
     gear.textContent = '⚙';
     gear.dataset.eyhInstance = INSTANCE_TOKEN;
-    gear.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      openPanel().catch(error => setStatus(`설정 열기 실패: ${error.message}`, 'error'));
-    }, true);
     return gear;
+  }
+
+  async function toggleSafeAuto() {
+    if (!extensionAlive()) {
+      offerReloadForStaleContext();
+      return;
+    }
+    const current = await chrome.storage.local.get({ [AUTO_KEY]: false });
+    const enabled = !Boolean(current[AUTO_KEY]);
+    await chrome.storage.local.set({ [AUTO_KEY]: enabled });
+    setStatus(enabled ? 'Watch Later 자동 안전 정리 켜짐' : '자동 안전 정리 꺼짐');
+    scheduleRender();
   }
 
   async function render() {
@@ -337,19 +352,6 @@
       autoButton.type = 'button';
       autoButton.id = AUTO_BUTTON_ID;
       autoButton.className = 'eyh-header-button';
-      autoButton.addEventListener('click', async event => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (!extensionAlive()) {
-          offerReloadForStaleContext();
-          return;
-        }
-        const current = await chrome.storage.local.get({ [AUTO_KEY]: false });
-        const enabled = !Boolean(current[AUTO_KEY]);
-        await chrome.storage.local.set({ [AUTO_KEY]: enabled });
-        setStatus(enabled ? 'Watch Later 자동 안전 정리 켜짐' : '자동 안전 정리 꺼짐');
-        scheduleRender();
-      }, true);
     }
     const cleanup = root.querySelector('#eyh-watch-later-safe-cleanup');
     const undo = root.querySelector('#eyh-watch-later-safe-undo');
@@ -375,13 +377,40 @@
     for (const delay of RETRY_DELAYS) setTimeout(scheduleRender, delay);
   }
 
+  function onLifecycle() {
+    const currentRoute = routeIdentity();
+    if (document.getElementById(PANEL_ID) && panelRoute && panelRoute !== currentRoute) closePanel();
+    scheduleRenderRetries();
+  }
+
   if (!extensionAlive()) return;
-  window.addEventListener('yt-navigate-finish', () => { closePanel(); scheduleRenderRetries(); }, true);
-  window.addEventListener('popstate', () => { closePanel(); scheduleRenderRetries(); }, true);
+  window.addEventListener('yt-navigate-finish', onLifecycle, true);
+  window.addEventListener('popstate', onLifecycle, true);
+
+  // Handle our masthead actions before YouTube's own masthead event machinery. Per-element click
+  // listeners can be swallowed by YouTube even though the button still shows its pressed CSS state.
   document.addEventListener('click', event => {
+    const gear = event.target?.closest?.(`#${GEAR_ID}`);
+    if (gear) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (document.getElementById(PANEL_ID)) closePanel();
+      else openPanel().catch(error => setStatus(`설정 열기 실패: ${error.message}`, 'error'));
+      return;
+    }
+
+    const auto = event.target?.closest?.(`#${AUTO_BUTTON_ID}`);
+    if (auto) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      toggleSafeAuto().catch(error => setStatus(`자동 정리 설정 실패: ${error.message}`, 'error'));
+      return;
+    }
+
     const panel = document.getElementById(PANEL_ID);
-    if (panel && !panel.contains(event.target) && !event.target?.closest?.(`#${GEAR_ID}`)) closePanel();
+    if (panel && !panel.contains(event.target)) closePanel();
   }, true);
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.watchedSurfaceProfiles || changes.watchedSurfaceDefaultProfile
