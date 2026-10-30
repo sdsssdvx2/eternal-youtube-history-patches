@@ -1,9 +1,10 @@
-name: Validate server-side app patching
+name: Validate deployed server-side app patching
 
 on:
   workflow_dispatch:
   push:
     paths:
+      - 'android-update-status.json'
       - '.github/workflows/test-server-patch.yml'
 
 permissions:
@@ -37,7 +38,7 @@ jobs:
       - name: Install acquisition dependencies
         run: python -m pip install --disable-pip-version-check requests
 
-      - name: Acquire exact trusted clean YouTube APK
+      - name: Acquire exact trusted deployed YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.server-test/morphe-builds
         shell: bash
@@ -45,66 +46,49 @@ jobs:
           set -euo pipefail
           mkdir -p .server-test/input
           version="$(jq -r '.youtube.version' android-update-status.json)"
-          test "$version" = '21.20.405'
           VERSION="$version" python - <<'PY'
-          import os
-          import zipfile
+          import os, zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
-
-          version = os.environ['VERSION']
-          trusted = os.environ['YT_TRUSTED_SHA256'].strip().lower()
-          app = AppConfig(
-              key='youtube', name='YouTube', package='com.google.android.youtube',
-              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
-              formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
-          resolver = ApkMirrorResolver(min_request_interval=1.2, max_release_attempts=4, max_variant_attempts=12)
-          dest = Path('.server-test/input/youtube.apk')
-          errors = []
-
-          def validate_standalone(path: Path) -> None:
-              with zipfile.ZipFile(path) as apk:
-                  names = set(apk.namelist())
-              if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
-                  raise RuntimeError('candidate is not a standalone APK')
-              if not any(name == 'classes.dex' or (name.startswith('classes') and name.endswith('.dex')) for name in names):
-                  raise RuntimeError('candidate has no classes dex')
-
-          for index, (url, referer) in enumerate(resolver.iter_candidates(app, version), start=1):
+          version=os.environ['VERSION']; trusted=os.environ['YT_TRUSTED_SHA256'].lower()
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          dest=Path('.server-test/input/youtube.apk'); errors=[]
+          for index,(url,referer) in enumerate(resolver.iter_candidates(app,version),start=1):
               try:
-                  result = resolver.download_candidate(url, referer, dest)
-                  print('candidate', index, result.size, result.sha256)
-                  validate_standalone(dest)
-                  if result.sha256.lower() != trusted:
-                      raise RuntimeError('candidate hash does not match trusted base')
-                  print('validated trusted standalone APK selected', referer)
-                  break
+                  result=resolver.download_candidate(url,referer,dest)
+                  with zipfile.ZipFile(dest) as apk: names=set(apk.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if result.sha256.lower() != trusted: raise RuntimeError('candidate hash does not match trusted base')
+                  print('validated deployed base',version,result.size,result.sha256,referer); break
               except Exception as exc:
-                  errors.append(str(exc))
-                  dest.unlink(missing_ok=True)
-          else:
-              raise RuntimeError('base acquisition failed: ' + ' | '.join(errors[-6:]))
+                  errors.append(str(exc)); dest.unlink(missing_ok=True)
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errors[-6:]))
           PY
           echo "$YT_TRUSTED_SHA256  .server-test/input/youtube.apk" | sha256sum -c -
 
-      - name: Resolve and download Morphe Desktop and patch bundles
+      - name: Resolve exact deployed Morphe and Eternal bundles
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .server-test/tools
-          get_asset() {
-            local repo="$1" regex="$2" out="$3"
-            url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$regex" '.assets[] | select(.name|test($re)) | .browser_download_url' | head -1)"
-            test -n "$url" && test "$url" != null
-            curl -fL --retry 3 "$url" -o "$out"
-          }
-          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\.jar$' .server-test/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches '^patches-.*\.mpp$' .server-test/tools/morphe.mpp
-          get_asset sdsssdvx2/eternal-youtube-history-patches '^patches-.*\.mpp$' .server-test/tools/eternal.mpp
-          ls -lh .server-test/tools
+          morphe_tag="$(jq -r '.morphe_patches' android-update-status.json)"
+          eternal_tag="$(jq -r '.eternal_patches' android-update-status.json)"
+          desktop="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${morphe_tag}")"
+          eternal="$(curl -fsSL "https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/tags/${eternal_tag}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$morphe" | head -1)"
+          eternal_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$eternal" | head -1)"
+          for url in "$desktop_url" "$morphe_url" "$eternal_url"; do test -n "$url" && test "$url" != null; done
+          curl -fL --retry 3 "$desktop_url" -o .server-test/tools/morphe-desktop.jar
+          curl -fL --retry 3 "$morphe_url" -o .server-test/tools/morphe.mpp
+          curl -fL --retry 3 "$eternal_url" -o .server-test/tools/eternal.mpp
+          echo "Reproducing deployed pair: Morphe $morphe_tag / Eternal $eternal_tag"
 
-      - name: Patch pinned YouTube with released Eternal source
+      - name: Patch deployed YouTube combination and require Eternal
         shell: bash
         run: |
           set -euo pipefail
@@ -126,9 +110,8 @@ jobs:
             and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
             and ((.failedPatches // []) | length == 0)
           ' .server-test/out/result.json >/dev/null
-          echo "PASS released Eternal actually applied to trusted YouTube $version"
-          echo "output bytes: $(stat -c%s .server-test/out/youtube-morphe-eternal.apk)"
+          echo "PASS deployed Eternal combination reproduces on trusted YouTube $version"
 
-      - name: Remove proprietary APKs and ephemeral signing material
+      - name: Remove proprietary APKs and ephemeral tools
         if: always()
         run: rm -rf .server-test/input .server-test/out .server-test/tools
