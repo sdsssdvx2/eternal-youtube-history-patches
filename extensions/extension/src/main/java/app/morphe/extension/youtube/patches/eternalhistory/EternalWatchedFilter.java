@@ -2,6 +2,8 @@ package app.morphe.extension.youtube.patches.eternalhistory;
 
 import androidx.annotation.Nullable;
 
+import java.util.Locale;
+
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.patches.components.BufferPhraseFilter;
 import app.morphe.extension.shared.patches.components.ContextInterface;
@@ -57,8 +59,7 @@ public final class EternalWatchedFilter {
 
             StringBuilder pathBuilder = contextInterface.patch_getPathBuilder();
             if (pathBuilder == null) return false;
-            String path = pathBuilder.toString();
-            String lowerPath = path.toLowerCase();
+            String lowerPath = pathBuilder.toString().toLowerCase(Locale.ROOT);
 
             // v1.10.5 crash quarantine: classify only from the Litho path already passed into this
             // filter. Never consult cached NavigationBar/browse/player state while YouTube rebuilds
@@ -80,15 +81,15 @@ public final class EternalWatchedFilter {
             // Hiding has precedence when both rules match. It is evaluated only on a whole-card
             // component so a watched thumbnail can never accidentally remove only a child view.
             if (profile.hideEnabled
-                    && looksLikeWholeVideoCard(path, surface)
+                    && looksLikeWholeVideoCard(lowerPath, surface)
                     && EternalHistoryClient.isWatchedCached(videoId, profile.effectiveHideThreshold())) {
                 return true;
             }
 
             if (!profile.dimEnabled) return false;
             if (EternalHistorySettings.DIM_CARD_INFO.get()) {
-                if (!looksLikeWholeVideoCard(path, surface)) return false;
-            } else if (!looksLikeThumbnailComponent(path, surface)) {
+                if (!looksLikeWholeVideoCard(lowerPath, surface)) return false;
+            } else if (!looksLikeThumbnailComponent(lowerPath, surface)) {
                 return false;
             }
 
@@ -124,44 +125,44 @@ public final class EternalWatchedFilter {
         return EternalSurfaceSettings.Surface.OTHER;
     }
 
-    private static boolean looksLikeVideoContext(String path) {
-        if (path == null || path.isEmpty()) return false;
-        String lower = path.toLowerCase();
+    /** All callers pass a path already normalized with Locale.ROOT. */
+    private static boolean looksLikeVideoContext(String lowerPath) {
+        if (lowerPath == null || lowerPath.isEmpty()) return false;
         for (String root : ROOT_CARD_PATHS) {
-            if (lower.startsWith(root) || lower.contains(root)) return true;
+            if (lowerPath.startsWith(root) || lowerPath.contains(root)) return true;
         }
         for (String nested : NESTED_CARD_PATHS) {
-            if (lower.contains(nested)) return true;
+            if (lowerPath.contains(nested)) return true;
         }
         return false;
     }
 
-    private static boolean looksLikeWholeVideoCard(String path, EternalSurfaceSettings.Surface surface) {
-        if (path == null || path.isEmpty()) return false;
-        String lower = path.toLowerCase();
-        boolean known = looksLikeVideoContext(lower);
+    /** All callers pass a path already normalized with Locale.ROOT. */
+    private static boolean looksLikeWholeVideoCard(String lowerPath, EternalSurfaceSettings.Surface surface) {
+        if (lowerPath == null || lowerPath.isEmpty()) return false;
+        boolean known = looksLikeVideoContext(lowerPath);
         if (!known && isPlaylistLikeSurface(surface)) {
             // New YouTube playlist pages increasingly use generic lockup view-model names instead
             // of the old playlist_video renderer names. On these already-known video-list surfaces,
             // a component carrying an extracted video id is accepted as a card only when its path
             // looks like a video/lockup root and not one of the child-view paths below.
-            known = lower.contains("video") || lower.contains("lockup");
+            known = lowerPath.contains("video") || lowerPath.contains("lockup");
         }
         if (!known) return false;
         for (String child : CHILD_EXCEPTIONS) {
-            if (lower.contains(child)) return false;
+            if (lowerPath.contains(child)) return false;
         }
         return true;
     }
 
-    private static boolean looksLikeThumbnailComponent(String path, EternalSurfaceSettings.Surface surface) {
-        if (path == null) return false;
-        String lower = path.toLowerCase();
+    /** All callers pass a path already normalized with Locale.ROOT. */
+    private static boolean looksLikeThumbnailComponent(String lowerPath, EternalSurfaceSettings.Surface surface) {
+        if (lowerPath == null) return false;
         for (String thumbnail : THUMBNAIL_COMPONENTS) {
-            if (lower.contains(thumbnail)) return true;
+            if (lowerPath.contains(thumbnail)) return true;
         }
         return isPlaylistLikeSurface(surface)
-                && (lower.contains("thumbnail") || lower.contains("content_image") || lower.contains("lockup_image"));
+                && (lowerPath.contains("thumbnail") || lowerPath.contains("content_image") || lowerPath.contains("lockup_image"));
     }
 
     private static boolean isPlaylistLikeSurface(EternalSurfaceSettings.Surface surface) {
