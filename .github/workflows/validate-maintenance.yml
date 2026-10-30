@@ -65,7 +65,7 @@ jobs:
           grep -F "if (key === 'shorts')" surface-profiles.js
           grep -F 'button?.remove()' surface-profiles.js
           echo 'PASS PC low-frequency maintenance + isolated renderer + Shorts UI safety'
-      - name: Android transactional cleanup and toolbar quarantine safety
+      - name: Android transactional cleanup and toolbar lifecycle safety
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +76,7 @@ jobs:
           job="$base/EternalWatchLaterJobService.java"
           addon="$base/EternalHistoryAddOn.java"
           toolbar="$base/EternalHistoryToolbar.java"
+          guard="$base/EternalToolbarVisibilityGuard.java"
           tracker="$base/EternalSurfaceTracker.java"
           surface="$base/EternalSurfaceSettings.java"
           filter="$base/EternalWatchedFilter.java"
@@ -152,14 +153,23 @@ jobs:
           # Conservative payload parsing remains strict.
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$payload"
 
-          # Real-device tab-crash quarantine: navigation and browse callbacks stay disabled. Only a
-          # passive toolbar ImageView render signal is restored, and E is hidden unless it can be
-          # positioned from a live top-toolbar anchor. There is no hard-coded content-Y fallback.
+          # Real-device tab-crash quarantine remains intact: navigation and browse callbacks stay
+          # disabled. The passive toolbar hook now enters the visibility guard, which forwards to
+          # EternalHistoryToolbar but makes E follow actual native-header visibility every pre-draw
+          # and hard-hides it while Morphe's cached Shorts player state is open.
           grep -F 'HOST_NAVIGATION_HOOKS_ENABLED = false' "$addon"
           grep -F 'NavigationBar.addOnNavigationButtonChangedListener(EternalSurfaceTracker::onNavigationChanged)' "$addon"
           grep -F 'installEternalToolbarHook()' "$support"
           ! grep -F 'installEternalBrowseIdHook()' <(sed -n '/internal fun registerAddOn/,/}/p' "$support")
+          grep -F 'EternalToolbarVisibilityGuard;' "$support"
           grep -F 'onToolbarImageView' "$support"
+          grep -F 'EternalHistoryToolbar.onToolbarImageView(imageView)' "$guard"
+          grep -F 'ShortsPlayerState.isOpen()' "$guard"
+          grep -F 'ViewTreeObserver.OnPreDrawListener' "$guard"
+          grep -F 'getGlobalVisibleRect' "$guard"
+          grep -F 'anchor.getWindowVisibility() != View.VISIBLE' "$guard"
+          grep -F 'control.setVisibility(View.GONE)' "$guard"
+          grep -F 'control.setVisibility(View.VISIBLE)' "$guard"
           grep -F 'isUsableToolbarAnchor' "$toolbar"
           grep -F 'control.setVisibility(View.INVISIBLE)' "$toolbar"
           grep -F 'control.setVisibility(View.GONE)' "$toolbar"
@@ -194,4 +204,4 @@ jobs:
 
           grep -F 'android.permission.BIND_JOB_SERVICE' "$support"
           grep -F 'node.setAttribute("android:exported", "false")' "$support"
-          echo 'PASS Android legacy-delete lock + transactional cleanup + toolbar quarantine safety'
+          echo 'PASS Android legacy-delete lock + transactional cleanup + header-bound E + Shorts safety'
