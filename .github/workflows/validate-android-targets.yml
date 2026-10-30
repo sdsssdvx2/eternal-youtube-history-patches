@@ -82,8 +82,10 @@ jobs:
           get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
           get_asset sdsssdvx2/eternal-youtube-history-patches patches .validation/tools/eternal.mpp
       - name: Patch recommended YouTube entirely on server
+        shell: bash
         run: |
           set -euo pipefail
+          version="$(jq -r '.youtube.version' android-update-status.json)"
           java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
             -p .validation/tools/morphe.mpp \
             -p .validation/tools/eternal.mpp -e 'Eternal YouTube History' \
@@ -91,7 +93,16 @@ jobs:
             -r .validation/out/result.json \
             .validation/input/youtube.apk
           test -s .validation/out/youtube.apk
+          test -s .validation/out/result.json
           cat .validation/out/result.json
+          jq -e --arg version "$version" '
+            .success == true
+            and .packageName == "com.google.android.youtube"
+            and .packageVersion == $version
+            and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS released Eternal actually applied to recommended YouTube $version"
       - name: Remove proprietary files
         if: always()
         run: rm -rf .validation/input .validation/out .validation/tools
