@@ -137,6 +137,11 @@ public final class EternalToolbarVisibilityGuard {
         View control = findControl(root);
         if (control == null) return;
 
+        if (!EternalHistorySettings.ENABLED.get()) {
+            control.setVisibility(View.GONE);
+            return;
+        }
+
         // Shorts has no recommendation-list presentation surface. Use Morphe's cached player-state
         // signal rather than the quarantined NavigationBar/browse callbacks.
         if (ShortsPlayerState.isOpen()) {
