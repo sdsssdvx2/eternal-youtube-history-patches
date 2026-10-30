@@ -14,7 +14,7 @@ const recoveryHtml = text('recovery.html');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.8');
+assert.equal(manifest.version, '0.10.9');
 assert.deepEqual(manifest.optional_permissions, ['history'], 'history must remain optional, never install-time required');
 assert.ok(!manifest.permissions.includes('history'), 'history must not be a permanent required permission');
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
