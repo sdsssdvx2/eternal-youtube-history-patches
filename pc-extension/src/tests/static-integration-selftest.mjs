@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.14', 'hot-path resource release must have a distinct version');
+assert.equal(manifest.version, '0.10.15', 'startup/idle resource release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -86,23 +86,24 @@ assert.doesNotMatch(content, /await chrome\.storage\.local\.get\(\{\s*directWatc
 assert.match(content, /videoWatcherAbort = new AbortController\(\)/);
 assert.match(content, /\{ passive: true, signal \}/);
 
-assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
+// v0.10.15 keeps the missed-SPA fallback O(1), halves its visible wake rate, and stops it entirely
+// while the tab is hidden. visibilitychange reconciles immediately before polling resumes.
+assert.match(spaLifecycle, /HEARTBEAT_MS = 1000/);
 assert.match(spaLifecycle, /location\.pathname/);
 assert.match(spaLifecycle, /location\.search/);
 assert.match(spaLifecycle, /document\.getElementById\('eyh-header-controls'\)/);
 assert.match(spaLifecycle, /window\.dispatchEvent\(new Event\('yt-navigate-finish'\)\)/);
-assert.match(spaLifecycle, /setInterval\(\(\) => reconcile\(false\), HEARTBEAT_MS\)/);
-assert.doesNotMatch(spaLifecycle, /MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
-  'SPA lifecycle reconciler must stay O(1) and must not scan cards or mutate settings');
+assert.match(spaLifecycle, /document\.visibilityState !== 'visible'/);
+assert.match(spaLifecycle, /function stopHeartbeat\(\)/);
+assert.match(spaLifecycle, /setTimeout\(\(\) => \{[\s\S]*?reconcile\(false\);[\s\S]*?scheduleHeartbeat\(\);[\s\S]*?\}, HEARTBEAT_MS\)/);
+assert.doesNotMatch(spaLifecycle, /setInterval|MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
+  'SPA lifecycle reconciler must stay O(1), hidden-tab idle, and must not scan cards or mutate settings');
 
 assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
 assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// v0.10.13+ keeps one visible quick-mode painter during startup. content.js may retain its legacy
-// compatibility class, but the profile controller owns the visible class and commits one storage
-// transaction per physical click. Retry ladders are coalesced instead of accumulating timers.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
@@ -113,6 +114,11 @@ assert.match(css, /data-eyh-profile-controller="1"[\s\S]*button\[data-eyh-mode\]
 assert.match(css, /button\[data-eyh-mode\]\.eyh-profile-active/);
 assert.match(stability, /quickModeSeqBySurface/);
 assert.match(stability, /pendingModeBySurface/);
+assert.match(stability, /resolvedModeBySurface/,
+  'resolved profile mode must survive until a late masthead mount can paint it');
+assert.match(stability, /pending\?\.mode \|\| resolvedModeBySurface\.get\(key\)/,
+  'a physical pending click must win while late masthead decoration replays state');
+assert.match(stability, /resolvedModeBySurface\.set\(key, effective\.mode\)/);
 assert.match(stability, /chooseCurrentSurfaceMode/);
 assert.match(stability, /persistCurrentSurfaceMode/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
@@ -260,4 +266,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.14 startup-stable + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.15 startup-pinned + hidden-tab-idle + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
