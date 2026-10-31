@@ -62,10 +62,13 @@ jobs:
           apktool_url="$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | jq -r '.assets[] | select(.name|test("^apktool_[0-9].*\\.jar$")) | .browser_download_url' | head -1)"
           test -n "$apktool_url"
           curl -fL --retry 3 "$apktool_url" -o .analysis/apktool.jar
-          java -jar .analysis/apktool.jar d -f -r -s=false .analysis/input/youtube.apk -o .analysis/apktool >/tmp/apktool-alpha.log 2>&1 || {
+          # Apktool 3 decodes sources by default. -r skips resources only; the old -s=false syntax
+          # is invalid in Apktool 3 and prevented the diagnostic from ever reaching smali output.
+          java -jar .analysis/apktool.jar d -f -r .analysis/input/youtube.apk -o .analysis/apktool >/tmp/apktool-alpha.log 2>&1 || {
             cat /tmp/apktool-alpha.log
             exit 1
           }
+          find .analysis/apktool -type f -name '*.smali' -print -quit | grep -q .
       - name: Inspect all View.setAlpha Litho candidates
         shell: bash
         run: |
@@ -89,14 +92,13 @@ jobs:
                   while e<len(lines) and not lines[e].lstrip().startswith('.end method'): e+=1
                   if s<0 or e>=len(lines): continue
                   method=lines[s:e+1]
-                  # Rank methods that resemble the historical Litho mount-properties helper.
                   score=0
                   if any(desc in x for x in method): score+=100
                   if ' static ' in (' '+lines[s]+' '): score+=10
                   if lines[s].rstrip().endswith(')V'): score+=5
                   iget_float=[]
                   for j in range(max(s,i-8), i):
-                      if re.search(r'\biget\s+v\d+,\s*v\d+,\s*L[^;]+;->[^:]+:F', lines[j]):
+                      if re.search(r'\biget\s+[vp]\d+,\s*[vp]\d+,\s*L[^;]+;->[^:]+:F', lines[j]):
                           iget_float.append((j,lines[j]))
                           score+=20
                   hits.append((score,p,s,e,i,iget_float,method))
@@ -105,10 +107,9 @@ jobs:
           print(f'TOTAL_SET_ALPHA_HITS={len(hits)}')
           for n,(score,p,s,e,i,igets,method) in enumerate(hits[:80],1):
               print(f'===== CANDIDATE {n} score={score} file={p} methodLine={s+1} hitLine={i+1} =====')
-              print(lines_header := method[0].strip())
+              print(method[0].strip())
               print('HAS_SET_CONTENT_DESCRIPTION=' + str(any(desc in x for x in method)))
               print('NEARBY_IGET_FLOAT=' + str(len(igets)))
-              # Print a tight window around the alpha call plus any method-level content-description calls.
               src=p.read_text(encoding='utf-8', errors='replace').splitlines()
               for j in range(max(s,i-16), min(e+1,i+17)):
                   print(f'{j+1:6}: {src[j]}')
