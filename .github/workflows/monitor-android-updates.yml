@@ -1,31 +1,30 @@
-name: Monitor Android update targets
+name: Monitor Android update candidates
 
 on:
   workflow_dispatch:
   schedule:
-    # The private signed-build workflow runs at :41. Publish recommended metadata after it has
-    # normally had time to finish, rather than advertising a new target before the APK exists.
     - cron: '55 */6 * * *'
   push:
     paths:
       - '.github/workflows/monitor-android-updates.yml'
 
 concurrency:
-  group: monitor-android-update-targets
+  group: monitor-android-update-candidates
   cancel-in-progress: true
 
+# This public repository can observe public Morphe/Eternal candidates, but it cannot prove that the
+# private same-signer builder actually produced the corresponding APK. Never mutate the deployed
+# status from a timing assumption. android-update-status.json is release evidence, not a wishlist.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
-      - name: Resolve validated Morphe, Eternal, YouTube, Music and MicroG-RE targets
+      - name: Resolve public non-downgrade candidates without publishing them
         shell: bash
         run: |
           set -euo pipefail
@@ -41,22 +40,6 @@ jobs:
           curl -fsSL https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/latest > .update-monitor/eternal.json
           ETERNAL_TAG="$(jq -r '.tag_name' .update-monitor/eternal.json)"
           test -n "$ETERNAL_TAG" && test "$ETERNAL_TAG" != null
-
-          # Do not advertise a just-published Morphe/Eternal target until the private builder has had
-          # at least one complete 6-hour schedule window to create and sign the matching APK. This
-          # handles the edge case where a public release appears just after the :41 private build.
-          now_epoch="$(date -u +%s)"
-          for release_json in .update-monitor/morphe.json .update-monitor/eternal.json; do
-            published="$(jq -r '.published_at // .created_at // empty' "$release_json")"
-            test -n "$published"
-            published_epoch="$(date -u -d "$published" +%s)"
-            age="$((now_epoch - published_epoch))"
-            if [ "$age" -lt 21600 ]; then
-              echo "Newest public target is only ${age}s old; keep the previous recommended status until the next signed-build window."
-              exit 0
-            fi
-          done
-
           curl -fsSL "https://raw.githubusercontent.com/sdsssdvx2/eternal-youtube-history-patches/${ETERNAL_TAG}/patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt" > .update-monitor/eternal-youtube.kt
 
           python3 - <<'PY'
@@ -73,12 +56,15 @@ jobs:
                       continue
                   mm = re.search(r'minSdk\s*=\s*(\d+)', block)
                   result.append({
-                      "version": vm.group(1),
-                      "min_sdk": int(mm.group(1)) if mm else None,
+                      'version': vm.group(1),
+                      'min_sdk': int(mm.group(1)) if mm else None,
                   })
               if not result:
                   raise RuntimeError(f'No stable target found in {path}')
               return result
+
+          def version_key(version):
+              return tuple(int(part) for part in version.split('.'))
 
           def eternal_versions(path):
               text = Path(path).read_text()
@@ -87,22 +73,26 @@ jobs:
                   raise RuntimeError('No Eternal YouTube compatibility targets found')
               return set(versions)
 
+          deployed = json.loads(Path('android-update-status.json').read_text())
           morphe = json.loads(Path('.update-monitor/morphe.json').read_text())
           microg = json.loads(Path('.update-monitor/microg.json').read_text())
           eternal = json.loads(Path('.update-monitor/eternal.json').read_text())
 
+          current_yt = deployed['youtube']['version']
+          current_music = deployed['youtube_music']['version']
           yt_supported = eternal_versions('.update-monitor/eternal-youtube.kt')
           youtube = next(
               (target for target in stable_targets('.update-monitor/youtube.kt')
-               if target['version'] in yt_supported),
+               if target['version'] in yt_supported
+               and version_key(target['version']) >= version_key(current_yt)),
               None,
           )
-          if youtube is None:
-              raise RuntimeError(
-                  f"No stable Morphe YouTube target is compatible with Eternal {eternal['tag_name']}"
-              )
+          music = next(
+              (target for target in stable_targets('.update-monitor/music.kt')
+               if version_key(target['version']) >= version_key(current_music)),
+              None,
+          )
 
-          music = stable_targets('.update-monitor/music.kt')[0]
           mg_tag = microg['tag_name']
           arm64 = next(
               (a for a in microg.get('assets', [])
@@ -110,35 +100,38 @@ jobs:
               None,
           )
 
-          state = {
-              "schema": 2,
-              "morphe_patches": morphe['tag_name'],
-              "eternal_patches": eternal['tag_name'],
-              "youtube": youtube,
-              "youtube_music": music,
-              "microg_re": {
-                  "version": mg_tag,
-                  "arm64_asset": arm64['browser_download_url'] if arm64 else None,
-                  "arm64_sha256": (arm64.get('digest') or '').removeprefix('sha256:') if arm64 else None,
+          candidate = {
+              'schema': 1,
+              'evidence': 'public-candidate-only',
+              'publishable': False,
+              'reason': 'A matching private same-signer APK release has not been proven by this public workflow.',
+              'deployed': {
+                  'morphe_patches': deployed.get('morphe_patches'),
+                  'eternal_patches': deployed.get('eternal_patches'),
+                  'youtube': deployed.get('youtube'),
+                  'youtube_music': deployed.get('youtube_music'),
+              },
+              'candidate': {
+                  'morphe_patches': morphe['tag_name'],
+                  'eternal_patches': eternal['tag_name'],
+                  'youtube': youtube,
+                  'youtube_music': music,
+                  'microg_re': {
+                      'version': mg_tag,
+                      'arm64_asset': arm64['browser_download_url'] if arm64 else None,
+                      'arm64_sha256': (arm64.get('digest') or '').removeprefix('sha256:') if arm64 else None,
+                  },
               },
           }
-          Path('android-update-status.json').write_text(
-              json.dumps(state, ensure_ascii=False, indent=2) + '\n'
+          print(json.dumps(candidate, ensure_ascii=False, indent=2))
+          Path('.update-monitor/candidate.json').write_text(
+              json.dumps(candidate, ensure_ascii=False, indent=2) + '\n'
           )
-          print(json.dumps(state, indent=2))
           PY
 
-      - name: Commit state only when public update targets changed
+      - name: Prove deployed status was not mutated
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .update-monitor
-          if git diff --quiet -- android-update-status.json && git ls-files --error-unmatch android-update-status.json >/dev/null 2>&1; then
-            echo 'No update target change.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add android-update-status.json
-          git commit -m 'chore: update Android target status'
-          git push
+          git diff --exit-code -- android-update-status.json
+          echo 'PASS public monitor is read-only; deployed status requires signed-release evidence.'

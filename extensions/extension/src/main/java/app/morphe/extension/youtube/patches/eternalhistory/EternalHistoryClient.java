@@ -48,6 +48,7 @@ final class EternalHistoryClient {
         return t;
     });
     private static final AtomicBoolean initialized = new AtomicBoolean();
+    private static final AtomicBoolean feedCacheStarted = new AtomicBoolean();
     private static final AtomicBoolean cacheLoadScheduled = new AtomicBoolean();
     private static final ConcurrentHashMap<String, Float> WATCHED_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, String> TITLE_CACHE = new ConcurrentHashMap<>();
@@ -73,7 +74,9 @@ final class EternalHistoryClient {
         // The large permanent-history cache exists only to support watched-card visuals. Do not
         // download/touch tens of thousands of historical rows when that feature is disabled.
         if (EternalHistorySettings.isFeedVisualEnabled()) {
-            scheduleCacheLoadAndMaintenance(true);
+            if (feedCacheStarted.compareAndSet(false, true)) {
+                scheduleCacheLoadAndMaintenance(true);
+            }
         } else {
             IO.execute(() -> {
                 try {
@@ -89,7 +92,11 @@ final class EternalHistoryClient {
     static void ensureFeedCacheStarted() {
         if (!EternalHistorySettings.isFeedVisualEnabled()) return;
         initialized.compareAndSet(false, true);
-        if (WATCHED_CACHE.isEmpty()) {
+        // An empty cache is a legitimate steady state for a new/empty ledger. Using emptiness as
+        // an initialization signal made every later Litho card eligible to re-schedule a DB load
+        // plus forced cloud sync once the previous task completed. Start this maintenance once per
+        // process instead; normal video-change maintenance still performs periodic sync thereafter.
+        if (feedCacheStarted.compareAndSet(false, true)) {
             scheduleCacheLoadAndMaintenance(true);
         }
     }

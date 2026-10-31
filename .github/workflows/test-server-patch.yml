@@ -1,9 +1,10 @@
-name: Validate server-side app patching
+name: Validate deployed server-side app patching
 
 on:
   workflow_dispatch:
   push:
     paths:
+      - 'android-update-status.json'
       - '.github/workflows/test-server-patch.yml'
 
 permissions:
@@ -12,7 +13,9 @@ permissions:
 jobs:
   youtube:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    env:
+      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
     steps:
       - uses: actions/checkout@v7
 
@@ -35,58 +38,62 @@ jobs:
       - name: Install acquisition dependencies
         run: python -m pip install --disable-pip-version-check requests
 
-      - name: Acquire validated clean YouTube APK
+      - name: Acquire exact trusted deployed YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.server-test/morphe-builds
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .server-test/input
-          python - <<'PY'
+          version="$(jq -r '.youtube.version' android-update-status.json)"
+          VERSION="$version" python - <<'PY'
+          import os, zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
-          app = AppConfig(
-              key='youtube', name='YouTube', package='com.google.android.youtube',
-              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
-              formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
-          r = ApkMirrorResolver(min_request_interval=1.2, max_release_attempts=3, max_variant_attempts=8)
-          dest = Path('.server-test/input/youtube.apk')
-          expected = '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
-          errors=[]
-          for url, referer in r.iter_candidates(app, '21.16.256'):
+          version=os.environ['VERSION']; trusted=os.environ['YT_TRUSTED_SHA256'].lower()
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          dest=Path('.server-test/input/youtube.apk'); errors=[]
+          for index,(url,referer) in enumerate(resolver.iter_candidates(app,version),start=1):
               try:
-                  result=r.download_candidate(url, referer, dest)
-                  print('candidate', result.size, result.sha256)
-                  if result.sha256 != expected:
-                      raise RuntimeError('Candidate is not the validated universal APK')
-                  print('validated universal APK selected')
-                  break
-              except Exception as e:
-                  errors.append(str(e))
-                  dest.unlink(missing_ok=True)
-          else:
-              raise RuntimeError('base acquisition failed: ' + ' | '.join(errors[-4:]))
+                  result=resolver.download_candidate(url,referer,dest)
+                  with zipfile.ZipFile(dest) as apk: names=set(apk.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if result.sha256.lower() != trusted: raise RuntimeError('candidate hash does not match trusted base')
+                  print('validated deployed base',version,result.size,result.sha256,referer); break
+              except Exception as exc:
+                  errors.append(str(exc)); dest.unlink(missing_ok=True)
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errors[-6:]))
           PY
+          echo "$YT_TRUSTED_SHA256  .server-test/input/youtube.apk" | sha256sum -c -
 
-      - name: Resolve and download Morphe Desktop and patch bundles
+      - name: Resolve exact deployed Morphe and Eternal bundles
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .server-test/tools
-          get_asset() {
-            local repo="$1" regex="$2" out="$3"
-            url="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" | jq -r --arg re "$regex" '.assets[] | select(.name|test($re)) | .browser_download_url' | head -1)"
-            test -n "$url" && test "$url" != null
-            curl -fL --retry 3 "$url" -o "$out"
-          }
-          get_asset MorpheApp/morphe-desktop '^morphe-desktop-.*-all\.jar$' .server-test/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches '^patches-.*\.mpp$' .server-test/tools/morphe.mpp
-          get_asset sdsssdvx2/eternal-youtube-history-patches '^patches-.*\.mpp$' .server-test/tools/eternal.mpp
-          ls -lh .server-test/tools
+          morphe_tag="$(jq -r '.morphe_patches' android-update-status.json)"
+          eternal_tag="$(jq -r '.eternal_patches' android-update-status.json)"
+          desktop="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${morphe_tag}")"
+          eternal="$(curl -fsSL "https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/tags/${eternal_tag}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$morphe" | head -1)"
+          eternal_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$eternal" | head -1)"
+          for url in "$desktop_url" "$morphe_url" "$eternal_url"; do test -n "$url" && test "$url" != null; done
+          curl -fL --retry 3 "$desktop_url" -o .server-test/tools/morphe-desktop.jar
+          curl -fL --retry 3 "$morphe_url" -o .server-test/tools/morphe.mpp
+          curl -fL --retry 3 "$eternal_url" -o .server-test/tools/eternal.mpp
+          echo "Reproducing deployed pair: Morphe $morphe_tag / Eternal $eternal_tag"
 
-      - name: Patch on GitHub runner with both sources
+      - name: Patch deployed YouTube combination and require Eternal
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .server-test/out
-          # This validates the currently released Eternal source against the exact clean base the phone uses.
-          # Validation marker: Eternal v1.2.2 accessibility-bound dimming.
+          version="$(jq -r '.youtube.version' android-update-status.json)"
           java -Xmx5g -jar .server-test/tools/morphe-desktop.jar patch \
             -p .server-test/tools/morphe.mpp \
             -p .server-test/tools/eternal.mpp -e 'Eternal YouTube History' \
@@ -94,16 +101,17 @@ jobs:
             -r .server-test/out/result.json \
             .server-test/input/youtube.apk
           test -s .server-test/out/youtube-morphe-eternal.apk
-          python - <<'PY'
-          import json, pathlib
-          p=pathlib.Path('.server-test/out/result.json')
-          data=json.loads(p.read_text())
-          print('package:', data.get('packageName') or data.get('package'))
-          print('version:', data.get('versionName') or data.get('version'))
-          print('success:', data.get('success'))
-          print('output bytes:', pathlib.Path('.server-test/out/youtube-morphe-eternal.apk').stat().st_size)
-          PY
+          test -s .server-test/out/result.json
+          cat .server-test/out/result.json
+          jq -e --arg version "$version" '
+            .success == true
+            and .packageName == "com.google.android.youtube"
+            and .packageVersion == $version
+            and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
+            and ((.failedPatches // []) | length == 0)
+          ' .server-test/out/result.json >/dev/null
+          echo "PASS deployed Eternal combination reproduces on trusted YouTube $version"
 
-      - name: Remove proprietary APKs and ephemeral signing material
+      - name: Remove proprietary APKs and ephemeral tools
         if: always()
         run: rm -rf .server-test/input .server-test/out .server-test/tools

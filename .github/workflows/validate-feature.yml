@@ -6,8 +6,13 @@ on:
       - 'pc-extension/**'
       - 'patches/**'
       - 'extensions/**'
+      - 'android-update-status.json'
       - '.github/workflows/validate-feature.yml'
   workflow_dispatch:
+
+concurrency:
+  group: validate-feature-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -51,7 +56,64 @@ jobs:
           console.log('PASS PC manifest + one resident renderer + safe coordinators');
           NODE
 
+  android-targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      morphe_tag: ${{ steps.resolve.outputs.morphe_tag }}
+      youtube_version: ${{ steps.resolve.outputs.youtube_version }}
+      music_version: ${{ steps.resolve.outputs.music_version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve latest stable non-downgrade Android candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .validation/targets
+          curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .validation/targets/release.json
+          tag="$(jq -r '.tag_name' .validation/targets/release.json)"
+          test -n "$tag" && test "$tag" != null
+          curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${tag}/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt" > .validation/targets/youtube.kt
+          curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${tag}/patches/src/main/kotlin/app/morphe/patches/music/shared/Constants.kt" > .validation/targets/music.kt
+          MORPHE_TAG="$tag" python3 - <<'PY' > .validation/targets/outputs
+          import json, os, re
+          from pathlib import Path
+
+          def stable(path):
+              text=Path(path).read_text()
+              out=[]
+              for match in re.finditer(r'AppTarget\((.*?)\)', text, re.S):
+                  block=match.group(1)
+                  version=re.search(r'version\s*=\s*"([^"]+)"', block)
+                  if version and not re.search(r'isExperimental\s*=\s*true', block):
+                      out.append(version.group(1))
+              if not out:
+                  raise RuntimeError(f'no stable targets in {path}')
+              return out
+
+          def key(v): return tuple(int(x) for x in v.split('.'))
+
+          status=json.loads(Path('android-update-status.json').read_text())
+          current_yt=status['youtube']['version']
+          current_music=status['youtube_music']['version']
+          eternal=Path('patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt').read_text()
+          eternal_versions=set(re.findall(r'AppTarget\(\s*version\s*=\s*"([^"]+)"', eternal, re.S))
+          yt_candidates=[v for v in stable('.validation/targets/youtube.kt') if v in eternal_versions and key(v) >= key(current_yt)]
+          music_candidates=[v for v in stable('.validation/targets/music.kt') if key(v) >= key(current_music)]
+          if not yt_candidates:
+              raise RuntimeError(f'no non-downgrade common YouTube target above deployed {current_yt}')
+          if not music_candidates:
+              raise RuntimeError(f'no non-downgrade Music target above deployed {current_music}')
+          print('morphe_tag='+os.environ['MORPHE_TAG'])
+          print('youtube_version='+yt_candidates[0])
+          print('music_version='+music_candidates[0])
+          PY
+          cat .validation/targets/outputs
+          cat .validation/targets/outputs >> "$GITHUB_OUTPUT"
+
   android-compile:
+    needs: android-targets
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -59,11 +121,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: eternal-youtube-history-patches
-      - name: Checkout official Morphe patches
+      - name: Checkout official Morphe stable patches
         uses: actions/checkout@v7
         with:
           repository: MorpheApp/morphe-patches
-          ref: dev
+          ref: ${{ needs.android-targets.outputs.morphe_tag }}
           path: morphe-patches
       - name: Checkout Morphe patcher
         uses: actions/checkout@v7
@@ -95,7 +157,7 @@ jobs:
           ./gradlew :extensions:extension:compileReleaseJavaWithJavac \
                     :patches:compileKotlin \
                     --no-daemon --stacktrace
-      - name: Cross-version structural smoke assertions
+      - name: Cross-version structural and hot-path smoke assertions
         working-directory: eternal-youtube-history-patches
         shell: bash
         run: |
@@ -106,24 +168,64 @@ jobs:
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$base/EternalWatchLaterPayload.java"
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$base/EternalWatchLaterSafeCleaner.java"
           grep -F 'declareWatchLaterJobService()' patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
-          echo 'PASS Android compile + conservative parser/safe-cleaner structure'
+
+          client="$base/EternalHistoryClient.java"
+          filter="$base/EternalWatchedFilter.java"
+          grep -F 'private static final AtomicBoolean feedCacheStarted = new AtomicBoolean();' "$client"
+          grep -F 'if (feedCacheStarted.compareAndSet(false, true))' "$client"
+          CLIENT="$client" FILTER="$filter" python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+
+          client = Path(os.environ['CLIENT']).read_text()
+          method = re.search(r'static void ensureFeedCacheStarted\(\) \{(.*?)\n    \}', client, re.S)
+          if not method:
+              raise SystemExit('ensureFeedCacheStarted method not found')
+          if 'WATCHED_CACHE.isEmpty()' in method.group(1):
+              raise SystemExit('empty watched cache must not be used as a feed-cache initialization signal')
+          if method.group(1).count('feedCacheStarted.compareAndSet(false, true)') != 1:
+              raise SystemExit('feed cache startup must be guarded exactly once in ensureFeedCacheStarted')
+
+          watched_filter = Path(os.environ['FILTER']).read_text()
+          count = watched_filter.count('toLowerCase(Locale.ROOT)')
+          if count != 1:
+              raise SystemExit(f'Litho path must be normalized exactly once per decision; found {count} source call sites')
+          for helper in ('looksLikeVideoContext', 'looksLikeWholeVideoCard', 'looksLikeThumbnailComponent'):
+              block = re.search(r'private static boolean ' + helper + r'\(.*?\) \{(.*?)\n    \}', watched_filter, re.S)
+              if not block:
+                  raise SystemExit(f'{helper} not found')
+              if 'toLowerCase' in block.group(1):
+                  raise SystemExit(f'{helper} reintroduced per-card path normalization')
+          print('PASS Android feed hot-path startup + single-normalization invariants')
+          PY
+
+          TARGET='${{ needs.android-targets.outputs.youtube_version }}' python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          version=os.environ['TARGET']
+          text=Path('patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt').read_text()
+          block=text[text.index('// MORPHE_COMPAT_START'):text.index('// MORPHE_COMPAT_END')]
+          count=len(re.findall(r'version\s*=\s*"'+re.escape(version)+r'"', block))
+          if count != 1:
+              raise SystemExit(f'next YouTube target {version} must occur exactly once; found {count}')
+          print('Next target present exactly once:', version)
+          PY
+          echo 'PASS Android compile + conservative parser/safe-cleaner/current-stable target structure'
 
   android-patch-smoke:
-    needs: android-compile
+    needs: [android-targets, android-compile]
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
     steps:
       - name: Checkout Eternal feature branch
         uses: actions/checkout@v7
         with:
           path: eternal-youtube-history-patches
-      - name: Checkout official Morphe patches source
+      - name: Checkout official Morphe stable patches source
         uses: actions/checkout@v7
         with:
           repository: MorpheApp/morphe-patches
-          ref: dev
+          ref: ${{ needs.android-targets.outputs.morphe_tag }}
           path: morphe-patches
       - name: Checkout Morphe patcher
         uses: actions/checkout@v7
@@ -172,89 +274,56 @@ jobs:
             printf '  %s\n' "${eternal_mpps[@]:-<none>}" >&2
             exit 1
           fi
-          eternal_mpp="${eternal_mpps[0]}"
-          test -s "$eternal_mpp"
-          cp "$eternal_mpp" ../.validation/tools/eternal-feature.mpp
-          echo "Feature runtime MPP: $eternal_mpp"
-      - name: Acquire exact trusted standalone YouTube APK
+          cp "${eternal_mpps[0]}" ../.validation/tools/eternal-feature.mpp
+      - name: Acquire standalone next-stable YouTube APK and report candidate SHA
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
+          YOUTUBE_VERSION: ${{ needs.android-targets.outputs.youtube_version }}
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check requests >/dev/null
-          version="$(jq -r '.youtube.version' eternal-youtube-history-patches/android-update-status.json)"
-          test "$version" = '21.20.405'
           mkdir -p .validation/input
-          VERSION="$version" python - <<'PY'
-          import os
-          import zipfile
+          python - <<'PY'
+          import os, zipfile
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
-
-          version = os.environ['VERSION']
-          trusted = os.environ['YT_TRUSTED_SHA256'].strip().lower()
-          app = AppConfig(
-              key='youtube', name='YouTube', package='com.google.android.youtube',
-              apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
-              formats=('apk',), prefer=('universal',), target_abi='arm64-v8a')
-          resolver = ApkMirrorResolver(
-              min_request_interval=1.2,
-              max_release_attempts=4,
-              max_variant_attempts=12)
-          out = Path('.validation/input/youtube.apk')
-          errors = []
-
-          def validate_standalone(path: Path) -> None:
-              with zipfile.ZipFile(path) as apk:
-                  names = set(apk.namelist())
-              required = {'AndroidManifest.xml', 'resources.arsc'}
-              missing = required - names
-              if missing:
-                  raise RuntimeError('not a standalone APK; missing ' + ','.join(sorted(missing)))
-              if not any(name == 'classes.dex' or (name.startswith('classes') and name.endswith('.dex')) for name in names):
-                  raise RuntimeError('not a standalone APK; classes.dex missing')
-              if any(name.lower().endswith(('.apk', '.apkm', '.xapk')) for name in names):
-                  raise RuntimeError('bundle/container payload detected')
-
-          for index, (url, referer) in enumerate(resolver.iter_candidates(app, version), start=1):
+          version=os.environ['YOUTUBE_VERSION']
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          out=Path('.validation/input/youtube.apk'); errors=[]
+          for index,(url,referer) in enumerate(resolver.iter_candidates(app,version),start=1):
               try:
-                  got = resolver.download_candidate(url, referer, out)
-                  sha = got.sha256.lower()
-                  print(f'candidate {index}: bytes={got.size} sha256={sha}')
-                  validate_standalone(out)
-                  if sha != trusted:
-                      raise RuntimeError(f'standalone candidate hash does not match trusted base: {sha}')
-                  print('selected exact trusted standalone candidate', referer)
+                  got=resolver.download_candidate(url,referer,out)
+                  with zipfile.ZipFile(out) as apk: names=set(apk.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if any(n.lower().endswith(('.apk','.apkm','.xapk')) for n in names):
+                      raise RuntimeError('bundle/container payload')
+                  print(f'NEXT_YOUTUBE_BASE version={version} bytes={got.size} sha256={got.sha256} referer={referer}')
                   break
               except Exception as exc:
-                  errors.append(f'candidate {index}: {exc}')
-                  out.unlink(missing_ok=True)
-          else:
-              raise RuntimeError('trusted base acquisition failed: ' + ' | '.join(errors[-8:]))
+                  errors.append(f'candidate {index}: {exc}'); out.unlink(missing_ok=True)
+          else: raise RuntimeError('candidate acquisition failed: '+' | '.join(errors[-8:]))
           PY
-          echo "$YT_TRUSTED_SHA256  .validation/input/youtube.apk" | sha256sum -c -
       - name: Resolve Morphe Desktop and stable Morphe patches
         env:
           GH_TOKEN: ${{ github.token }}
+          MORPHE_TAG: ${{ needs.android-targets.outputs.morphe_tag }}
         shell: bash
         run: |
           set -euo pipefail
-          get_asset(){
-            repo="$1" kind="$2" out="$3"
-            release="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${repo}/releases/latest")"
-            case "$kind" in
-              desktop) api_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$release" | head -1)" ;;
-              patches) api_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .url' <<<"$release" | head -1)" ;;
-              *) exit 2 ;;
-            esac
-            test -n "$api_url" && test "$api_url" != null
-            curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api_url" -o "$out"
-          }
-          get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
-      - name: Apply feature Eternal patch to supported YouTube APK
+          mkdir -p .validation/tools
+          desktop="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${MORPHE_TAG}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .url' <<<"$morphe" | head -1)"
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$desktop_url" -o .validation/tools/morphe-desktop.jar
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$morphe_url" -o .validation/tools/morphe.mpp
+      - name: Apply feature Eternal patch to next stable YouTube APK
+        env:
+          YOUTUBE_VERSION: ${{ needs.android-targets.outputs.youtube_version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -268,7 +337,103 @@ jobs:
           test -s .validation/out/youtube.apk
           test -s .validation/out/result.json
           cat .validation/out/result.json
-          echo 'PASS feature patch application smoke test'
+          jq -e --arg version "$YOUTUBE_VERSION" '
+            .success == true
+            and .packageName == "com.google.android.youtube"
+            and .packageVersion == $version
+            and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS Eternal YouTube History actually applied to next stable YouTube $YOUTUBE_VERSION"
+      - name: Remove proprietary APKs and ephemeral tools
+        if: always()
+        run: rm -rf .validation/input .validation/out .validation/tools
+
+  android-music-patch-smoke:
+    needs: android-targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: krishhari2105/morphe-builds
+          path: .validation/morphe-builds
+          fetch-depth: 1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Acquire standalone next-stable YouTube Music APK and report candidate SHA
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
+          MUSIC_VERSION: ${{ needs.android-targets.outputs.music_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check requests >/dev/null
+          mkdir -p .validation/input
+          python - <<'PY'
+          import os, zipfile
+          from pathlib import Path
+          from morphe_builder.apkmirror import ApkMirrorResolver
+          from morphe_builder.models import AppConfig
+          version=os.environ['MUSIC_VERSION']
+          app=AppConfig(key='music',name='YouTube Music',package='com.google.android.apps.youtube.music',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube-music/',formats=('apk',),prefer=('universal','arm64-v8a'),target_abi='arm64-v8a')
+          resolver=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          out=Path('.validation/input/music.apk'); errors=[]
+          for index,(url,referer) in enumerate(resolver.iter_candidates(app,version),start=1):
+              try:
+                  got=resolver.download_candidate(url,referer,out)
+                  with zipfile.ZipFile(out) as apk: names=set(apk.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if any(n.lower().endswith(('.apk','.apkm','.xapk')) for n in names):
+                      raise RuntimeError('bundle/container payload')
+                  print(f'NEXT_MUSIC_BASE version={version} bytes={got.size} sha256={got.sha256} referer={referer}')
+                  break
+              except Exception as exc:
+                  errors.append(f'candidate {index}: {exc}'); out.unlink(missing_ok=True)
+          else: raise RuntimeError('candidate acquisition failed: '+' | '.join(errors[-8:]))
+          PY
+      - name: Resolve Morphe Desktop and stable patches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MORPHE_TAG: ${{ needs.android-targets.outputs.morphe_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .validation/tools .validation/out
+          desktop="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${MORPHE_TAG}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .url' <<<"$morphe" | head -1)"
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$desktop_url" -o .validation/tools/morphe-desktop.jar
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$morphe_url" -o .validation/tools/morphe.mpp
+      - name: Patch next-stable YouTube Music entirely on server
+        env:
+          MUSIC_VERSION: ${{ needs.android-targets.outputs.music_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
+            -p .validation/tools/morphe.mpp \
+            -o .validation/out/music.apk \
+            -r .validation/out/result.json \
+            .validation/input/music.apk
+          test -s .validation/out/music.apk
+          test -s .validation/out/result.json
+          cat .validation/out/result.json
+          jq -e --arg version "$MUSIC_VERSION" '
+            .success == true
+            and .packageName == "com.google.android.apps.youtube.music"
+            and .packageVersion == $version
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS Morphe patched next stable YouTube Music $MUSIC_VERSION"
       - name: Remove proprietary APKs and ephemeral tools
         if: always()
         run: rm -rf .validation/input .validation/out .validation/tools

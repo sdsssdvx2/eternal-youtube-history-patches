@@ -1,4 +1,4 @@
-name: Validate Android update targets on server
+name: Validate deployed Android update targets
 
 on:
   workflow_dispatch:
@@ -14,6 +14,8 @@ jobs:
   youtube:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -28,7 +30,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire patchable clean YouTube base
+      - name: Acquire exact deployed YouTube base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -42,48 +44,43 @@ jobs:
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
-          version=os.environ['VERSION']
-          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal','arm64-v8a'),target_abi='arm64-v8a')
-          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
-          out=Path('.validation/input/youtube.apk')
-          errs=[]
+          version=os.environ['VERSION']; trusted=os.environ['YT_TRUSTED_SHA256'].lower()
+          app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          out=Path('.validation/input/youtube.apk'); errs=[]
           for url,ref in r.iter_candidates(app,version):
               try:
                   got=r.download_candidate(url,ref,out)
-                  with zipfile.ZipFile(out) as z:
-                      names=set(z.namelist())
-                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
-                      raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
-                  print('selected standalone candidate',got.size,got.sha256,ref)
-                  break
+                  with zipfile.ZipFile(out) as z: names=set(z.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if got.sha256.lower() != trusted: raise RuntimeError('SHA-256 mismatch')
+                  print('selected exact deployed YouTube base',got.size,got.sha256,ref); break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
-          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-6:]))
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-8:]))
           PY
-      - name: Resolve Morphe Desktop and both patch sources
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Resolve recorded deployed patch bundles
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
-          get_asset(){
-            repo="$1" kind="$2" out="$3"
-            release="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${repo}/releases/latest")"
-            case "$kind" in
-              desktop) api_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$release" | head -1)" ;;
-              patches) api_url="$(jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .url' <<<"$release" | head -1)" ;;
-              *) exit 2 ;;
-            esac
-            test -n "$api_url" && test "$api_url" != null
-            curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api_url" -o "$out"
-          }
-          get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
-          get_asset sdsssdvx2/eternal-youtube-history-patches patches .validation/tools/eternal.mpp
-      - name: Patch recommended YouTube entirely on server
+          morphe_tag="$(jq -r '.morphe_patches' android-update-status.json)"
+          eternal_tag="$(jq -r '.eternal_patches' android-update-status.json)"
+          desktop="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${morphe_tag}")"
+          eternal="$(curl -fsSL "https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/tags/${eternal_tag}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$morphe" | head -1)"
+          eternal_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$eternal" | head -1)"
+          curl -fL --retry 3 "$desktop_url" -o .validation/tools/morphe-desktop.jar
+          curl -fL --retry 3 "$morphe_url" -o .validation/tools/morphe.mpp
+          curl -fL --retry 3 "$eternal_url" -o .validation/tools/eternal.mpp
+      - name: Reproduce deployed YouTube entirely on server
+        shell: bash
         run: |
           set -euo pipefail
+          version="$(jq -r '.youtube.version' android-update-status.json)"
           java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
             -p .validation/tools/morphe.mpp \
             -p .validation/tools/eternal.mpp -e 'Eternal YouTube History' \
@@ -91,7 +88,16 @@ jobs:
             -r .validation/out/result.json \
             .validation/input/youtube.apk
           test -s .validation/out/youtube.apk
+          test -s .validation/out/result.json
           cat .validation/out/result.json
+          jq -e --arg version "$version" '
+            .success == true
+            and .packageName == "com.google.android.youtube"
+            and .packageVersion == $version
+            and ((.appliedPatches // []) | index("Eternal YouTube History") != null)
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS deployed YouTube target reproduces with recorded Morphe/Eternal tags"
       - name: Remove proprietary files
         if: always()
         run: rm -rf .validation/input .validation/out .validation/tools
@@ -99,6 +105,8 @@ jobs:
   youtube-music:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      MUSIC_TRUSTED_SHA256: 5c4add71134d46818c855959e1c7029518c68be9e56ef172119626539d32c852
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -113,7 +121,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire patchable clean YouTube Music base
+      - name: Acquire exact deployed YouTube Music base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -127,54 +135,54 @@ jobs:
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
-          version=os.environ['VERSION']
-          app=AppConfig(key='yt-music',name='YouTube Music',package='com.google.android.apps.youtube.music',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube-music/',formats=('apk',),prefer=('arm64-v8a','universal'),target_abi='arm64-v8a')
-          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
-          out=Path('.validation/input/ytmusic.apk')
-          errs=[]
+          version=os.environ['VERSION']; trusted=os.environ['MUSIC_TRUSTED_SHA256'].lower()
+          app=AppConfig(key='music',name='YouTube Music',package='com.google.android.apps.youtube.music',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube-music/',formats=('apk',),prefer=('universal','arm64-v8a'),target_abi='arm64-v8a')
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          out=Path('.validation/input/music.apk'); errs=[]
           for url,ref in r.iter_candidates(app,version):
               try:
                   got=r.download_candidate(url,ref,out)
-                  with zipfile.ZipFile(out) as z:
-                      names=set(z.namelist())
-                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
-                      raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
-                  print('selected standalone candidate',got.size,got.sha256,ref)
-                  break
+                  with zipfile.ZipFile(out) as z: names=set(z.namelist())
+                  if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names or not any(n == 'classes.dex' or (n.startswith('classes') and n.endswith('.dex')) for n in names):
+                      raise RuntimeError('not standalone APK')
+                  if got.sha256.lower() != trusted: raise RuntimeError('SHA-256 mismatch')
+                  print('selected exact deployed Music base',got.size,got.sha256,ref); break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
-          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-6:]))
+          else: raise RuntimeError('base acquisition failed: '+' | '.join(errs[-8:]))
           PY
-      - name: Resolve Morphe Desktop and stable patches
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Resolve recorded deployed Morphe bundle
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .validation/tools .validation/out
-          get_asset(){
-            repo="$1" kind="$2" out="$3"
-            release="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${repo}/releases/latest")"
-            case "$kind" in
-              desktop) api_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .url' <<<"$release" | head -1)" ;;
-              patches) api_url="$(jq -r '.assets[] | select(.name | startswith("patches-") and endswith(".mpp")) | .url' <<<"$release" | head -1)" ;;
-              *) exit 2 ;;
-            esac
-            test -n "$api_url" && test "$api_url" != null
-            curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api_url" -o "$out"
-          }
-          get_asset MorpheApp/morphe-desktop desktop .validation/tools/morphe-desktop.jar
-          get_asset MorpheApp/morphe-patches patches .validation/tools/morphe.mpp
-      - name: Patch recommended YouTube Music entirely on server
+          morphe_tag="$(jq -r '.morphe_patches' android-update-status.json)"
+          desktop="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          morphe="$(curl -fsSL "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${morphe_tag}")"
+          desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' <<<"$desktop" | head -1)"
+          morphe_url="$(jq -r '.assets[] | select((.name | startswith("patches-")) and (.name | endswith(".mpp")) and ((.name | contains("-javadoc")) | not) and ((.name | contains("-sources")) | not)) | .browser_download_url' <<<"$morphe" | head -1)"
+          curl -fL --retry 3 "$desktop_url" -o .validation/tools/morphe-desktop.jar
+          curl -fL --retry 3 "$morphe_url" -o .validation/tools/morphe.mpp
+      - name: Reproduce deployed YouTube Music entirely on server
+        shell: bash
         run: |
           set -euo pipefail
+          version="$(jq -r '.youtube_music.version' android-update-status.json)"
           java -Xmx5g -jar .validation/tools/morphe-desktop.jar patch \
             -p .validation/tools/morphe.mpp \
-            -o .validation/out/ytmusic.apk \
+            -o .validation/out/music.apk \
             -r .validation/out/result.json \
-            .validation/input/ytmusic.apk
-          test -s .validation/out/ytmusic.apk
+            .validation/input/music.apk
+          test -s .validation/out/music.apk
+          test -s .validation/out/result.json
           cat .validation/out/result.json
+          jq -e --arg version "$version" '
+            .success == true
+            and .packageName == "com.google.android.apps.youtube.music"
+            and .packageVersion == $version
+            and ((.failedPatches // []) | length == 0)
+          ' .validation/out/result.json >/dev/null
+          echo "PASS deployed Music target reproduces with recorded Morphe tag"
       - name: Remove proprietary files
         if: always()
         run: rm -rf .validation/input .validation/out .validation/tools
