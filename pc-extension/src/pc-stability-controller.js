@@ -8,6 +8,7 @@
   let decorationTimers = [];
   const quickModeSeqBySurface = new Map();
   const pendingModeBySurface = new Map();
+  const resolvedProfileBySurface = new Map();
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -55,6 +56,14 @@
       sharedThreshold: clamp(profile.sharedThreshold),
       dimThreshold: clamp(profile.dimThreshold),
       hideThreshold: clamp(profile.hideThreshold)
+    };
+  }
+
+  function profileForMode(profile, mode) {
+    return {
+      ...profile,
+      dimEnabled: mode === 'dim',
+      hideEnabled: mode === 'hide'
     };
   }
 
@@ -169,11 +178,15 @@
 
     const state = await readProfileState(key);
     if (generation !== applyGeneration || key !== surfaceKey()) return;
+    resolvedProfileBySurface.set(key, state.profile);
 
     const pending = pendingModeBySurface.get(key);
     if (pending) {
-      paintQuickMode(pending.mode);
-      applyRendererPresentation(pending.mode, null);
+      const pendingProfile = profileForMode(state.profile, pending.mode);
+      resolvedProfileBySurface.set(key, pendingProfile);
+      const pendingPresentation = effectivePresentation(pendingProfile);
+      paintQuickMode(pendingPresentation.mode);
+      applyRendererPresentation(pendingPresentation.mode, pendingPresentation.threshold);
       scheduleHeaderDecoration();
       return;
     }
@@ -189,13 +202,10 @@
     const state = await readProfileState(key);
     if (quickModeSeqBySurface.get(key) !== seq) return;
 
-    const profile = {
-      ...state.profile,
-      dimEnabled: mode === 'dim',
-      hideEnabled: mode === 'hide'
-    };
+    const profile = profileForMode(state.profile, mode);
     const profiles = { ...state.profiles, [key]: profile };
     const effective = effectivePresentation(profile);
+    resolvedProfileBySurface.set(key, profile);
 
     await chrome.storage.local.set({
       watchedSurfaceProfiles: profiles,
@@ -218,10 +228,18 @@
     quickModeSeqBySurface.set(key, seq);
     pendingModeBySurface.set(key, { seq, mode });
 
-    // Immediate, tab-local feedback. Persistence happens separately and never touches shared legacy
-    // renderer keys, so another YouTube tab/page cannot inherit this page's choice.
+    // Immediate, tab-local feedback. Reuse the already-resolved profile so even separate dim/hide
+    // thresholds switch synchronously; persistence never touches the shared legacy renderer keys.
     paintQuickMode(mode);
-    applyRendererPresentation(mode, null);
+    const cached = resolvedProfileBySurface.get(key);
+    if (cached) {
+      const immediateProfile = profileForMode(cached, mode);
+      resolvedProfileBySurface.set(key, immediateProfile);
+      const immediate = effectivePresentation(immediateProfile);
+      applyRendererPresentation(immediate.mode, immediate.threshold);
+    } else {
+      applyRendererPresentation(mode, null);
+    }
 
     persistCurrentSurfaceMode(mode, key, seq).catch(() => {
       if (quickModeSeqBySurface.get(key) === seq) {
