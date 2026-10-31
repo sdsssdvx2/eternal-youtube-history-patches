@@ -8,7 +8,6 @@
   const RETRY_DELAYS = [0, 120, 500, 1400];
   const INSTANCE_TOKEN = crypto.randomUUID();
   let renderQueued = false;
-  let renderRetryTimers = [];
   let panelRoute = '';
 
   const LABELS = {
@@ -375,10 +374,7 @@
   }
 
   function scheduleRenderRetries() {
-    // Collapse repeated YouTube lifecycle/header signals into one retry ladder. This prevents
-    // dozens of short-lived timers from accumulating during the first seconds of masthead setup.
-    for (const timer of renderRetryTimers) clearTimeout(timer);
-    renderRetryTimers = RETRY_DELAYS.map(delay => setTimeout(scheduleRender, delay));
+    for (const delay of RETRY_DELAYS) setTimeout(scheduleRender, delay);
   }
 
   function onLifecycle() {
@@ -391,6 +387,8 @@
   window.addEventListener('yt-navigate-finish', onLifecycle, true);
   window.addEventListener('popstate', onLifecycle, true);
 
+  // Handle our masthead actions before YouTube's own masthead event machinery. Per-element click
+  // listeners can be swallowed by YouTube even though the button still shows its pressed CSS state.
   document.addEventListener('click', event => {
     const gear = event.target?.closest?.(`#${GEAR_ID}`);
     if (gear) {

@@ -1,17 +1,14 @@
 (() => {
   'use strict';
 
-  // Presentation stability controller for v0.10.15.
-  // IMPORTANT: this file never scans or mutates video cards. content.js is the sole card renderer.
-  // It owns only page-profile -> legacy-renderer mapping and the three quick-button visuals.
-
+  // v0.10.18: page profiles are persistent, but renderer presentation is strictly tab-local.
+  // Never map a page-specific profile back into shared watchedDisplayMode/watchedMinProgressPct.
   const RETRY_DELAYS = [0, 180, 700, 1800];
-  const PROFILE_ACTIVE_CLASS = 'eyh-profile-active';
   let applyGeneration = 0;
   let decorationTimers = [];
   const quickModeSeqBySurface = new Map();
   const pendingModeBySurface = new Map();
-  const resolvedModeBySurface = new Map();
+  const resolvedProfileBySurface = new Map();
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -59,6 +56,14 @@
       sharedThreshold: clamp(profile.sharedThreshold),
       dimThreshold: clamp(profile.dimThreshold),
       hideThreshold: clamp(profile.hideThreshold)
+    };
+  }
+
+  function profileForMode(profile, mode) {
+    return {
+      ...profile,
+      dimEnabled: mode === 'dim',
+      hideEnabled: mode === 'hide'
     };
   }
 
@@ -111,13 +116,18 @@
     };
   }
 
+  function applyRendererPresentation(mode, threshold = null) {
+    try {
+      globalThis.EYHApplySurfacePresentation?.({ mode, threshold });
+    } catch { }
+  }
+
   function paintQuickMode(mode) {
     const root = document.querySelector('#eyh-header-controls');
     if (!root || !['none', 'dim', 'hide'].includes(mode)) return false;
-    root.dataset.eyhProfileOwned = '1';
     for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
       const active = button.dataset.eyhMode === mode;
-      button.classList.toggle(PROFILE_ACTIVE_CLASS, active);
+      button.classList.toggle('eyh-active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
     return true;
@@ -127,28 +137,17 @@
     const root = document.querySelector('#eyh-header-controls');
     if (!root) return false;
 
-    root.dataset.eyhProfileOwned = '1';
     root.querySelector('#eyh-surface-settings')?.remove();
     document.querySelector('#eyh-surface-panel')?.remove();
     const brand = root.querySelector('.eyh-header-brand');
     if (brand) brand.hidden = true;
 
-    const key = surfaceKey();
-    const shorts = key === 'shorts';
+    const shorts = surfaceKey() === 'shorts';
     root.style.display = shorts ? 'none' : '';
 
     for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
       button.hidden = shorts;
       button.disabled = shorts;
-    }
-
-    // The profile can resolve before YouTube has mounted its masthead. Keep that resolved state and
-    // paint it immediately on whichever retry first sees the root instead of waiting for the next
-    // 1s lifecycle fallback. A physical pending click always wins over the stored resolved mode.
-    if (!shorts) {
-      const pending = pendingModeBySurface.get(key);
-      const mode = pending?.mode || resolvedModeBySurface.get(key);
-      if (mode) paintQuickMode(mode);
     }
 
     for (const selector of ['#eyh-watch-later-auto', '#eyh-watch-later-cleanup']) {
@@ -172,29 +171,29 @@
     const key = surfaceKey();
 
     if (key === 'shorts') {
+      applyRendererPresentation('none', 0);
       scheduleHeaderDecoration();
       return;
     }
 
     const state = await readProfileState(key);
     if (generation !== applyGeneration || key !== surfaceKey()) return;
+    resolvedProfileBySurface.set(key, state.profile);
 
     const pending = pendingModeBySurface.get(key);
     if (pending) {
-      paintQuickMode(pending.mode);
+      const pendingProfile = profileForMode(state.profile, pending.mode);
+      resolvedProfileBySurface.set(key, pendingProfile);
+      const pendingPresentation = effectivePresentation(pendingProfile);
+      paintQuickMode(pendingPresentation.mode);
+      applyRendererPresentation(pendingPresentation.mode, pendingPresentation.threshold);
       scheduleHeaderDecoration();
       return;
     }
 
     const effective = effectivePresentation(state.profile);
-    resolvedModeBySurface.set(key, effective.mode);
     paintQuickMode(effective.mode);
-    const patch = {};
-    if (state.values.watchedDisplayMode !== effective.mode) patch.watchedDisplayMode = effective.mode;
-    if (Number(state.values.watchedMinProgressPct || 0) !== effective.threshold) {
-      patch.watchedMinProgressPct = effective.threshold;
-    }
-    if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+    applyRendererPresentation(effective.mode, effective.threshold);
     scheduleHeaderDecoration();
   }
 
@@ -203,41 +202,45 @@
     const state = await readProfileState(key);
     if (quickModeSeqBySurface.get(key) !== seq) return;
 
-    const profile = {
-      ...state.profile,
-      dimEnabled: mode === 'dim',
-      hideEnabled: mode === 'hide'
-    };
+    const profile = profileForMode(state.profile, mode);
     const profiles = { ...state.profiles, [key]: profile };
     const effective = effectivePresentation(profile);
-    const patch = {
+    resolvedProfileBySurface.set(key, profile);
+
+    await chrome.storage.local.set({
       watchedSurfaceProfiles: profiles,
       watchLaterAutoCleanupEnabled: false
-    };
-    if (surfaceKey() === key) {
-      patch.watchedDisplayMode = effective.mode;
-      patch.watchedMinProgressPct = effective.threshold;
-    }
-    await chrome.storage.local.set(patch);
+    });
 
     if (quickModeSeqBySurface.get(key) !== seq) return;
     pendingModeBySurface.delete(key);
-    resolvedModeBySurface.set(key, effective.mode);
     if (surfaceKey() === key) {
       paintQuickMode(effective.mode);
-      applySurfaceProfile().catch(() => {});
+      applyRendererPresentation(effective.mode, effective.threshold);
     }
     scheduleHeaderDecoration();
   }
 
   function chooseCurrentSurfaceMode(mode) {
     const key = surfaceKey();
-    if (key === 'shorts') return;
+    if (key === 'shorts' || !['none', 'dim', 'hide'].includes(mode)) return;
     const seq = (quickModeSeqBySurface.get(key) || 0) + 1;
     quickModeSeqBySurface.set(key, seq);
     pendingModeBySurface.set(key, { seq, mode });
 
+    // Immediate, tab-local feedback. Reuse the already-resolved profile so even separate dim/hide
+    // thresholds switch synchronously; persistence never touches the shared legacy renderer keys.
     paintQuickMode(mode);
+    const cached = resolvedProfileBySurface.get(key);
+    if (cached) {
+      const immediateProfile = profileForMode(cached, mode);
+      resolvedProfileBySurface.set(key, immediateProfile);
+      const immediate = effectivePresentation(immediateProfile);
+      applyRendererPresentation(immediate.mode, immediate.threshold);
+    } else {
+      applyRendererPresentation(mode, null);
+    }
+
     persistCurrentSurfaceMode(mode, key, seq).catch(() => {
       if (quickModeSeqBySurface.get(key) === seq) {
         pendingModeBySurface.delete(key);
@@ -245,6 +248,8 @@
       }
     });
   }
+
+  globalThis.EYHChooseSurfaceMode = chooseCurrentSurfaceMode;
 
   document.addEventListener('click', event => {
     const button = event.target?.closest?.('#eyh-header-controls button[data-eyh-mode]');
@@ -263,8 +268,6 @@
   }
 
   if (!extensionAlive()) return;
-
-  document.documentElement.dataset.eyhProfileController = '1';
 
   chrome.storage.local.get({ watchLaterAutoCleanupEnabled: false }).then(values => {
     if (values.watchLaterAutoCleanupEnabled === true) {

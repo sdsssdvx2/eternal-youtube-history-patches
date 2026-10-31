@@ -113,24 +113,6 @@ ytd-app[dark] #eyh-header-controls {
   color: #fff;
   opacity: 1;
 }
-
-/* v0.10.13: once the page-profile controller is resident, content.js may keep toggling its legacy
-   eyh-active compatibility class but it no longer controls the three quick buttons' visible state.
-   One painter means startup/storage events cannot visibly ping-pong 표시/흐림/숨김. */
-html[data-eyh-profile-controller="1"] #eyh-header-controls button[data-eyh-mode].eyh-active {
-  background: transparent;
-  color: currentColor;
-  opacity: .82;
-}
-html[data-eyh-profile-controller="1"] #eyh-header-controls button[data-eyh-mode].eyh-profile-active {
-  background: var(--yt-spec-call-to-action, #065fd4);
-  color: #fff;
-  opacity: 1;
-}
-html[data-eyh-profile-controller="1"] #eyh-header-controls button[data-eyh-mode].eyh-profile-active:hover {
-  background: var(--yt-spec-call-to-action, #065fd4);
-}
-
 #eyh-header-controls .eyh-header-button.eyh-surface-compact {
   width: 28px;
   min-width: 28px;
