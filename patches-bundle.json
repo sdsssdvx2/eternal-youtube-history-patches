@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-30T10:30:09",
-  "description": "## [1.10.7](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.6...v1.10.7) (2026-10-30)\n\n### 🐛 Bug Fixes\n\n* **android:** hide E with native header and on Shorts ([6210e98](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/6210e982d5149fbeb48d3aa58915e6f011ca027e))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.7/patches-1.10.7.mpp",
+  "created_at": "2026-10-31T11:03:40",
+  "description": "## [1.10.8](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.7...v1.10.8) (2026-10-31)\n\n### 🐛 Bug Fixes\n\n* **android:** optimize feed hot path and validate Morphe 2 transition ([d521206](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/d52120693404ee8fc586163517a96be742514f12))\n* **android:** restore deployed-state evidence ([c1420ff](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c1420ff2109bcd8320b628ed4ccdd18555027894))\n* sync YouTube compatibility with stable Morphe release ([d52d44c](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/d52d44c2dd6c84c452f81016a8124884345a3eae))\n\n### 🔧 Improvements\n\n* **android:** reduce Eternal toolbar pre-draw churn ([c6d868d](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c6d868de7d111a8abc3cb991ac29e9b777ae8d61))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.8/patches-1.10.8.mpp",
   "signature_download_url": "",
-  "version": "1.10.7"
+  "version": "1.10.8"
 }
