@@ -16,6 +16,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   monitor:
@@ -129,10 +130,12 @@ jobs:
           PY
 
       - name: Commit state only when public update targets changed
+        id: publish
         shell: bash
         run: |
           set -euo pipefail
           rm -rf .update-monitor
+          echo 'changed=false' >> "$GITHUB_OUTPUT"
           if git diff --quiet -- android-update-status.json && git ls-files --error-unmatch android-update-status.json >/dev/null 2>&1; then
             echo 'No update target change.'
             exit 0
@@ -142,3 +145,16 @@ jobs:
           git add android-update-status.json
           git commit -m 'chore: update Android target status'
           git push
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      # The status commit is authenticated by GITHUB_TOKEN, so its push intentionally does not
+      # recursively start another workflow. Dispatch the server-side patch validation explicitly.
+      - name: Dispatch server validation for changed target metadata
+        if: steps.publish.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run validate-android-targets.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo 'Dispatched validate-android-targets.yml for the newly published target status.'
