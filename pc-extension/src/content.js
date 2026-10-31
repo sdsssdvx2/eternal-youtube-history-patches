@@ -423,7 +423,10 @@
       directWatchSeconds = Math.max(1, Math.min(120, Number(changes.directWatchSeconds.newValue) || 5));
     }
     if (changes.watchedDisplayMode || changes.watchedMinProgressPct || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo || changes.watchLaterAutoCleanupEnabled || changes.watchLaterCleanupMinProgressPct) {
-      loadDisplaySettings().then(() => { watchedCache.clear(); progressCache.clear(); scheduleScan(); }).catch(() => {});
+      // These keys only change presentation/cleanup policy. The ledger itself did not change, so
+      // keep the watched/progress caches warm and repaint locally instead of reissuing CHECK_WATCHED
+      // for every visible card. Real ledger mutations invalidate or update the caches elsewhere.
+      loadDisplaySettings().then(() => scheduleScan()).catch(() => {});
     }
   });
 
