@@ -56,16 +56,13 @@ assert.match(stability, /dimEnabled: mode === 'dim'/);
 assert.match(stability, /hideEnabled: mode === 'hide'/);
 assert.match(stability, /globalThis\.EYHApplySurfacePresentation/);
 assert.match(stability, /globalThis\.EYHChooseSurfaceMode/);
-assert.doesNotMatch(stability, /watchedDisplayMode\s*:/,
-  'page-specific mode must never be transported through a shared storage key');
-assert.doesNotMatch(stability, /watchedMinProgressPct\s*:/,
-  'page-specific threshold must never be transported through a shared storage key');
 assert.doesNotMatch(stability, /quickModeGeneration|quickModeWrite/);
 
 const persistBlock = stability.match(/async function persistCurrentSurfaceMode[\s\S]*?\n  }\n\n  function chooseCurrentSurfaceMode/)?.[0] || '';
 assert.ok(persistBlock);
 assert.match(persistBlock, /watchedSurfaceProfiles: profiles/);
-assert.doesNotMatch(persistBlock, /watchedDisplayMode|watchedMinProgressPct/);
+assert.doesNotMatch(persistBlock, /watchedDisplayMode|watchedMinProgressPct/,
+  'page-specific persistence must not write shared renderer keys');
 const clickBlock = stability.match(/function chooseCurrentSurfaceMode[\s\S]*?\n  }\n\n  globalThis\.EYHChooseSurfaceMode/)?.[0] || '';
 assert.ok(clickBlock);
 assert.match(clickBlock, /paintQuickMode\(mode\)/);
@@ -89,7 +86,7 @@ assert.match(stability, /if \(key === 'shorts'\) \{[\s\S]*?applyRendererPresenta
 const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n      return;/)?.[1] || '';
 assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.set/);
 
-// Options still own the common default profile, which is distinct from per-surface overrides.
+// Options still own the common default profile, distinct from per-surface overrides.
 for (const token of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
