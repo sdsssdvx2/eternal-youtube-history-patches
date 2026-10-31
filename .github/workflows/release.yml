@@ -28,11 +28,22 @@ jobs:
         with:
           path: eternal-youtube-history-patches
           fetch-depth: 0
-      - name: Checkout official Morphe patches
+
+      - name: Resolve latest stable Morphe patch release
+        id: morphe
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest | jq -r '.tag_name')"
+          test -n "$tag" && test "$tag" != null
+          echo "ref=$tag" >> "$GITHUB_OUTPUT"
+          echo "Release compile will use Morphe stable $tag"
+
+      - name: Checkout official stable Morphe patches
         uses: actions/checkout@v7
         with:
           repository: MorpheApp/morphe-patches
-          ref: dev
+          ref: ${{ steps.morphe.outputs.ref }}
           path: morphe-patches
       - name: Checkout Morphe patcher
         uses: actions/checkout@v7
@@ -55,7 +66,7 @@ jobs:
       - name: Install npm dependencies
         working-directory: eternal-youtube-history-patches
         run: npm install
-      - name: Precompile official Morphe extension API
+      - name: Precompile official stable Morphe extension API
         working-directory: morphe-patches
         env:
           GITHUB_ACTOR: ${{ github.actor }}
