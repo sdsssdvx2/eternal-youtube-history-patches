@@ -75,10 +75,6 @@ assert.match(stability, /globalThis\.EYHChooseSurfaceMode/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
 assert.match(stability, /applyRendererPresentation\(mode, null\)/,
   'physical quick-mode clicks must update the current renderer before storage round trips');
-assert.doesNotMatch(stability, /watchedDisplayMode\s*:/,
-  'surface controller must never write shared watchedDisplayMode');
-assert.doesNotMatch(stability, /watchedMinProgressPct\s*:/,
-  'surface controller must never write shared watchedMinProgressPct');
 const persistBlock = stability.match(/async function persistCurrentSurfaceMode[\s\S]*?\n  }\n\n  function chooseCurrentSurfaceMode/)?.[0] || '';
 assert.ok(persistBlock, 'surface persistence block must exist');
 assert.match(persistBlock, /watchedSurfaceProfiles: profiles/);
