@@ -41,19 +41,10 @@
         "https://www.youtube.com/*"
       ],
       "js": [
-        "pc-stability-controller.js"
-      ],
-      "run_at": "document_start",
-      "world": "ISOLATED"
-    },
-    {
-      "matches": [
-        "https://www.youtube.com/*"
-      ],
-      "js": [
         "watch-later-core.js",
         "watch-later-safe-core.js",
         "content.js",
+        "pc-stability-controller.js",
         "watch-later-safe.js",
         "watch-later-safe-auto.js",
         "pc-inline-controls.js",
@@ -65,6 +56,16 @@
         "content.css"
       ],
       "run_at": "document_idle",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "pc-profile-bootstrap.js"
+      ],
+      "run_at": "document_start",
       "world": "ISOLATED"
     }
   ],
