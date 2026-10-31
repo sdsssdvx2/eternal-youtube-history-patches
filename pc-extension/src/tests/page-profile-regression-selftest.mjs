@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import './watch-later-recovery-selftest.mjs';
 import './watch-later-recovery-static-selftest.mjs';
+import './page-profile-behavior-selftest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
@@ -67,7 +68,7 @@ const clickBlock = stability.match(/function chooseCurrentSurfaceMode[\s\S]*?\n 
 assert.ok(clickBlock);
 assert.match(clickBlock, /paintQuickMode\(mode\)/);
 assert.match(clickBlock, /applyRendererPresentation\(mode, null\)/,
-  'click must visibly apply before async persistence');
+  'click must visibly apply before async persistence when no resolved threshold is cached');
 
 // Navigation and cross-tab storage notifications re-resolve only the receiving tab's current URL.
 assert.match(content, /const key = surfaceKey\(\)/);
