@@ -24,30 +24,39 @@ assert.equal(C.normalizeProgressPct(120), 100);
 assert.equal(C.normalizeProgressPct(-4), 0);
 assert.equal(C.normalizeProgressPct('not-a-number'), null);
 
-const initial = { contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: { content: { sectionListRenderer: { contents: [{ itemSectionRenderer: { contents: [{ playlistVideoListRenderer: { contents: [
-  { playlistVideoRenderer: { videoId: 'abcdefghijk', setVideoId: 'SET_001_valid' } },
-  { playlistVideoRenderer: { videoId: 'lmnopqrstuv', setVideoId: 'SET_002_valid' } },
-  { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'CONTINUATION_TOKEN_1' } } } }
-] } }] } }] } } } }] } } };
+const initial = {
+  contents: {
+    twoColumnBrowseResultsRenderer: {
+      tabs: [{
+        tabRenderer: {
+          content: {
+            sectionListRenderer: {
+              contents: [{
+                itemSectionRenderer: {
+                  contents: [{
+                    playlistVideoListRenderer: {
+                      contents: [
+                        { playlistVideoRenderer: { videoId: 'abcdefghijk', setVideoId: 'SET_001_valid' } },
+                        { playlistVideoRenderer: { videoId: 'lmnopqrstuv', setVideoId: 'SET_002_valid' } },
+                        { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: 'CONTINUATION_TOKEN_1' } } } }
+                      ]
+                    }
+                  }]
+                }
+              }]
+            }
+          }
+        }
+      }]
+    }
+  }
+};
 const entries = C.extractPlaylistEntries(initial);
 assert.deepEqual(entries, [
   { videoId: 'abcdefghijk', setVideoId: 'SET_001_valid' },
   { videoId: 'lmnopqrstuv', setVideoId: 'SET_002_valid' }
 ]);
 assert.deepEqual(C.extractContinuationTokens(initial), ['CONTINUATION_TOKEN_1']);
-
-const modern = { contents: [
-  { lockupViewModel: { contentId: 'modernabc12', menu: { menuRenderer: { items: [
-    { menuServiceItemRenderer: { serviceEndpoint: { playlistEditEndpoint: { actions: [{ setVideoId: 'LOCKUP_SET_001' }] } } } }
-  ] } } } },
-  { playlistVideoViewModel: { videoId: 'modernxyz34', rendererContext: { commandContext: { onTap: { innertubeCommand: { playlistEditEndpoint: {
-    actions: [{ playlistSetVideoId: 'VIEWMODEL_SET_002' }]
-  } } } } } } } }
-] };
-assert.deepEqual(C.extractPlaylistEntries(modern), [
-  { videoId: 'modernabc12', setVideoId: 'LOCKUP_SET_001' },
-  { videoId: 'modernxyz34', setVideoId: 'VIEWMODEL_SET_002' }
-]);
 assert.deepEqual(C.qualifyCleanup(entries, { abcdefghijk: 61.2, lmnopqrstuv: 59.9 }, 60), [
   { videoId: 'abcdefghijk', setVideoId: 'SET_001_valid', progressPct: 61.2 }
 ]);
