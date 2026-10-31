@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  // Presentation stability controller for v0.10.13.
+  // Presentation stability controller for v0.10.15.
   // IMPORTANT: this file never scans or mutates video cards. content.js is the sole card renderer.
   // It owns only page-profile -> legacy-renderer mapping and the three quick-button visuals.
 
@@ -11,6 +11,7 @@
   let decorationTimers = [];
   const quickModeSeqBySurface = new Map();
   const pendingModeBySurface = new Map();
+  const resolvedModeBySurface = new Map();
 
   const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
 
@@ -112,16 +113,14 @@
 
   function paintQuickMode(mode) {
     const root = document.querySelector('#eyh-header-controls');
-    if (!root) return;
+    if (!root || !['none', 'dim', 'hide'].includes(mode)) return false;
     root.dataset.eyhProfileOwned = '1';
     for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
       const active = button.dataset.eyhMode === mode;
-      // content.js still maintains the historic eyh-active class for compatibility. v0.10.13
-      // deliberately paints the visible selection through a separate class so only one subsystem
-      // controls what the user sees during startup/storage churn.
       button.classList.toggle(PROFILE_ACTIVE_CLASS, active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
+    return true;
   }
 
   function decorateHeader() {
@@ -134,12 +133,22 @@
     const brand = root.querySelector('.eyh-header-brand');
     if (brand) brand.hidden = true;
 
-    const shorts = surfaceKey() === 'shorts';
+    const key = surfaceKey();
+    const shorts = key === 'shorts';
     root.style.display = shorts ? 'none' : '';
 
     for (const button of root.querySelectorAll('button[data-eyh-mode]')) {
       button.hidden = shorts;
       button.disabled = shorts;
+    }
+
+    // The profile can resolve before YouTube has mounted its masthead. Keep that resolved state and
+    // paint it immediately on whichever retry first sees the root instead of waiting for the next
+    // 1s lifecycle fallback. A physical pending click always wins over the stored resolved mode.
+    if (!shorts) {
+      const pending = pendingModeBySurface.get(key);
+      const mode = pending?.mode || resolvedModeBySurface.get(key);
+      if (mode) paintQuickMode(mode);
     }
 
     for (const selector of ['#eyh-watch-later-auto', '#eyh-watch-later-cleanup']) {
@@ -153,8 +162,6 @@
   }
 
   function scheduleHeaderDecoration() {
-    // YouTube can emit several equivalent lifecycle signals while the masthead is being built.
-    // Keep at most one retry ladder alive instead of accumulating 4 timers per signal.
     for (const timer of decorationTimers) clearTimeout(timer);
     decorationTimers = RETRY_DELAYS.map(delay => setTimeout(decorateHeader, delay));
   }
@@ -180,6 +187,7 @@
     }
 
     const effective = effectivePresentation(state.profile);
+    resolvedModeBySurface.set(key, effective.mode);
     paintQuickMode(effective.mode);
     const patch = {};
     if (state.values.watchedDisplayMode !== effective.mode) patch.watchedDisplayMode = effective.mode;
@@ -210,12 +218,11 @@
       patch.watchedDisplayMode = effective.mode;
       patch.watchedMinProgressPct = effective.threshold;
     }
-    // One canonical storage transaction per click. v0.10.12 first wrote watchedDisplayMode and then
-    // wrote the full profile, which made content.js reload/scan twice and amplified startup churn.
     await chrome.storage.local.set(patch);
 
     if (quickModeSeqBySurface.get(key) !== seq) return;
     pendingModeBySurface.delete(key);
+    resolvedModeBySurface.set(key, effective.mode);
     if (surfaceKey() === key) {
       paintQuickMode(effective.mode);
       applySurfaceProfile().catch(() => {});
@@ -230,8 +237,6 @@
     quickModeSeqBySurface.set(key, seq);
     pendingModeBySurface.set(key, { seq, mode });
 
-    // UI feedback is immediate. The sole renderer switches after the single canonical storage
-    // transaction below, avoiding the old two-write bounce while keeping the user's click pinned.
     paintQuickMode(mode);
     persistCurrentSurfaceMode(mode, key, seq).catch(() => {
       if (quickModeSeqBySurface.get(key) === seq) {
@@ -259,12 +264,8 @@
 
   if (!extensionAlive()) return;
 
-  // CSS can now ignore content.js's compatibility eyh-active paint before the first masthead mount,
-  // eliminating the visible startup ping-pong even if storage/lifecycle events arrive in a burst.
   document.documentElement.dataset.eyhProfileController = '1';
 
-  // Keep the old destructive auto-cleanup key fail-closed without performing a redundant storage
-  // write on every YouTube tab startup.
   chrome.storage.local.get({ watchLaterAutoCleanupEnabled: false }).then(values => {
     if (values.watchLaterAutoCleanupEnabled === true) {
       return chrome.storage.local.set({ watchLaterAutoCleanupEnabled: false });
