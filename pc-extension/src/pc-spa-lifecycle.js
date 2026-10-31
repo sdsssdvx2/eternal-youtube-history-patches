@@ -1,13 +1,15 @@
 (() => {
   'use strict';
 
-  // YouTube normally emits yt-navigate-finish itself. This is only a bounded fallback for the rare
-  // isolated-world miss: compare URL + one fixed Eternal root, never scan cards or storage.
-  // Hidden tabs do not need a polling wakeup; visibilitychange performs an immediate reconciliation.
-  const HEARTBEAT_MS = 1000;
+  // YouTube occasionally changes SPA routes without delivering the navigation event to an
+  // extension's isolated world. Keep this deliberately tiny: it never scans video cards or the
+  // document tree. It only compares the URL and the single Eternal header root twice per second.
+  // When either changes, replay the same completion signal our lightweight coordinators already
+  // consume. This repairs page-profile, Watch Later and inline-control lifecycle state without a
+  // second DOM observer or another renderer.
+  const HEARTBEAT_MS = 500;
   let lastRoute = `${location.pathname}${location.search}`;
   let lastHeaderRoot = document.getElementById('eyh-header-controls');
-  let heartbeatTimer = null;
 
   function reconcile(force = false) {
     const route = `${location.pathname}${location.search}`;
@@ -19,30 +21,6 @@
     window.dispatchEvent(new Event('yt-navigate-finish'));
   }
 
-  function stopHeartbeat() {
-    if (heartbeatTimer !== null) clearTimeout(heartbeatTimer);
-    heartbeatTimer = null;
-  }
-
-  function scheduleHeartbeat() {
-    stopHeartbeat();
-    if (document.visibilityState !== 'visible') return;
-    heartbeatTimer = setTimeout(() => {
-      heartbeatTimer = null;
-      reconcile(false);
-      scheduleHeartbeat();
-    }, HEARTBEAT_MS);
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      reconcile(true);
-      scheduleHeartbeat();
-    } else {
-      stopHeartbeat();
-    }
-  }, true);
-
-  reconcile(true);
-  scheduleHeartbeat();
+  setInterval(() => reconcile(false), HEARTBEAT_MS);
+  setTimeout(() => reconcile(true), 0);
 })();
