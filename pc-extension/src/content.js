@@ -2,6 +2,9 @@
   const PAGE = 'eternal-youtube-history-page';
   const CONTENT = 'eternal-youtube-history-content';
   const WL = globalThis.EYHWatchLaterCore;
+  const VIDEO_ANCHOR_SELECTOR = 'a[href*="watch?v="], a[href^="/shorts/"]';
+  const VIDEO_ELEMENT_SELECTOR = 'video.html5-main-video, video';
+  const HEADER_ROOT_SELECTOR = 'ytd-masthead, #masthead-container, #masthead';
   const watchedCache = new Map();
   const progressCache = new Map();
   let watchedDisplayMode = 'dim';
@@ -9,6 +12,7 @@
   let watchedThumbnailOpacityPct = 65;
   let watchedThumbnailGrayscale = false;
   let watchedLinkCardInfo = false;
+  let directWatchSeconds = 5;
   let pendingHistory = new Map();
   const pendingWatchLater = new Map();
   const watchLaterAutoAttempted = new Map();
@@ -21,6 +25,7 @@
   let scanTimer = null;
   let currentVideoId = null;
   let currentVideoEl = null;
+  let videoWatcherAbort = null;
   let directTimer = null;
   let directRecorded = false;
   let lastProgressSent = null;
@@ -68,6 +73,7 @@
       watchedThumbnailOpacityPct: 65,
       watchedThumbnailGrayscale: false,
       watchedLinkCardInfo: false,
+      directWatchSeconds: 5,
       watchLaterAutoCleanupEnabled: false,
       watchLaterCleanupMinProgressPct: 60
     });
@@ -76,6 +82,7 @@
     watchedThumbnailOpacityPct = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
     watchedThumbnailGrayscale = Boolean(v.watchedThumbnailGrayscale);
     watchedLinkCardInfo = Boolean(v.watchedLinkCardInfo);
+    directWatchSeconds = Math.max(1, Math.min(120, Number(v.directWatchSeconds) || 5));
     watchLaterAutoCleanupEnabled = Boolean(v.watchLaterAutoCleanupEnabled);
     watchLaterCleanupMinProgressPct = Math.max(1, Math.min(100, Number(v.watchLaterCleanupMinProgressPct) || 60));
     document.documentElement.style.setProperty('--eyh-watched-opacity', String(watchedThumbnailOpacityPct / 100));
@@ -144,14 +151,19 @@
 
   async function bindVideoWatcher() {
     const vid = videoIdFromUrl();
-    if (!vid) { currentVideoId = null; currentVideoEl = null; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer); return; }
-    const el = document.querySelector('video.html5-main-video, video');
+    if (!vid) {
+      videoWatcherAbort?.abort(); videoWatcherAbort = null;
+      currentVideoId = null; currentVideoEl = null; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer); return;
+    }
+    const el = document.querySelector(VIDEO_ELEMENT_SELECTOR);
     if (!el || (currentVideoId === vid && currentVideoEl === el)) return;
+    videoWatcherAbort?.abort();
+    videoWatcherAbort = new AbortController();
+    const signal = videoWatcherAbort.signal;
     currentVideoId = vid; currentVideoEl = el; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer);
     const maybeRecord = async () => {
-      const { directWatchSeconds = 5 } = await chrome.storage.local.get({ directWatchSeconds: 5 });
       if (currentVideoId !== vid || currentVideoEl !== el) return;
-      if (!el.paused && Number(el.currentTime || 0) >= Number(directWatchSeconds || 5)) await recordDirectWatch(vid).catch(() => {});
+      if (!el.paused && Number(el.currentTime || 0) >= directWatchSeconds) await recordDirectWatch(vid).catch(() => {});
       if (directRecorded) {
         const pct = currentVideoProgressPct(el);
         if (pct != null && (lastProgressSent == null || pct >= lastProgressSent + 5 || pct >= 99.5)) {
@@ -163,15 +175,15 @@
       }
     };
     const onTime = () => maybeRecord().catch(() => {});
-    el.addEventListener('timeupdate', onTime, { passive: true });
-    el.addEventListener('playing', onTime, { passive: true });
+    el.addEventListener('timeupdate', onTime, { passive: true, signal });
+    el.addEventListener('playing', onTime, { passive: true, signal });
     el.addEventListener('ended', () => {
       if (currentVideoId === vid) {
         lastProgressSent = 100; progressCache.set(vid, 100);
         chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: 100 }] }).catch(() => {});
         maybeAutoRemoveCurrentFromWatchLater(vid, 100).catch(() => {}); scheduleScan();
       }
-    }, { passive: true });
+    }, { passive: true, signal });
     directTimer = setTimeout(() => maybeRecord().catch(() => {}), 7000);
   }
 
@@ -188,7 +200,7 @@
   async function scanAndMark() {
     scanTimer = null;
     const map = new Map();
-    for (const a of document.querySelectorAll('a[href*="watch?v="], a[href^="/shorts/"]')) {
+    for (const a of document.querySelectorAll(VIDEO_ANCHOR_SELECTOR)) {
       const id = idFromAnchor(a); if (!id) continue; if (!map.has(id)) map.set(id, []); map.get(id).push(a);
     }
     const unknown = [...map.keys()].filter(id => !watchedCache.has(id));
@@ -218,6 +230,18 @@
   }
 
   function scheduleScan() { if (document.visibilityState === 'hidden' || scanTimer) return; scanTimer = setTimeout(scanAndMark, 650); }
+
+  function nodeMatchesOrContains(node, selector) {
+    if (!node || (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) return false;
+    return Boolean(node.matches?.(selector) || node.querySelector?.(selector));
+  }
+
+  function nodeTouchesHeader(node) {
+    if (!node || (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE)) return false;
+    if (node.matches?.(HEADER_ROOT_SELECTOR) || node.querySelector?.(HEADER_ROOT_SELECTOR)) return true;
+    if (node.matches?.('#end, #buttons') && node.closest?.(HEADER_ROOT_SELECTOR)) return true;
+    return false;
+  }
 
   function requestWatchLater(type, payload = {}, timeoutMs = 600000) {
     const requestId = crypto.randomUUID();
@@ -395,6 +419,9 @@
   loadDisplaySettings().then(() => { scheduleScan(); scheduleHeaderMount(); maybeAutoCleanupWatchLaterPage().catch(() => {}); }).catch(() => {});
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.directWatchSeconds) {
+      directWatchSeconds = Math.max(1, Math.min(120, Number(changes.directWatchSeconds.newValue) || 5));
+    }
     if (changes.watchedDisplayMode || changes.watchedMinProgressPct || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo || changes.watchLaterAutoCleanupEnabled || changes.watchLaterCleanupMinProgressPct) {
       loadDisplaySettings().then(() => { watchedCache.clear(); progressCache.clear(); scheduleScan(); }).catch(() => {});
     }
@@ -402,7 +429,22 @@
 
   const observer = new MutationObserver(mutations => {
     if (document.visibilityState === 'hidden') return;
-    for (const m of mutations) if (m.type === 'childList' && m.addedNodes.length) { scheduleScan(); scheduleHeaderMount(); bindVideoWatcher().catch(() => {}); break; }
+    let needsScan = false;
+    let needsHeaderMount = !document.getElementById('eyh-header-controls');
+    let needsVideoBind = false;
+    for (const mutation of mutations) {
+      if (mutation.type !== 'childList' || !mutation.addedNodes.length) continue;
+      for (const node of mutation.addedNodes) {
+        if (!needsScan && nodeMatchesOrContains(node, VIDEO_ANCHOR_SELECTOR)) needsScan = true;
+        if (!needsHeaderMount && nodeTouchesHeader(node)) needsHeaderMount = true;
+        if (!needsVideoBind && videoIdFromUrl() && nodeMatchesOrContains(node, VIDEO_ELEMENT_SELECTOR)) needsVideoBind = true;
+        if (needsScan && needsHeaderMount && needsVideoBind) break;
+      }
+      if (needsScan && needsHeaderMount && needsVideoBind) break;
+    }
+    if (needsScan) scheduleScan();
+    if (needsHeaderMount) scheduleHeaderMount();
+    if (needsVideoBind) bindVideoWatcher().catch(() => {});
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
 

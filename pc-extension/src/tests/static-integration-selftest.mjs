@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.13', 'startup-stability/performance release must have a distinct version');
+assert.equal(manifest.version, '0.10.14', 'hot-path resource release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -73,6 +73,19 @@ assert.doesNotMatch(inlineControls, /MutationObserver/);
 assert.doesNotMatch(inlineControls, /querySelectorAll\('a\[href|classList\.toggle\('eyh-(?:watched|hidden|surface)/,
   'inline UI must never become another video-card renderer');
 
+// v0.10.14 keeps the one renderer but stops waking it for unrelated YouTube DOM churn. The direct
+// watch threshold is cached once/settings-change only, and old video listeners are abortable.
+assert.match(content, /const VIDEO_ANCHOR_SELECTOR/);
+assert.match(content, /function nodeMatchesOrContains\(/);
+assert.match(content, /if \(!needsScan && nodeMatchesOrContains\(node, VIDEO_ANCHOR_SELECTOR\)\) needsScan = true/);
+assert.match(content, /if \(needsScan\) scheduleScan\(\)/);
+assert.match(content, /let directWatchSeconds = 5/);
+assert.match(content, /directWatchSeconds = Math\.max\(1, Math\.min\(120/);
+assert.doesNotMatch(content, /await chrome\.storage\.local\.get\(\{\s*directWatchSeconds/,
+  'timeupdate path must never perform storage IPC for directWatchSeconds');
+assert.match(content, /videoWatcherAbort = new AbortController\(\)/);
+assert.match(content, /\{ passive: true, signal \}/);
+
 assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
 assert.match(spaLifecycle, /location\.pathname/);
 assert.match(spaLifecycle, /location\.search/);
@@ -87,7 +100,7 @@ assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// v0.10.13 keeps one visible quick-mode painter during startup. content.js may retain its legacy
+// v0.10.13+ keeps one visible quick-mode painter during startup. content.js may retain its legacy
 // compatibility class, but the profile controller owns the visible class and commits one storage
 // transaction per physical click. Retry ladders are coalesced instead of accumulating timers.
 assert.match(content, /\['none','표시'\]/);
@@ -247,4 +260,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.13 startup-stable single-painter + coalesced retries + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.14 startup-stable + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
