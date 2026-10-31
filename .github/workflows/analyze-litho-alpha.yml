@@ -73,7 +73,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
+          python - <<'PY' | tee .analysis/litho-candidates.txt
           from pathlib import Path
           import re
 
@@ -119,6 +119,14 @@ jobs:
           if not hits:
               raise SystemExit('no View.setAlpha(F)V calls found')
           PY
+          test -s .analysis/litho-candidates.txt
+      - name: Upload compact Litho candidate report
+        uses: actions/upload-artifact@v6
+        with:
+          name: litho-alpha-candidates-${{ env.YT_VERSION }}
+          path: .analysis/litho-candidates.txt
+          if-no-files-found: error
+          retention-days: 3
       - name: Cleanup
         if: always()
         run: rm -rf .analysis/input .analysis/apktool .analysis/apktool.jar
