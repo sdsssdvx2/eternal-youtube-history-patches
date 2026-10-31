@@ -1,0 +1,1 @@
+The PR Android patch smoke intentionally reports the SHA-256 of the highest stable standalone YouTube APK supported by current Eternal source. Before merge, repeat the smoke and promote a stable repeated digest into the production trusted-hash allowlists. This file is a temporary review note and is not part of runtime behavior.
