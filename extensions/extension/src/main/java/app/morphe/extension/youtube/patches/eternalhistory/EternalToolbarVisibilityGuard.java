@@ -202,8 +202,11 @@ public final class EternalToolbarVisibilityGuard {
     }
 
     private static void setVisible(View control, boolean visible) {
-        int desired = visible ? View.VISIBLE : View.GONE;
-        if (control.getVisibility() != desired) control.setVisibility(desired);
+        if (visible) {
+            if (control.getVisibility() != View.VISIBLE) control.setVisibility(View.VISIBLE);
+        } else {
+            if (control.getVisibility() != View.GONE) control.setVisibility(View.GONE);
+        }
     }
 
     private static String safeMessage(Throwable t) {
