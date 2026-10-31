@@ -62,10 +62,14 @@ jobs:
           import json, re
           from pathlib import Path
 
+          # Production base pins are promoted only after repeated standalone acquisition and a
+          # successful feature-branch patch smoke. 21.30.216 was independently resolved twice to
+          # the same 198,948,665-byte standalone APK before this digest was added.
           TRUSTED_YOUTUBE = {
               '20.51.39': '4cb1a507dad189b0eed01440cd6dba4c749c897dae2ff169d659c037bdfbda07',
               '21.16.256': '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00',
               '21.20.405': '4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c',
+              '21.30.216': '3775a15129dcc4e5b80fc17b7e0841b7fdd1ca89a6e72baa798806f666c74d02',
           }
           TRUSTED_MUSIC = {
               '9.20.53': '5c4add71134d46818c855959e1c7029518c68be9e56ef172119626539d32c852',
