@@ -7,36 +7,46 @@ import './watch-later-recovery-static-selftest.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
-const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
-const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
-const content = fs.readFileSync(path.join(src, 'content.js'), 'utf8');
-const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
-const safeAuto = fs.readFileSync(path.join(src, 'watch-later-safe-auto.js'), 'utf8');
-const options = fs.readFileSync(path.join(src, 'options.js'), 'utf8');
-const optionsHtml = fs.readFileSync(path.join(src, 'options.html'), 'utf8');
+const text = name => fs.readFileSync(path.join(src, name), 'utf8');
+const manifest = JSON.parse(text('manifest.json'));
+const stability = text('pc-stability-controller.js');
+const content = text('content.js');
+const safeCoordinator = text('watch-later-safe.js');
+const safeAuto = text('watch-later-safe-auto.js');
+const options = text('options.js');
+const optionsHtml = text('options.html');
+const backgroundEntry = text('background-entry.js');
 
-const isolated = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
-assert.ok(isolated, 'missing isolated world content script');
-
+assert.equal(manifest.version, '0.10.18');
+const isolatedWorlds = manifest.content_scripts.filter(cs => cs.world === 'ISOLATED');
+assert.equal(isolatedWorlds.length, 1, 'only one isolated runtime may be resident');
+const isolated = isolatedWorlds[0];
 assert.ok(isolated.js.includes('content.js'));
 assert.ok(isolated.js.includes('pc-stability-controller.js'));
 assert.ok(isolated.js.includes('watch-later-safe.js'));
 assert.ok(isolated.js.includes('watch-later-safe-auto.js'));
 assert.ok(!isolated.js.includes('surface-profiles.js'));
 assert.ok(!isolated.js.includes('pc-ui-hotfix.js'));
+assert.ok(!isolated.js.includes('pc-profile-bootstrap.js'));
+assert.doesNotMatch(backgroundEntry, /pc-update-reconnect/);
+
+// content.js remains the only card renderer.
 assert.match(content, /classList\.toggle\('eyh-watched'/);
 assert.match(content, /classList\.toggle\('eyh-hidden'/);
 assert.match(content, /const observer = new MutationObserver/);
 assert.doesNotMatch(stability, /MutationObserver/);
 assert.doesNotMatch(stability, /classList\.toggle\('eyh-(?:watched|hidden|surface)/,
-  'stability adapter may paint header controls but must never toggle video-card presentation classes');
+  'profile adapter may paint header buttons but never card presentation classes');
 assert.doesNotMatch(stability, /querySelectorAll\('a\[href/);
 assert.doesNotMatch(safeCoordinator, /classList\.toggle|new\s+MutationObserver/);
 assert.doesNotMatch(safeAuto, /classList\.toggle|new\s+MutationObserver/);
 
-assert.match(content, /\['none','표시'\]/);
-assert.match(content, /\['dim','흐림'\]/);
-assert.match(content, /\['hide','숨김'\]/);
+// Current-surface profile is persistent; renderer state is local to each tab.
+assert.match(content, /function surfaceKey\(\)/);
+assert.match(content, /watchedSurfaceProfiles/);
+assert.match(content, /watchedSurfaceDefaultProfile/);
+assert.match(content, /globalThis\.EYHApplySurfacePresentation/);
+assert.match(stability, /function surfaceKey\(\)/);
 assert.match(stability, /chooseCurrentSurfaceMode/);
 assert.match(stability, /persistCurrentSurfaceMode/);
 assert.match(stability, /pendingModeBySurface/);
@@ -44,38 +54,56 @@ assert.match(stability, /quickModeSeqBySurface/);
 assert.match(stability, /watchedSurfaceProfiles: profiles/);
 assert.match(stability, /dimEnabled: mode === 'dim'/);
 assert.match(stability, /hideEnabled: mode === 'hide'/);
+assert.match(stability, /globalThis\.EYHApplySurfacePresentation/);
+assert.match(stability, /globalThis\.EYHChooseSurfaceMode/);
+assert.doesNotMatch(stability, /watchedDisplayMode\s*:/,
+  'page-specific mode must never be transported through a shared storage key');
+assert.doesNotMatch(stability, /watchedMinProgressPct\s*:/,
+  'page-specific threshold must never be transported through a shared storage key');
 assert.doesNotMatch(stability, /quickModeGeneration|quickModeWrite/);
 
-assert.match(stability, /#eyh-surface-settings/);
-assert.match(stability, /#eyh-surface-panel/);
-assert.doesNotMatch(stability, /openPanel/);
-assert.doesNotMatch(stability, /eyh-surface-compact/);
-assert.doesNotMatch(optionsHtml, /⚙ 페이지 패널/);
+const persistBlock = stability.match(/async function persistCurrentSurfaceMode[\s\S]*?\n  }\n\n  function chooseCurrentSurfaceMode/)?.[0] || '';
+assert.ok(persistBlock);
+assert.match(persistBlock, /watchedSurfaceProfiles: profiles/);
+assert.doesNotMatch(persistBlock, /watchedDisplayMode|watchedMinProgressPct/);
+const clickBlock = stability.match(/function chooseCurrentSurfaceMode[\s\S]*?\n  }\n\n  globalThis\.EYHChooseSurfaceMode/)?.[0] || '';
+assert.ok(clickBlock);
+assert.match(clickBlock, /paintQuickMode\(mode\)/);
+assert.match(clickBlock, /applyRendererPresentation\(mode, null\)/,
+  'click must visibly apply before async persistence');
 
+// Navigation and cross-tab storage notifications re-resolve only the receiving tab's current URL.
+assert.match(content, /const key = surfaceKey\(\)/);
+assert.match(content, /Object\.prototype\.hasOwnProperty\.call\(profiles, key\)/);
+assert.match(content, /const onYoutubeNavigation = \(\) => \{[\s\S]*?loadDisplaySettings\(\)\.then\(\(\) => scheduleScan\(0\)\)/);
+const settingsBlock = content.match(/chrome\.storage\.onChanged\.addListener\(\(changes, area\) => \{([\s\S]*?)\n  \}\);\n\n  const observer/)?.[1] || '';
+assert.match(settingsBlock, /changes\.watchedSurfaceProfiles/);
+assert.match(settingsBlock, /changes\.watchedSurfaceDefaultProfile/);
+assert.doesNotMatch(settingsBlock, /watchedCache\.clear\(\)|progressCache\.clear\(\)/);
+assert.match(settingsBlock, /scheduleScan\(0\)/);
+
+// Shorts remains presentation-off without mutating persistent settings.
 assert.match(stability, /path\.startsWith\('\/shorts\/'\)/);
 assert.match(stability, /root\.style\.display = shorts \? 'none' : ''/);
-assert.match(stability, /if \(key === 'shorts'\) \{[\s\S]*?scheduleHeaderDecoration\(\);[\s\S]*?return;[\s\S]*?\}/);
-const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n    \}/)?.[1] || '';
-assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.(?:set|get)/,
-  'Shorts must not corrupt the legacy/default presentation state');
+assert.match(stability, /if \(key === 'shorts'\) \{[\s\S]*?applyRendererPresentation\('none', 0\)/);
+const shortsBlock = stability.match(/if \(key === 'shorts'\) \{([\s\S]*?)\n      return;/)?.[1] || '';
+assert.doesNotMatch(shortsBlock, /chrome\.storage\.local\.set/);
 
-assert.match(stability, /if \(!hasStoredDefault\)/);
-assert.match(stability, /watchedSurfaceDefaultProfile: defaults/);
-
+// Options still own the common default profile, which is distinct from per-surface overrides.
 for (const token of [
   'watchedDefaultDimEnabled', 'watchedDefaultHideEnabled', 'watchedDefaultLinkedThresholds',
   'watchedDefaultSharedThreshold', 'watchedDefaultDimThreshold', 'watchedDefaultHideThreshold'
-]) assert.ok(options.includes(token), `missing full default-profile field: ${token}`);
-assert.match(stability, /watchedSurfaceDefaultProfile/);
-assert.match(stability, /linkedThresholds/);
-assert.match(stability, /sharedThreshold/);
-assert.match(stability, /dimThreshold/);
-assert.match(stability, /hideThreshold/);
-assert.match(options, /watchedDisplayMode: presentation\.mode/,
-  'options must feed the single renderer instead of disabling it');
+]) assert.ok(options.includes(token), `missing default profile control ${token}`);
+assert.match(options, /watchedSurfaceDefaultProfile: defaultProfile/);
 assert.match(options, /watchLaterSafeAutoCleanupEnabled/);
-assert.doesNotMatch(options, /watchLaterAutoCleanupEnabled:\s*false/);
 assert.match(optionsHtml, /자동 안전 정리/);
-assert.doesNotMatch(optionsHtml, /현재 안전 잠금/);
 
-console.log('PASS lightweight page-profile + uncancelled quick-mode + safe cleanup coexistence regression self-test');
+// Safe Watch Later cleanup/undo remains independent from presentation.
+assert.match(safeCoordinator, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeCoordinator, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_LIST_REQUEST/);
+assert.match(safeAuto, /EYH_WL_SAFE_REMOVE_REQUEST/);
+assert.doesNotMatch(safeCoordinator, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
+assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
+
+console.log('PASS v0.10.18 tab-local page-profile + immediate quick-mode + safe cleanup coexistence regression self-test');
