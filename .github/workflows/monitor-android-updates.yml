@@ -3,19 +3,19 @@ name: Monitor Android update targets
 on:
   workflow_dispatch:
   schedule:
-    # The private signed-build workflow runs at :41. Publish recommended metadata after it has
-    # normally had time to finish, rather than advertising a new target before the APK exists.
     - cron: '55 */6 * * *'
   push:
     paths:
       - '.github/workflows/monitor-android-updates.yml'
+      - '.github/workflows/validate-android-targets.yml'
 
 concurrency:
   group: monitor-android-update-targets
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
+  actions: write
 
 jobs:
   monitor:
@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve validated Morphe, Eternal, YouTube, Music and MicroG-RE targets
+      - name: Resolve candidate Morphe, Eternal, YouTube, Music and MicroG-RE targets
         shell: bash
         run: |
           set -euo pipefail
@@ -42,9 +42,8 @@ jobs:
           ETERNAL_TAG="$(jq -r '.tag_name' .update-monitor/eternal.json)"
           test -n "$ETERNAL_TAG" && test "$ETERNAL_TAG" != null
 
-          # Do not advertise a just-published Morphe/Eternal target until the private builder has had
-          # at least one complete 6-hour schedule window to create and sign the matching APK. This
-          # handles the edge case where a public release appears just after the :41 private build.
+          # Let the private signed-builder get its normal :41 schedule opportunity before validating
+          # and promoting a public recommendation. A promotion is still gated by server patch success.
           now_epoch="$(date -u +%s)"
           for release_json in .update-monitor/morphe.json .update-monitor/eternal.json; do
             published="$(jq -r '.published_at // .created_at // empty' "$release_json")"
@@ -52,7 +51,7 @@ jobs:
             published_epoch="$(date -u -d "$published" +%s)"
             age="$((now_epoch - published_epoch))"
             if [ "$age" -lt 21600 ]; then
-              echo "Newest public target is only ${age}s old; keep the previous recommended status until the next signed-build window."
+              echo "Newest public target is only ${age}s old; keep the previous validated status until the next monitor window."
               exit 0
             fi
           done
@@ -62,6 +61,20 @@ jobs:
           python3 - <<'PY'
           import json, re
           from pathlib import Path
+
+          # Production base pins are promoted only after repeated standalone acquisition and a
+          # successful feature-branch patch smoke. 21.30.216 was independently resolved twice to
+          # the same 198,948,665-byte standalone APK before this digest was added.
+          TRUSTED_YOUTUBE = {
+              '20.51.39': '4cb1a507dad189b0eed01440cd6dba4c749c897dae2ff169d659c037bdfbda07',
+              '21.16.256': '724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00',
+              '21.20.405': '4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c',
+              '21.30.216': '3775a15129dcc4e5b80fc17b7e0841b7fdd1ca89a6e72baa798806f666c74d02',
+          }
+          TRUSTED_MUSIC = {
+              '9.20.53': '5c4add71134d46818c855959e1c7029518c68be9e56ef172119626539d32c852',
+              '9.30.53': '1fe8d535ae445265c7250ed76a24c340e1dc89f2ab5d265f755800fe23ad334e',
+          }
 
           def stable_targets(path):
               text = Path(path).read_text()
@@ -73,8 +86,8 @@ jobs:
                       continue
                   mm = re.search(r'minSdk\s*=\s*(\d+)', block)
                   result.append({
-                      "version": vm.group(1),
-                      "min_sdk": int(mm.group(1)) if mm else None,
+                      'version': vm.group(1),
+                      'min_sdk': int(mm.group(1)) if mm else None,
                   })
               if not result:
                   raise RuntimeError(f'No stable target found in {path}')
@@ -91,54 +104,93 @@ jobs:
           microg = json.loads(Path('.update-monitor/microg.json').read_text())
           eternal = json.loads(Path('.update-monitor/eternal.json').read_text())
 
-          yt_supported = eternal_versions('.update-monitor/eternal-youtube.kt')
-          youtube = next(
-              (target for target in stable_targets('.update-monitor/youtube.kt')
-               if target['version'] in yt_supported),
-              None,
-          )
+          supported = eternal_versions('.update-monitor/eternal-youtube.kt')
+          youtube = next((t for t in stable_targets('.update-monitor/youtube.kt') if t['version'] in supported), None)
           if youtube is None:
+              raise RuntimeError(f"No stable Morphe YouTube target is compatible with Eternal {eternal['tag_name']}")
+          music = stable_targets('.update-monitor/music.kt')[0]
+
+          youtube_sha = TRUSTED_YOUTUBE.get(youtube['version'])
+          music_sha = TRUSTED_MUSIC.get(music['version'])
+          if not youtube_sha:
               raise RuntimeError(
-                  f"No stable Morphe YouTube target is compatible with Eternal {eternal['tag_name']}"
+                  f"Candidate YouTube {youtube['version']} has no reviewed standalone SHA-256 pin; refusing automatic promotion"
+              )
+          if not music_sha:
+              raise RuntimeError(
+                  f"Candidate YouTube Music {music['version']} has no reviewed standalone SHA-256 pin; refusing automatic promotion"
               )
 
-          music = stable_targets('.update-monitor/music.kt')[0]
           mg_tag = microg['tag_name']
           arm64 = next(
-              (a for a in microg.get('assets', [])
-               if a.get('name') == f'microg-{mg_tag}-icon-arm64-v8a.apk'),
+              (a for a in microg.get('assets', []) if a.get('name') == f'microg-{mg_tag}-icon-arm64-v8a.apk'),
               None,
           )
+          if not arm64:
+              raise RuntimeError(f'No arm64 MicroG-RE asset for {mg_tag}')
+          mg_sha = (arm64.get('digest') or '').removeprefix('sha256:')
+          if not re.fullmatch(r'[0-9a-fA-F]{64}', mg_sha):
+              raise RuntimeError('MicroG-RE arm64 release asset has no trusted SHA-256 digest')
 
-          state = {
-              "schema": 2,
-              "morphe_patches": morphe['tag_name'],
-              "eternal_patches": eternal['tag_name'],
-              "youtube": youtube,
-              "youtube_music": music,
-              "microg_re": {
-                  "version": mg_tag,
-                  "arm64_asset": arm64['browser_download_url'] if arm64 else None,
-                  "arm64_sha256": (arm64.get('digest') or '').removeprefix('sha256:') if arm64 else None,
+          candidate = {
+              'schema': 2,
+              'morphe_patches': morphe['tag_name'],
+              'eternal_patches': eternal['tag_name'],
+              'youtube': {**youtube, 'sha256': youtube_sha},
+              'youtube_music': {**music, 'sha256': music_sha},
+              'microg_re': {
+                  'version': mg_tag,
+                  'arm64_asset': arm64['browser_download_url'],
+                  'arm64_sha256': mg_sha.lower(),
               },
           }
-          Path('android-update-status.json').write_text(
-              json.dumps(state, ensure_ascii=False, indent=2) + '\n'
-          )
-          print(json.dumps(state, indent=2))
+          Path('.update-monitor/candidate.json').write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(candidate, indent=2))
           PY
 
-      - name: Commit state only when public update targets changed
+      - name: Skip when candidate already equals validated status
+        id: compare
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .update-monitor
-          if git diff --quiet -- android-update-status.json && git ls-files --error-unmatch android-update-status.json >/dev/null 2>&1; then
-            echo 'No update target change.'
-            exit 0
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          current = json.loads(Path('android-update-status.json').read_text())
+          candidate = json.loads(Path('.update-monitor/candidate.json').read_text())
+          # SHA pins are validator inputs, not part of the public status schema.
+          candidate['youtube'].pop('sha256', None)
+          candidate['youtube_music'].pop('sha256', None)
+          if current == candidate:
+              Path('/tmp/same').write_text('1')
+          PY
+          if [ -f /tmp/same ]; then
+            echo 'changed=false' > "$GITHUB_OUTPUT"
+            echo 'Candidate already matches the last validated public status.'
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add android-update-status.json
-          git commit -m 'chore: update Android target status'
-          git push
+
+      # Candidate metadata is never written to android-update-status.json here. The validator owns
+      # promotion and commits only after both production APKs patch successfully with exact SHA pins.
+      - name: Dispatch candidate validation and promotion
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          c=.update-monitor/candidate.json
+          gh workflow run validate-android-targets.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f morphe_tag="$(jq -r '.morphe_patches' "$c")" \
+            -f eternal_tag="$(jq -r '.eternal_patches' "$c")" \
+            -f youtube_version="$(jq -r '.youtube.version' "$c")" \
+            -f youtube_min_sdk="$(jq -r '.youtube.min_sdk' "$c")" \
+            -f youtube_sha256="$(jq -r '.youtube.sha256' "$c")" \
+            -f music_version="$(jq -r '.youtube_music.version' "$c")" \
+            -f music_min_sdk="$(jq -r '.youtube_music.min_sdk' "$c")" \
+            -f music_sha256="$(jq -r '.youtube_music.sha256' "$c")" \
+            -f microg_version="$(jq -r '.microg_re.version' "$c")" \
+            -f microg_asset="$(jq -r '.microg_re.arm64_asset' "$c")" \
+            -f microg_sha256="$(jq -r '.microg_re.arm64_sha256' "$c")" \
+            -f publish=true
+          echo 'Dispatched candidate validation; public status remains unchanged unless both patch jobs succeed.'

@@ -4,6 +4,7 @@
   const WL = globalThis.EYHWatchLaterCore;
   const watchedCache = new Map();
   const progressCache = new Map();
+  let directWatchSeconds = 5;
   let watchedDisplayMode = 'dim';
   let watchedMinProgressPct = 0;
   let watchedThumbnailOpacityPct = 65;
@@ -21,6 +22,7 @@
   let scanTimer = null;
   let currentVideoId = null;
   let currentVideoEl = null;
+  let currentVideoHandlers = null;
   let directTimer = null;
   let directRecorded = false;
   let lastProgressSent = null;
@@ -63,6 +65,7 @@
 
   async function loadDisplaySettings() {
     const v = await chrome.storage.local.get({
+      directWatchSeconds: 5,
       watchedDisplayMode: 'dim',
       watchedMinProgressPct: 0,
       watchedThumbnailOpacityPct: 65,
@@ -71,6 +74,7 @@
       watchLaterAutoCleanupEnabled: false,
       watchLaterCleanupMinProgressPct: 60
     });
+    directWatchSeconds = Math.max(1, Math.min(120, Number(v.directWatchSeconds) || 5));
     watchedDisplayMode = ['dim','hide','none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
     watchedMinProgressPct = Math.max(0, Math.min(100, Number(v.watchedMinProgressPct) || 0));
     watchedThumbnailOpacityPct = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
@@ -142,16 +146,36 @@
     scheduleScan();
   }
 
+  function unbindVideoWatcher() {
+    clearTimeout(directTimer);
+    directTimer = null;
+    if (currentVideoEl && currentVideoHandlers) {
+      currentVideoEl.removeEventListener('timeupdate', currentVideoHandlers.onTime);
+      currentVideoEl.removeEventListener('playing', currentVideoHandlers.onTime);
+      currentVideoEl.removeEventListener('ended', currentVideoHandlers.onEnded);
+    }
+    currentVideoHandlers = null;
+  }
+
   async function bindVideoWatcher() {
     const vid = videoIdFromUrl();
-    if (!vid) { currentVideoId = null; currentVideoEl = null; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer); return; }
+    if (!vid) {
+      unbindVideoWatcher();
+      currentVideoId = null; currentVideoEl = null; directRecorded = false; lastProgressSent = null;
+      return;
+    }
     const el = document.querySelector('video.html5-main-video, video');
-    if (!el || (currentVideoId === vid && currentVideoEl === el)) return;
-    currentVideoId = vid; currentVideoEl = el; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer);
+    if (!el || (currentVideoId === vid && currentVideoEl === el && currentVideoHandlers)) return;
+
+    // YouTube commonly reuses the same <video> element across SPA navigations. Always detach the
+    // previous handlers before binding the new video id so long sessions cannot accumulate inert
+    // timeupdate/playing/ended closures on one media element.
+    unbindVideoWatcher();
+    currentVideoId = vid; currentVideoEl = el; directRecorded = false; lastProgressSent = null;
+
     const maybeRecord = async () => {
-      const { directWatchSeconds = 5 } = await chrome.storage.local.get({ directWatchSeconds: 5 });
       if (currentVideoId !== vid || currentVideoEl !== el) return;
-      if (!el.paused && Number(el.currentTime || 0) >= Number(directWatchSeconds || 5)) await recordDirectWatch(vid).catch(() => {});
+      if (!el.paused && Number(el.currentTime || 0) >= directWatchSeconds) await recordDirectWatch(vid).catch(() => {});
       if (directRecorded) {
         const pct = currentVideoProgressPct(el);
         if (pct != null && (lastProgressSent == null || pct >= lastProgressSent + 5 || pct >= 99.5)) {
@@ -163,15 +187,17 @@
       }
     };
     const onTime = () => maybeRecord().catch(() => {});
-    el.addEventListener('timeupdate', onTime, { passive: true });
-    el.addEventListener('playing', onTime, { passive: true });
-    el.addEventListener('ended', () => {
-      if (currentVideoId === vid) {
+    const onEnded = () => {
+      if (currentVideoId === vid && currentVideoEl === el) {
         lastProgressSent = 100; progressCache.set(vid, 100);
         chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: 100 }] }).catch(() => {});
         maybeAutoRemoveCurrentFromWatchLater(vid, 100).catch(() => {}); scheduleScan();
       }
-    }, { passive: true });
+    };
+    currentVideoHandlers = { onTime, onEnded };
+    el.addEventListener('timeupdate', onTime, { passive: true });
+    el.addEventListener('playing', onTime, { passive: true });
+    el.addEventListener('ended', onEnded, { passive: true });
     directTimer = setTimeout(() => maybeRecord().catch(() => {}), 7000);
   }
 
@@ -203,7 +229,11 @@
       for (const a of anchors) {
         const c = candidateContainer(a); if (!c) continue;
         const storedProgress = normalizeProgressPct(progressCache.get(id));
-        const cardProgress = nativeProgressPct(c);
+        // Native progress probing can fall back to getComputedStyle(), which may require layout.
+        // Skip it completely when no threshold is configured, or when the cached ledger progress
+        // already satisfies the threshold. Presentation remains identical in both cases.
+        const needsNativeProgress = watchedMinProgressPct > 0 && (storedProgress == null || storedProgress < watchedMinProgressPct);
+        const cardProgress = needsNativeProgress ? nativeProgressPct(c) : null;
         const effectiveProgress = storedProgress == null ? cardProgress : (cardProgress == null ? storedProgress : Math.max(storedProgress, cardProgress));
         const matchesProgress = watchedMinProgressPct <= 0 || (effectiveProgress != null && effectiveProgress >= watchedMinProgressPct);
         const matches = watched && matchesProgress && watchedDisplayMode !== 'none';
@@ -239,7 +269,15 @@
 
   function updateHeaderControls() {
     const root = document.querySelector('#eyh-header-controls'); if (!root) return;
-    for (const b of root.querySelectorAll('button[data-eyh-mode]')) { const active = b.dataset.eyhMode === watchedDisplayMode; b.classList.toggle('eyh-active', active); b.setAttribute('aria-pressed', active ? 'true' : 'false'); }
+    // v0.10.13+ gives pc-stability-controller sole ownership of the visible quick-mode state.
+    // Avoid redundant class/ARIA churn from the legacy renderer once that controller is resident.
+    if (document.documentElement.dataset.eyhProfileController !== '1') {
+      for (const b of root.querySelectorAll('button[data-eyh-mode]')) {
+        const active = b.dataset.eyhMode === watchedDisplayMode;
+        b.classList.toggle('eyh-active', active);
+        b.setAttribute('aria-pressed', active ? 'true' : 'false');
+      }
+    }
     const cleanup = root.querySelector('#eyh-watch-later-cleanup');
     if (cleanup) { cleanup.hidden = !isWatchLaterPage(); cleanup.textContent = `${watchLaterCleanupMinProgressPct}%+ 정리`; cleanup.title = `Eternal 진행률 ${watchLaterCleanupMinProgressPct}% 이상인 나중에 볼 동영상 제거`; }
     const auto = root.querySelector('#eyh-watch-later-auto');
@@ -377,8 +415,7 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === 'SYNC_HISTORY') {
       (async () => {
-        const useLoadedPage = Boolean(msg.useLoadedPage); const dom = useLoadedPage && location.pathname.startsWith('/feed/history') ? await waitForHistoryDom(10000) : { records: [], waitedMs: 0, signature: '' };
-        const result = await requestHistory(msg.maxPages || 3, { useLoadedPage }); const merged = new Map();
+        const useLoadedPage = Boolean(msg.useLoadedPage); const dom = useLoadedPage && location.pathname.startsWith('/feed/history') ? await waitForHistoryDom(10000) : { records: [], waitedMs: 0, signature: '' }; const result = await requestHistory(msg.maxPages || 3, { useLoadedPage }); const merged = new Map();
         for (const r of dom.records || []) if (!merged.has(r.videoId)) merged.set(r.videoId, r); for (const r of result.records || []) if (!merged.has(r.videoId)) merged.set(r.videoId, r);
         const latestRecord = dom.records?.[0] || result.latestRecord || [...merged.values()][0] || null; let latestAlreadyKnown = null;
         if (latestRecord?.videoId) { const before = await chrome.runtime.sendMessage({ type: 'CHECK_WATCHED', ids: [latestRecord.videoId] }).catch(() => null); latestAlreadyKnown = Boolean(before?.watched?.[latestRecord.videoId]); }
@@ -395,14 +432,23 @@
   loadDisplaySettings().then(() => { scheduleScan(); scheduleHeaderMount(); maybeAutoCleanupWatchLaterPage().catch(() => {}); }).catch(() => {});
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (changes.directWatchSeconds) {
+      directWatchSeconds = Math.max(1, Math.min(120, Number(changes.directWatchSeconds.newValue) || 5));
+    }
     if (changes.watchedDisplayMode || changes.watchedMinProgressPct || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo || changes.watchLaterAutoCleanupEnabled || changes.watchLaterCleanupMinProgressPct) {
-      loadDisplaySettings().then(() => { watchedCache.clear(); progressCache.clear(); scheduleScan(); }).catch(() => {});
+      // Presentation/settings changes do not invalidate the watched/progress ledger cache. Reusing
+      // those maps avoids a background CHECK_WATCHED round-trip for every visible card on each click.
+      loadDisplaySettings().then(() => scheduleScan()).catch(() => {});
     }
   });
 
   const observer = new MutationObserver(mutations => {
     if (document.visibilityState === 'hidden') return;
-    for (const m of mutations) if (m.type === 'childList' && m.addedNodes.length) { scheduleScan(); scheduleHeaderMount(); bindVideoWatcher().catch(() => {}); break; }
+    for (const m of mutations) if (m.type === 'childList' && m.addedNodes.length) {
+      // scanAndMark() already binds the active <video> after the debounced card pass; do not run an
+      // extra document.querySelector('video') on every YouTube DOM mutation burst.
+      scheduleScan(); scheduleHeaderMount(); break;
+    }
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
 

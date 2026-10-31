@@ -31,6 +31,14 @@ public final class EternalToolbarVisibilityGuard {
     private static WeakReference<ViewGroup> boundRootRef = new WeakReference<>(null);
     private static ViewTreeObserver.OnPreDrawListener preDrawListener;
 
+    // All geometry work below is dispatched on YouTube's main/UI thread. Reuse the tiny scratch
+    // objects instead of allocating a Rect and several int[2] arrays on every pre-draw frame.
+    private static final Rect visibleRect = new Rect();
+    private static final int[] rootLocation = new int[2];
+    private static final int[] anchorLocation = new int[2];
+    private static final int[] candidateLocation = new int[2];
+    private static final int[] currentLocation = new int[2];
+
     /** Passive bytecode injection point. Never mutates YouTube's toolbar hierarchy. */
     public static void onToolbarImageView(ImageView imageView) {
         // Preserve the existing control creation/dialog behavior first.
@@ -54,8 +62,6 @@ public final class EternalToolbarVisibilityGuard {
             return;
         }
         try {
-            int[] candidateLocation = new int[2];
-            int[] currentLocation = new int[2];
             candidate.getLocationInWindow(candidateLocation);
             current.getLocationInWindow(currentLocation);
             // Match EternalHistoryToolbar: the left-most live native action icon is the stable
@@ -138,25 +144,23 @@ public final class EternalToolbarVisibilityGuard {
         if (control == null) return;
 
         if (!EternalHistorySettings.ENABLED.get()) {
-            control.setVisibility(View.GONE);
+            setVisibility(control, View.GONE);
             return;
         }
 
         // Shorts has no recommendation-list presentation surface. Use Morphe's cached player-state
         // signal rather than the quarantined NavigationBar/browse callbacks.
         if (ShortsPlayerState.isOpen()) {
-            control.setVisibility(View.GONE);
+            setVisibility(control, View.GONE);
             return;
         }
 
         ImageView anchor = anchorRef.get();
         if (!headerAnchorActuallyVisible(root, anchor)) {
-            control.setVisibility(View.GONE);
+            setVisibility(control, View.GONE);
             return;
         }
 
-        int[] rootLocation = new int[2];
-        int[] anchorLocation = new int[2];
         root.getLocationInWindow(rootLocation);
         anchor.getLocationInWindow(anchorLocation);
         int width = control.getWidth() > 0 ? control.getWidth() : Dim.dp(36);
@@ -165,12 +169,16 @@ public final class EternalToolbarVisibilityGuard {
         float y = anchorLocation[1] - rootLocation[1] + (anchor.getHeight() - height) / 2f;
         if (x < Dim.dp4 || x + width > root.getWidth() - Dim.dp4
                 || y < 0 || y > Dim.dp(160)) {
-            control.setVisibility(View.GONE);
+            setVisibility(control, View.GONE);
             return;
         }
-        control.setX(x);
-        control.setY(y);
-        control.setVisibility(View.VISIBLE);
+        if (Math.abs(control.getX() - x) >= 0.5f) control.setX(x);
+        if (Math.abs(control.getY() - y) >= 0.5f) control.setY(y);
+        setVisibility(control, View.VISIBLE);
+    }
+
+    private static void setVisibility(View view, int visibility) {
+        if (view.getVisibility() != visibility) view.setVisibility(visibility);
     }
 
     /**
@@ -182,14 +190,12 @@ public final class EternalToolbarVisibilityGuard {
         if (root == null || !basicAnchor(anchor) || root.getWidth() <= 0
                 || anchor.getWindowVisibility() != View.VISIBLE || anchor.getAlpha() <= 0.05f) return false;
         try {
-            Rect visible = new Rect();
-            if (!anchor.getGlobalVisibleRect(visible)) return false;
+            visibleRect.setEmpty();
+            if (!anchor.getGlobalVisibleRect(visibleRect)) return false;
             int requiredWidth = Math.max(1, (anchor.getWidth() * 3) / 4);
             int requiredHeight = Math.max(1, (anchor.getHeight() * 3) / 4);
-            if (visible.width() < requiredWidth || visible.height() < requiredHeight) return false;
+            if (visibleRect.width() < requiredWidth || visibleRect.height() < requiredHeight) return false;
 
-            int[] rootLocation = new int[2];
-            int[] anchorLocation = new int[2];
             root.getLocationInWindow(rootLocation);
             anchor.getLocationInWindow(anchorLocation);
             int relativeX = anchorLocation[0] - rootLocation[0];

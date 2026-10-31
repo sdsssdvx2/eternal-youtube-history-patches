@@ -13,6 +13,7 @@ jobs:
   sync:
     permissions:
       contents: write
+      actions: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Eternal patches
@@ -47,8 +48,11 @@ jobs:
             patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
 
       - name: Commit if compatibility changed
+        id: publish
         shell: bash
         run: |
+          set -euo pipefail
+          echo 'changed=false' >> "$GITHUB_OUTPUT"
           if git diff --quiet -- patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt; then
             echo "No compatibility change."
             exit 0
@@ -58,3 +62,17 @@ jobs:
           git add patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt
           git commit -m "fix: sync YouTube compatibility with stable Morphe release"
           git push
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      # Pushes authenticated by GITHUB_TOKEN intentionally do not recursively start push-triggered
+      # workflows. Explicit workflow_dispatch is the supported exception, so a compatibility commit
+      # must hand off to Release itself or main can remain newer than the published Eternal MPP.
+      - name: Dispatch Eternal release for the synced main commit
+        if: steps.publish.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo 'Dispatched release.yml for the newly synced compatibility commit.'
