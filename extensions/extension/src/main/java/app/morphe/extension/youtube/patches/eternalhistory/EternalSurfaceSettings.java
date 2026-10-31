@@ -2,6 +2,7 @@ package app.morphe.extension.youtube.patches.eternalhistory;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 
 import app.morphe.extension.shared.Logger;
 import app.morphe.extension.shared.Utils;
@@ -10,6 +11,16 @@ import app.morphe.extension.shared.Utils;
 final class EternalSurfaceSettings {
     private static final String PREFS = "eternal_history_surface_profiles_v1";
     private static final String DEFAULT_V2_MIGRATED = "default_profile_v2_migrated";
+
+    // Feed/Litho filters can ask for the common profile many times per rendered frame. The settings
+    // themselves change only through explicit user interaction, so keep a very short-lived immutable
+    // snapshot instead of re-reading six settings and allocating a Profile for every component.
+    // 250 ms keeps UI changes effectively immediate while collapsing the hot path to two volatile
+    // reads plus SystemClock.uptimeMillis().
+    private static final long DEFAULT_PROFILE_CACHE_TTL_MS = 250L;
+    private static volatile Profile cachedDefaultProfile;
+    private static volatile long cachedDefaultProfileAtMs;
+    private static volatile boolean defaultMigrationVerified;
 
     enum Surface {
         HOME("home", "홈"),
@@ -71,25 +82,50 @@ final class EternalSurfaceSettings {
 
     /** Called during add-on startup before the settings screen can be edited. */
     static void ensureDefaultProfileMigrated() {
-        SharedPreferences p = prefs();
-        if (p == null || p.getBoolean(DEFAULT_V2_MIGRATED, false)) return;
-        try {
-            String legacyMode = EternalHistorySettings.feedMode();
-            int threshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
-            EternalHistorySettings.DEFAULT_DIM_ENABLED.save("dim".equals(legacyMode));
-            EternalHistorySettings.DEFAULT_HIDE_ENABLED.save("hide".equals(legacyMode));
-            EternalHistorySettings.DEFAULT_LINKED_THRESHOLDS.save(true);
-            EternalHistorySettings.DEFAULT_SHARED_THRESHOLD.save(threshold);
-            EternalHistorySettings.DEFAULT_DIM_THRESHOLD.save(threshold);
-            EternalHistorySettings.DEFAULT_HIDE_THRESHOLD.save(threshold);
-            p.edit().putBoolean(DEFAULT_V2_MIGRATED, true).commit();
-        } catch (Throwable t) {
-            Logger.printException(() -> "Eternal default profile migration failed", t);
+        if (defaultMigrationVerified) return;
+        synchronized (EternalSurfaceSettings.class) {
+            if (defaultMigrationVerified) return;
+            SharedPreferences p = prefs();
+            if (p == null) return;
+            if (p.getBoolean(DEFAULT_V2_MIGRATED, false)) {
+                defaultMigrationVerified = true;
+                return;
+            }
+            try {
+                String legacyMode = EternalHistorySettings.feedMode();
+                int threshold = clamp(EternalHistorySettings.HIDE_MIN_PROGRESS.get());
+                EternalHistorySettings.DEFAULT_DIM_ENABLED.save("dim".equals(legacyMode));
+                EternalHistorySettings.DEFAULT_HIDE_ENABLED.save("hide".equals(legacyMode));
+                EternalHistorySettings.DEFAULT_LINKED_THRESHOLDS.save(true);
+                EternalHistorySettings.DEFAULT_SHARED_THRESHOLD.save(threshold);
+                EternalHistorySettings.DEFAULT_DIM_THRESHOLD.save(threshold);
+                EternalHistorySettings.DEFAULT_HIDE_THRESHOLD.save(threshold);
+                if (p.edit().putBoolean(DEFAULT_V2_MIGRATED, true).commit()) {
+                    defaultMigrationVerified = true;
+                    invalidateDefaultProfileCache();
+                }
+            } catch (Throwable t) {
+                Logger.printException(() -> "Eternal default profile migration failed", t);
+            }
         }
     }
 
     static Profile defaultProfile(boolean explicit) {
         ensureDefaultProfileMigrated();
+        if (explicit) return readDefaultProfile(true);
+
+        long now = SystemClock.uptimeMillis();
+        Profile cached = cachedDefaultProfile;
+        long age = now - cachedDefaultProfileAtMs;
+        if (cached != null && age >= 0 && age < DEFAULT_PROFILE_CACHE_TTL_MS) return cached;
+
+        Profile fresh = readDefaultProfile(false);
+        cachedDefaultProfile = fresh;
+        cachedDefaultProfileAtMs = now;
+        return fresh;
+    }
+
+    private static Profile readDefaultProfile(boolean explicit) {
         return new Profile(
                 EternalHistorySettings.DEFAULT_DIM_ENABLED.get(),
                 EternalHistorySettings.DEFAULT_HIDE_ENABLED.get(),
@@ -99,6 +135,12 @@ final class EternalSurfaceSettings {
                 EternalHistorySettings.defaultHideThresholdPercent(),
                 explicit
         );
+    }
+
+    /** Explicit hook for call sites that need an immediate refresh after changing common settings. */
+    static void invalidateDefaultProfileCache() {
+        cachedDefaultProfile = null;
+        cachedDefaultProfileAtMs = 0L;
     }
 
     static Profile get(Surface surface) {
