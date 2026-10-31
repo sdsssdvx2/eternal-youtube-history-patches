@@ -13,6 +13,9 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      YT_VERSION: 20.51.39
+      YT_TRUSTED_SHA256: 4cb1a507dad189b0eed01440cd6dba4c749c897dae2ff169d659c037bdfbda07
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -27,54 +30,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire validated YouTube base
+      - name: Acquire exact trusted YouTube base
         env:
           PYTHONPATH: ${{ github.workspace }}/.analysis/morphe-builds
         run: |
           python -m pip install --disable-pip-version-check requests >/dev/null
           mkdir -p .analysis/input
           python - <<'PY'
+          import os
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
           app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal',),target_abi='arm64-v8a')
-          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
-          out=Path('.analysis/input/youtube.apk'); expected='724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00'
-          for url,ref in r.iter_candidates(app,'21.16.256'):
+          r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=4,max_variant_attempts=12)
+          out=Path('.analysis/input/youtube.apk'); expected=os.environ['YT_TRUSTED_SHA256'].lower(); version=os.environ['YT_VERSION']
+          for url,ref in r.iter_candidates(app,version):
               try:
                   got=r.download_candidate(url,ref,out)
-                  if got.sha256 == expected: break
+                  if got.sha256 == expected:
+                      print(f'selected {ref} bytes={got.size} sha256={got.sha256}')
+                      break
                   out.unlink(missing_ok=True)
               except Exception: out.unlink(missing_ok=True)
           else: raise SystemExit('validated base not found')
           PY
-      - name: Decompile Java
-        shell: bash
-        run: |
-          set -euo pipefail
-          url="$(curl -fsSL https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '.assets[] | select(.name|startswith("jadx-") and endswith(".zip") and (contains("gui")|not)) | .browser_download_url' | head -1)"
-          curl -fL --retry 3 "$url" -o .analysis/jadx.zip
-          unzip -q .analysis/jadx.zip -d .analysis/jadx
-          mkdir -p .analysis/decompiled
-          .analysis/jadx/bin/jadx --no-res --show-bad-code --threads-count 4 -d .analysis/decompiled .analysis/input/youtube.apk >/tmp/jadx-alpha.log 2>&1 || true
-          test -d .analysis/decompiled/sources/defpackage
-      - name: Inspect exact Litho alpha Java targets
-        shell: bash
-        run: |
-          set -euo pipefail
-          D=.analysis/decompiled/sources/defpackage
-          for cls in ggo gij gtx guf gho gee gfg ghz gjz tqu uzc gec tri; do
-            f="$D/$cls.java"
-            [ -f "$f" ] || continue
-            echo "===== $cls signatures/fields ====="
-            grep -n -E '^(public|final|class|interface|    public|    final|    private|    protected|    static)|setAlpha|alpha|floatValue|Float\.valueOf|ComponentHost' "$f" | head -520 || true
-          done
-          echo '===== setAlpha hits inside known Litho classes ====='
-          grep -n -E 'setAlpha\(' "$D"/{ggo,gij,gtx,guf,gho,gee,gfg,ghz,gjz,tqu,uzc,gec,tri}.java 2>/dev/null || true
-          echo '===== exact ghz methods around setAlpha ====='
-          grep -n -B85 -A85 'setAlpha(' "$D/ghz.java" | head -1800 || true
-          echo '===== exact gij alpha setter ====='
-          grep -n -B25 -A45 'public final void g(float' "$D/gij.java" || true
+          echo "$YT_TRUSTED_SHA256  .analysis/input/youtube.apk" | sha256sum -c -
       - name: Decompile exact smali
         shell: bash
         run: |
@@ -82,36 +62,71 @@ jobs:
           apktool_url="$(curl -fsSL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest | jq -r '.assets[] | select(.name|test("^apktool_[0-9].*\\.jar$")) | .browser_download_url' | head -1)"
           test -n "$apktool_url"
           curl -fL --retry 3 "$apktool_url" -o .analysis/apktool.jar
-          java -jar .analysis/apktool.jar d -f -r -s=false .analysis/input/youtube.apk -o .analysis/apktool >/tmp/apktool-alpha.log 2>&1 || {
+          # Apktool 3 decodes sources by default. -r skips resources only; the old -s=false syntax
+          # is invalid in Apktool 3 and prevented the diagnostic from ever reaching smali output.
+          java -jar .analysis/apktool.jar d -f -r .analysis/input/youtube.apk -o .analysis/apktool >/tmp/apktool-alpha.log 2>&1 || {
             cat /tmp/apktool-alpha.log
             exit 1
           }
-      - name: Inspect exact Litho alpha smali
+          find .analysis/apktool -type f -name '*.smali' -print -quit | grep -q .
+      - name: Inspect all View.setAlpha Litho candidates
         shell: bash
         run: |
           set -euo pipefail
-          GHZ="$(find .analysis/apktool -type f -path '*/defpackage/ghz.smali' | head -1)"
-          GIJ="$(find .analysis/apktool -type f -path '*/defpackage/gij.smali' | head -1)"
-          test -n "$GHZ" && test -n "$GIJ"
-          echo "===== GHZ FILE: $GHZ ====="
-          grep -n -B55 -A55 'Landroid/view/View;->setAlpha(F)V' "$GHZ" | head -900 || true
-          echo "===== GHZ METHOD HEADERS CONTAINING setAlpha ====="
-          python - "$GHZ" <<'PY'
-          import sys
-          p=sys.argv[1]
-          lines=open(p,encoding='utf-8').read().splitlines()
-          for i,line in enumerate(lines):
-              if 'Landroid/view/View;->setAlpha(F)V' not in line: continue
-              start=i
-              while start>=0 and not lines[start].lstrip().startswith('.method '): start-=1
-              end=i
-              while end<len(lines) and not lines[end].lstrip().startswith('.end method'): end+=1
-              print(f'--- hit line {i+1} / method line {start+1}: {lines[start].strip()}')
-              for j in range(max(start,i-35), min(end+1,i+36)):
-                  print(f'{j+1:6}: {lines[j]}')
+          python - <<'PY' | tee .analysis/litho-candidates.txt
+          from pathlib import Path
+          import re
+
+          root = Path('.analysis/apktool')
+          alpha = 'Landroid/view/View;->setAlpha(F)V'
+          desc = 'Landroid/view/View;->setContentDescription(Ljava/lang/CharSequence;)V'
+          hits=[]
+          for p in root.rglob('*.smali'):
+              try: lines=p.read_text(encoding='utf-8', errors='replace').splitlines()
+              except Exception: continue
+              for i,line in enumerate(lines):
+                  if alpha not in line: continue
+                  s=i
+                  while s>=0 and not lines[s].lstrip().startswith('.method '): s-=1
+                  e=i
+                  while e<len(lines) and not lines[e].lstrip().startswith('.end method'): e+=1
+                  if s<0 or e>=len(lines): continue
+                  method=lines[s:e+1]
+                  score=0
+                  if any(desc in x for x in method): score+=100
+                  if ' static ' in (' '+lines[s]+' '): score+=10
+                  if lines[s].rstrip().endswith(')V'): score+=5
+                  iget_float=[]
+                  for j in range(max(s,i-8), i):
+                      if re.search(r'\biget\s+[vp]\d+,\s*[vp]\d+,\s*L[^;]+;->[^:]+:F', lines[j]):
+                          iget_float.append((j,lines[j]))
+                          score+=20
+                  hits.append((score,p,s,e,i,iget_float,method))
+
+          hits.sort(key=lambda x:(-x[0],str(x[1]),x[4]))
+          print(f'TOTAL_SET_ALPHA_HITS={len(hits)}')
+          for n,(score,p,s,e,i,igets,method) in enumerate(hits[:80],1):
+              print(f'===== CANDIDATE {n} score={score} file={p} methodLine={s+1} hitLine={i+1} =====')
+              print(method[0].strip())
+              print('HAS_SET_CONTENT_DESCRIPTION=' + str(any(desc in x for x in method)))
+              print('NEARBY_IGET_FLOAT=' + str(len(igets)))
+              src=p.read_text(encoding='utf-8', errors='replace').splitlines()
+              for j in range(max(s,i-16), min(e+1,i+17)):
+                  print(f'{j+1:6}: {src[j]}')
+              for j in range(s,e+1):
+                  if desc in src[j] and abs(j-i)>16:
+                      print(f'DESC {j+1:6}: {src[j]}')
+          if not hits:
+              raise SystemExit('no View.setAlpha(F)V calls found')
           PY
-          echo "===== GIJ alpha float setter candidates ====="
-          grep -n -B18 -A38 -E '^\.method .*\(F\)V|->m:F|0x100000' "$GIJ" | head -1200 || true
+          test -s .analysis/litho-candidates.txt
+      - name: Upload compact Litho candidate report
+        uses: actions/upload-artifact@v6
+        with:
+          name: litho-alpha-candidates-${{ env.YT_VERSION }}
+          path: .analysis/litho-candidates.txt
+          if-no-files-found: error
+          retention-days: 3
       - name: Cleanup
         if: always()
-        run: rm -rf .analysis/input .analysis/decompiled .analysis/jadx .analysis/jadx.zip .analysis/apktool .analysis/apktool.jar
+        run: rm -rf .analysis/input .analysis/apktool .analysis/apktool.jar

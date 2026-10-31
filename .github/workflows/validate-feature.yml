@@ -113,7 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
+      # Exact APK file hash for the current 20.51.39 universal/nodpi standalone Google APK.
+      YT_TRUSTED_SHA256: 4cb1a507dad189b0eed01440cd6dba4c749c897dae2ff169d659c037bdfbda07
     steps:
       - name: Checkout Eternal feature branch
         uses: actions/checkout@v7
@@ -184,7 +185,7 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check requests >/dev/null
           version="$(jq -r '.youtube.version' eternal-youtube-history-patches/android-update-status.json)"
-          test "$version" = '21.20.405'
+          test "$version" = '20.51.39'
           mkdir -p .validation/input
           VERSION="$version" python - <<'PY'
           import os

@@ -26,6 +26,11 @@ import app.morphe.extension.youtube.shared.ShortsPlayerState;
 public final class EternalToolbarVisibilityGuard {
     private static final String CONTROL_TAG = "eternal-history-floating-control";
     private static final AtomicBoolean bindPending = new AtomicBoolean();
+    private static final Rect visibleRect = new Rect();
+    private static final int[] rootLocation = new int[2];
+    private static final int[] anchorLocation = new int[2];
+    private static final int[] candidateLocation = new int[2];
+    private static final int[] currentLocation = new int[2];
     private static WeakReference<ImageView> anchorRef = new WeakReference<>(null);
     private static WeakReference<View> controlRef = new WeakReference<>(null);
     private static WeakReference<ViewGroup> boundRootRef = new WeakReference<>(null);
@@ -33,7 +38,6 @@ public final class EternalToolbarVisibilityGuard {
 
     /** Passive bytecode injection point. Never mutates YouTube's toolbar hierarchy. */
     public static void onToolbarImageView(ImageView imageView) {
-        // Preserve the existing control creation/dialog behavior first.
         EternalHistoryToolbar.onToolbarImageView(imageView);
         if (imageView == null) return;
         imageView.post(() -> {
@@ -54,8 +58,6 @@ public final class EternalToolbarVisibilityGuard {
             return;
         }
         try {
-            int[] candidateLocation = new int[2];
-            int[] currentLocation = new int[2];
             candidate.getLocationInWindow(candidateLocation);
             current.getLocationInWindow(currentLocation);
             // Match EternalHistoryToolbar: the left-most live native action icon is the stable
@@ -88,9 +90,13 @@ public final class EternalToolbarVisibilityGuard {
                 }
                 detachPrevious();
                 boundRootRef = new WeakReference<>(root);
+                // Do not capture root strongly from this static listener. The old listener defeated
+                // boundRootRef's WeakReference and could retain a replaced Activity/root hierarchy.
                 preDrawListener = () -> {
-                    try { sync(root); }
-                    catch (Throwable t) {
+                    try {
+                        ViewGroup currentRoot = boundRootRef.get();
+                        if (currentRoot != null) sync(currentRoot);
+                    } catch (Throwable t) {
                         Logger.printDebug(() -> "Eternal toolbar visibility sync ignored: " + safeMessage(t));
                     }
                     return true;
@@ -133,63 +139,59 @@ public final class EternalToolbarVisibilityGuard {
         return null;
     }
 
+    private static void hideControl(View control) {
+        if (control.getVisibility() != View.GONE) control.setVisibility(View.GONE);
+    }
+
+    private static void showControl(View control) {
+        if (control.getVisibility() != View.VISIBLE) control.setVisibility(View.VISIBLE);
+    }
+
     private static void sync(ViewGroup root) {
         View control = findControl(root);
         if (control == null) return;
 
-        if (!EternalHistorySettings.ENABLED.get()) {
-            control.setVisibility(View.GONE);
-            return;
-        }
-
-        // Shorts has no recommendation-list presentation surface. Use Morphe's cached player-state
-        // signal rather than the quarantined NavigationBar/browse callbacks.
-        if (ShortsPlayerState.isOpen()) {
-            control.setVisibility(View.GONE);
+        if (!EternalHistorySettings.ENABLED.get() || ShortsPlayerState.isOpen()) {
+            hideControl(control);
             return;
         }
 
         ImageView anchor = anchorRef.get();
-        if (!headerAnchorActuallyVisible(root, anchor)) {
-            control.setVisibility(View.GONE);
+        if (!resolveVisibleAnchorGeometry(root, anchor)) {
+            hideControl(control);
             return;
         }
 
-        int[] rootLocation = new int[2];
-        int[] anchorLocation = new int[2];
-        root.getLocationInWindow(rootLocation);
-        anchor.getLocationInWindow(anchorLocation);
         int width = control.getWidth() > 0 ? control.getWidth() : Dim.dp(36);
         int height = control.getHeight() > 0 ? control.getHeight() : Dim.dp32;
         float x = anchorLocation[0] - rootLocation[0] - width - Dim.dp8;
         float y = anchorLocation[1] - rootLocation[1] + (anchor.getHeight() - height) / 2f;
         if (x < Dim.dp4 || x + width > root.getWidth() - Dim.dp4
                 || y < 0 || y > Dim.dp(160)) {
-            control.setVisibility(View.GONE);
+            hideControl(control);
             return;
         }
-        control.setX(x);
-        control.setY(y);
-        control.setVisibility(View.VISIBLE);
+        // Avoid invalidating the overlay on every pre-draw when YouTube's native header is static.
+        if (Math.abs(control.getX() - x) > 0.5f) control.setX(x);
+        if (Math.abs(control.getY() - y) > 0.5f) control.setY(y);
+        showControl(control);
     }
 
     /**
      * isShown() alone is insufficient: YouTube can keep the toolbar view attached/shown while its
-     * parent is translated or clipped off-screen. Global visible geometry makes E disappear in the
-     * same frame as the real header instead of remaining over video content.
+     * parent is translated or clipped off-screen. Reuse main-thread scratch geometry so the
+     * per-frame visibility guard stays allocation-free while still disappearing in the same frame.
      */
-    private static boolean headerAnchorActuallyVisible(ViewGroup root, ImageView anchor) {
+    private static boolean resolveVisibleAnchorGeometry(ViewGroup root, ImageView anchor) {
         if (root == null || !basicAnchor(anchor) || root.getWidth() <= 0
                 || anchor.getWindowVisibility() != View.VISIBLE || anchor.getAlpha() <= 0.05f) return false;
         try {
-            Rect visible = new Rect();
-            if (!anchor.getGlobalVisibleRect(visible)) return false;
+            visibleRect.setEmpty();
+            if (!anchor.getGlobalVisibleRect(visibleRect)) return false;
             int requiredWidth = Math.max(1, (anchor.getWidth() * 3) / 4);
             int requiredHeight = Math.max(1, (anchor.getHeight() * 3) / 4);
-            if (visible.width() < requiredWidth || visible.height() < requiredHeight) return false;
+            if (visibleRect.width() < requiredWidth || visibleRect.height() < requiredHeight) return false;
 
-            int[] rootLocation = new int[2];
-            int[] anchorLocation = new int[2];
             root.getLocationInWindow(rootLocation);
             anchor.getLocationInWindow(anchorLocation);
             int relativeX = anchorLocation[0] - rootLocation[0];

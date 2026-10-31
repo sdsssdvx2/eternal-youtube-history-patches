@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.13', 'startup-stability/performance release must have a distinct version');
+assert.equal(manifest.version, '0.10.14', 'startup choice-pin/performance release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -73,12 +73,17 @@ assert.doesNotMatch(inlineControls, /MutationObserver/);
 assert.doesNotMatch(inlineControls, /querySelectorAll\('a\[href|classList\.toggle\('eyh-(?:watched|hidden|surface)/,
   'inline UI must never become another video-card renderer');
 
-assert.match(spaLifecycle, /HEARTBEAT_MS = 500/);
-assert.match(spaLifecycle, /location\.pathname/);
-assert.match(spaLifecycle, /location\.search/);
+// The SPA repair loop is a low-frequency O(1) fallback only while the tab is visible. Resident
+// scripts initialize themselves, so v0.10.14 must not inject another forced startup lifecycle event.
+assert.match(spaLifecycle, /HEARTBEAT_MS = 1000/);
+assert.match(spaLifecycle, /routeKey\(\)/);
 assert.match(spaLifecycle, /document\.getElementById\('eyh-header-controls'\)/);
 assert.match(spaLifecycle, /window\.dispatchEvent\(new Event\('yt-navigate-finish'\)\)/);
-assert.match(spaLifecycle, /setInterval\(\(\) => reconcile\(false\), HEARTBEAT_MS\)/);
+assert.match(spaLifecycle, /document\.visibilityState !== 'visible'/);
+assert.match(spaLifecycle, /heartbeatTimer = setTimeout/);
+assert.match(spaLifecycle, /stopHeartbeat/);
+assert.doesNotMatch(spaLifecycle, /setInterval|reconcile\(true\)/,
+  'SPA fallback must not poll hidden tabs or replay a forced startup navigation event');
 assert.doesNotMatch(spaLifecycle, /MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
   'SPA lifecycle reconciler must stay O(1) and must not scan cards or mutate settings');
 
@@ -87,13 +92,18 @@ assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
 assert.match(css, /yt-lockup-view-model\.eyh-hidden/);
 assert.match(css, /Unknown markup\s+now fails open/i);
 
-// v0.10.13 keeps one visible quick-mode painter during startup. content.js may retain its legacy
-// compatibility class, but the profile controller owns the visible class and commits one storage
-// transaction per physical click. Retry ladders are coalesced instead of accumulating timers.
+// Keep one visible quick-mode painter and pin a physical user choice through the bounded startup
+// churn window. Lifecycle/storage refreshes may reconcile in the background but cannot visibly
+// bounce the selected button until the pin expires.
 assert.match(content, /\['none','표시'\]/);
 assert.match(content, /\['dim','흐림'\]/);
 assert.match(content, /\['hide','숨김'\]/);
 assert.match(stability, /PROFILE_ACTIVE_CLASS = 'eyh-profile-active'/);
+assert.match(stability, /USER_CHOICE_PIN_MS = 3000/);
+assert.match(stability, /pinnedModeBySurface/);
+assert.match(stability, /pinTimerBySurface/);
+assert.match(stability, /pinUserChoice/);
+assert.match(stability, /const pinned = pinnedMode\(key\)/);
 assert.match(stability, /document\.documentElement\.dataset\.eyhProfileController = '1'/);
 assert.match(stability, /button\.classList\.toggle\(PROFILE_ACTIVE_CLASS, active\)/);
 assert.match(css, /data-eyh-profile-controller="1"[\s\S]*button\[data-eyh-mode\]\.eyh-active/);
@@ -247,4 +257,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.13 startup-stable single-painter + coalesced retries + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.14 pinned startup choice + visible-only SPA heartbeat + safe Watch Later integration self-test');
