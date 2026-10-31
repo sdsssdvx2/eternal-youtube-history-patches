@@ -169,7 +169,7 @@ jobs:
             options.html options.js options.css page-bridge.js watch-later-core.js
             popup.html popup.js popup.css
             tests/watch-later-selftest.mjs tests/static-integration-selftest.mjs
-            tests/page-profile-regression-selftest.mjs
+            tests/page-profile-regression-selftest.mjs tests/page-profile-behavior-selftest.mjs
           )
           for file in "${required[@]}"; do
             test -f "pc-extension/src/$file"
@@ -203,6 +203,8 @@ jobs:
           rm -rf .pc-dist "$zip_name"
           mkdir -p ".pc-dist/${root}/extension" ".pc-dist/${root}/windows-updater"
           cp -a pc-extension/src/. ".pc-dist/${root}/extension/"
+          # Self-tests are CI inputs, not extension runtime. Keep release bytes stable when only tests change.
+          rm -rf ".pc-dist/${root}/extension/tests"
           cp -a pc-extension/windows-updater/. ".pc-dist/${root}/windows-updater/"
           cp pc-extension/README.md ".pc-dist/${root}/README.md"
 
@@ -220,6 +222,7 @@ jobs:
           test -s ".pc-verify/${root}/extension/watch-later-core.js"
           test -s ".pc-verify/${root}/extension/maintenance.js"
           test -s ".pc-verify/${root}/extension/surface-profiles.js"
+          test ! -e ".pc-verify/${root}/extension/tests"
           test -s ".pc-verify/${root}/windows-updater/Update-EternalPcExtension.ps1"
           test -s ".pc-verify/${root}/windows-updater/Install-EternalPcAutoUpdater.ps1"
 
@@ -230,7 +233,7 @@ jobs:
           echo "bytes=$bytes" >> "$GITHUB_OUTPUT"
           echo "Built $zip_name ($bytes bytes) SHA-256=$sha"
 
-      - name: Publish stable PC release without changing Android latest release
+      - name: Publish new stable PC release or verify existing release immutability
         if: github.ref == 'refs/heads/main'
         shell: bash
         env:
@@ -243,6 +246,27 @@ jobs:
           set -euo pipefail
           tag="pc-v${VERSION}"
           title="PC v${VERSION} · Eternal YouTube History"
+          root="eternal-youtube-history-v${VERSION}"
+
+          # A published semantic version is immutable. If the tag already exists, never patch its
+          # metadata and never --clobber its asset. Instead compare production files only. Test-only
+          # repository changes are allowed to pass; any production-byte change must bump manifest.version.
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/pc-release.json 2>/dev/null; then
+            existing_asset="$(jq -r --arg name "$FILE" '.assets[] | select(.name == $name) | .name' /tmp/pc-release.json | head -1)"
+            test "$existing_asset" = "$FILE"
+            rm -rf /tmp/pc-existing /tmp/pc-existing-zip
+            mkdir -p /tmp/pc-existing /tmp/pc-existing-zip
+            gh release download "$tag" --pattern "$FILE" --dir /tmp/pc-existing-zip
+            unzip -q "/tmp/pc-existing-zip/${FILE}" -d /tmp/pc-existing
+            test -d "/tmp/pc-existing/${root}/extension"
+
+            diff -qr --exclude=tests ".pc-verify/${root}/extension" "/tmp/pc-existing/${root}/extension"
+            diff -qr ".pc-verify/${root}/windows-updater" "/tmp/pc-existing/${root}/windows-updater"
+            cmp -s ".pc-verify/${root}/README.md" "/tmp/pc-existing/${root}/README.md"
+            echo "PASS: ${tag} already exists and production files are unchanged; immutable release left untouched."
+            exit 0
+          fi
+
           body="$(cat <<EOF
           Canonical unpacked Chrome extension release. The optional Windows updater remains available for users who want automatic source replacement, but is not required.
 
@@ -253,26 +277,14 @@ jobs:
           EOF
           )"
 
-          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > /tmp/pc-release.json 2>/dev/null; then
-            release_id="$(jq -r '.id' /tmp/pc-release.json)"
-            jq -n \
-              --arg name "$title" \
-              --arg body "$body" \
-              '{name:$name, body:$body, draft:false, prerelease:false, make_latest:"false"}' \
-              > /tmp/pc-release-payload.json
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              --input /tmp/pc-release-payload.json > /tmp/pc-release-updated.json
-          else
-            jq -n \
-              --arg tag "$tag" \
-              --arg name "$title" \
-              --arg body "$body" \
-              '{tag_name:$tag, name:$name, body:$body, draft:false, prerelease:false, make_latest:"false"}' \
-              > /tmp/pc-release-payload.json
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
-              --input /tmp/pc-release-payload.json > /tmp/pc-release-updated.json
-          fi
-
-          gh release upload "$tag" "$FILE" --clobber
+          jq -n \
+            --arg tag "$tag" \
+            --arg name "$title" \
+            --arg body "$body" \
+            '{tag_name:$tag, name:$name, body:$body, draft:false, prerelease:false, make_latest:"false"}' \
+            > /tmp/pc-release-payload.json
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+            --input /tmp/pc-release-payload.json > /tmp/pc-release-created.json
+          gh release upload "$tag" "$FILE"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq '.tag_name')" = "$tag"
           test "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" != "$tag"
