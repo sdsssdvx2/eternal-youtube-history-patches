@@ -121,7 +121,7 @@ jobs:
           test -s "$base/EternalToolbarVisibilityGuard.java"
           grep -F 'videos.size() == 1 && setIds.size() == 1' "$base/EternalWatchLaterPayload.java"
           grep -F 'listWatchLaterStrict(MAX_PAGES)' "$base/EternalWatchLaterSafeCleaner.java"
-          grep -F "candidate.state = \"attempting\"" "$base/EternalWatchLaterSafeCleaner.java"
+          grep -F 'candidate.put("status", "attempting")' "$base/EternalWatchLaterSafeCleaner.java"
           grep -F 'ShortsPlayerState.isOpen()' "$base/EternalToolbarVisibilityGuard.java"
           grep -F 'ViewTreeObserver.OnPreDrawListener' "$base/EternalToolbarVisibilityGuard.java"
           grep -F 'declareWatchLaterJobService()' patches/src/main/kotlin/app/eternal/patches/youtube/history/AddOnSupport.kt
