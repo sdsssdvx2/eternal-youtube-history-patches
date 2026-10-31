@@ -8,6 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '..');
 const safety = fs.readFileSync(path.join(src, 'watch-later-safety-main.js'), 'utf8');
 const stability = fs.readFileSync(path.join(src, 'pc-stability-controller.js'), 'utf8');
+const bootstrap = fs.readFileSync(path.join(src, 'pc-profile-bootstrap.js'), 'utf8');
 const safeCoordinator = fs.readFileSync(path.join(src, 'watch-later-safe.js'), 'utf8');
 const safeAuto = fs.readFileSync(path.join(src, 'watch-later-safe-auto.js'), 'utf8');
 const inlineControls = fs.readFileSync(path.join(src, 'pc-inline-controls.js'), 'utf8');
@@ -107,7 +108,7 @@ assert.deepEqual(C.buildRemoveActions([
   { action: 'ACTION_REMOVE_VIDEO', setVideoId: 'SET_999_valid' }
 ]);
 
-// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.16
+// The emergency MAIN-world boundary remains permanent for legacy direct-delete messages. v0.10.17
 // keeps only the separately journaled SAFE protocol resident; the old preference/buttons stay off.
 assert.match(safety, /EYH_WL_REMOVE_REQUEST/);
 assert.match(safety, /EYH_WL_REMOVE_ONE_REQUEST/);
@@ -127,9 +128,12 @@ assert.doesNotMatch(safeCoordinator, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_RE
 assert.doesNotMatch(safeAuto, /EYH_WL_REMOVE_REQUEST|EYH_WL_REMOVE_ONE_REQUEST/);
 
 const mainWorld = manifest.content_scripts.find(entry => entry.world === 'MAIN');
-const isolated = manifest.content_scripts.find(entry => entry.world === 'ISOLATED');
+const isolated = manifest.content_scripts.find(entry => entry.world === 'ISOLATED' && entry.run_at === 'document_idle');
+const earlyProfile = manifest.content_scripts.find(entry => entry.world === 'ISOLATED' && entry.run_at === 'document_start');
 assert.ok(mainWorld, 'MAIN-world content script is required');
-assert.ok(isolated, 'ISOLATED-world content script is required');
+assert.ok(isolated, 'document_idle ISOLATED-world content script is required');
+assert.ok(earlyProfile, 'document_start profile bootstrap is required');
+assert.deepEqual(earlyProfile.js, ['pc-profile-bootstrap.js']);
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'legacy safety boundary must load before page-bridge');
 assert.ok(mainWorld.js.indexOf('watch-later-safety-main.js') < mainWorld.js.indexOf('watch-later-safe-core.js'));
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'));
@@ -139,6 +143,13 @@ assert.ok(isolated.js.includes('watch-later-safe.js'), 'manual journaled cleanup
 assert.ok(isolated.js.includes('watch-later-safe-auto.js'), 'opt-in journaled automatic cleanup must be resident');
 assert.ok(isolated.js.includes('pc-inline-controls.js'), 'working inline settings/safe cleanup UI must be resident');
 assert.ok(isolated.js.includes('pc-spa-lifecycle.js'), 'missed SPA route changes must be reconciled');
-assert.equal(manifest.version, '0.10.16');
+assert.match(bootstrap, /watchedSurfaceProfiles/);
+assert.match(bootstrap, /watchedSurfaceDefaultProfile/);
+assert.match(bootstrap, /watchedDisplayMode/);
+assert.match(bootstrap, /watchedMinProgressPct/);
+assert.match(bootstrap, /if \(key === 'shorts'\) return/);
+assert.doesNotMatch(bootstrap, /MutationObserver|querySelectorAll|setInterval|setTimeout/,
+  'startup bootstrap must remain one-shot and must not add a resident DOM/polling cost');
+assert.equal(manifest.version, '0.10.17');
 
-console.log('PASS watch-later-core + modern lockup + legacy-blocked/safe-resident + inline-controls self-test');
+console.log('PASS watch-later-core + early profile bootstrap + legacy-blocked/safe-resident + inline-controls self-test');

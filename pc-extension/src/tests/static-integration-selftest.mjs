@@ -12,6 +12,7 @@ const updateReconnect = text('pc-update-reconnect.js');
 const content = text('content.js');
 const css = text('content.css');
 const stability = text('pc-stability-controller.js');
+const profileBootstrap = text('pc-profile-bootstrap.js');
 const inlineControls = text('pc-inline-controls.js');
 const spaLifecycle = text('pc-spa-lifecycle.js');
 const surface = text('surface-profiles.js');
@@ -30,7 +31,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.16', 'display-cache preservation release must have a distinct version');
+assert.equal(manifest.version, '0.10.17', 'early-profile bootstrap release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -39,8 +40,10 @@ assert.match(updateReconnect, /chrome\.storage\.session/);
 assert.match(updateReconnect, /chrome\.tabs\.reload/);
 assert.match(updateReconnect, /chrome\.tabs\.onActivated/);
 const mainWorld = manifest.content_scripts.find(cs => cs.world === 'MAIN');
-const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED');
-assert.ok(mainWorld && isolatedWorld, 'both MAIN and ISOLATED content-script worlds are required');
+const isolatedWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED' && cs.run_at === 'document_idle');
+const earlyProfileWorld = manifest.content_scripts.find(cs => cs.world === 'ISOLATED' && cs.run_at === 'document_start');
+assert.ok(mainWorld && isolatedWorld && earlyProfileWorld, 'MAIN, idle ISOLATED, and early-profile ISOLATED scripts are required');
+assert.deepEqual(earlyProfileWorld.js, ['pc-profile-bootstrap.js'], 'startup profile bootstrap must stay isolated and one-shot');
 assert.equal(mainWorld.js[0], 'watch-later-safety-main.js', 'legacy destructive safety boundary must load first in MAIN world');
 assert.ok(mainWorld.js.indexOf('watch-later-core.js') < mainWorld.js.indexOf('watch-later-safe-core.js'), 'Watch Later parser must precede safe core in MAIN world');
 assert.ok(mainWorld.js.indexOf('watch-later-safe-core.js') < mainWorld.js.indexOf('watch-later-safe-main.js'), 'safe core must precede safe write bridge');
@@ -112,6 +115,17 @@ assert.match(content, /if \(Number\(result\?\.pulled\?\.imported \|\| 0\) > 0\) 
   'real server imports must still invalidate cached ledger state');
 assert.match(content, /msg\?\.type === 'RESCAN'[\s\S]*?watchedCache\.clear\(\); progressCache\.clear\(\)/,
   'explicit RESCAN must retain hard invalidation semantics');
+
+// v0.10.17 resolves only the initial page profile at document_start. It must stay one-shot and
+// contain no resident DOM watcher or polling loop; the proven idle controller still owns SPA state.
+assert.match(profileBootstrap, /watchedSurfaceDefaultProfile/);
+assert.match(profileBootstrap, /watchedSurfaceProfiles/);
+assert.match(profileBootstrap, /watchedDisplayMode/);
+assert.match(profileBootstrap, /watchedMinProgressPct/);
+assert.match(profileBootstrap, /if \(key === 'shorts'\) return/);
+assert.match(profileBootstrap, /globalThis\.EYHProfileBootstrapReady/);
+assert.doesNotMatch(profileBootstrap, /MutationObserver|setInterval|setTimeout|addEventListener|querySelectorAll/,
+  'initial profile bootstrap must not add any resident runtime cost');
 
 assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
 assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
@@ -280,4 +294,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.16 startup-pinned + hidden-tab-idle + warm display-cache + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.17 early-profile bootstrap + startup-pinned + hidden-tab-idle + warm display-cache + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
