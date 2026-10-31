@@ -74,9 +74,12 @@ private val YOUTUBE = Compatibility(
  * YouTube's Litho mount helper applies node properties such as content description and alpha.
  * We use it as an obfuscation-safe structural anchor to discover NodeInfo's alpha field/setter and
  * to synchronize optional grayscale only when Litho itself changes alpha.
+ *
+ * Patcher 2 treats accessFlags as an exact set. The real helper is private static on current
+ * YouTube builds, so use isStatic instead of requiring STATIC to be the only access flag.
  */
 private object LithoMountPropertiesFingerprint : Fingerprint(
-    accessFlags = listOf(AccessFlags.STATIC),
+    isStatic = true,
     returnType = "V",
     filters = listOf(
         methodCall(
