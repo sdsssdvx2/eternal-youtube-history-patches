@@ -2,6 +2,15 @@ name: Validate Android update targets on server
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'android-update-status.json'
+      - 'patches/**'
+      - 'extensions/**'
+      - '.github/workflows/validate-android-targets.yml'
+      - '.github/workflows/monitor-android-updates.yml'
+      - '.github/workflows/sync-morphe-compat.yml'
+      - '.github/workflows/release.yml'
   push:
     paths:
       - 'android-update-status.json'
@@ -28,7 +37,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire patchable clean YouTube base
+      - name: Acquire exact pinned standalone YouTube base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -42,7 +51,16 @@ jobs:
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
+
           version=os.environ['VERSION']
+          trusted_hashes={
+              '20.51.39':'4cb1a507dad189b0eed01440cd6dba4c749c897dae2ff169d659c037bdfbda07',
+              '21.16.256':'724d2bf15d31dac98db00d82914db3876edf66e62fe2845001f204209ecf4c00',
+              '21.20.405':'4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c',
+          }
+          expected=trusted_hashes.get(version)
+          if expected is None:
+              raise RuntimeError(f'No pinned standalone SHA-256 for recommended YouTube {version}')
           app=AppConfig(key='youtube',name='YouTube',package='com.google.android.youtube',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',formats=('apk',),prefer=('universal','arm64-v8a'),target_abi='arm64-v8a')
           r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
           out=Path('.validation/input/youtube.apk')
@@ -54,7 +72,11 @@ jobs:
                       names=set(z.namelist())
                   if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
                       raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
-                  print('selected standalone candidate',got.size,got.sha256,ref)
+                  if not any(name == 'classes.dex' or (name.startswith('classes') and name.endswith('.dex')) for name in names):
+                      raise RuntimeError('classes.dex missing')
+                  if got.sha256.lower() != expected:
+                      raise RuntimeError(f'standalone SHA-256 mismatch: {got.sha256}')
+                  print('selected exact pinned standalone candidate',got.size,got.sha256,ref)
                   break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
@@ -113,7 +135,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Acquire patchable clean YouTube Music base
+      - name: Acquire exact pinned standalone YouTube Music base
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -127,7 +149,15 @@ jobs:
           from pathlib import Path
           from morphe_builder.apkmirror import ApkMirrorResolver
           from morphe_builder.models import AppConfig
+
           version=os.environ['VERSION']
+          trusted_hashes={
+              '9.20.53':'5c4add71134d46818c855959e1c7029518c68be9e56ef172119626539d32c852',
+              '9.30.53':'1fe8d535ae445265c7250ed76a24c340e1dc89f2ab5d265f755800fe23ad334e',
+          }
+          expected=trusted_hashes.get(version)
+          if expected is None:
+              raise RuntimeError(f'No pinned standalone SHA-256 for recommended YouTube Music {version}')
           app=AppConfig(key='yt-music',name='YouTube Music',package='com.google.android.apps.youtube.music',apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube-music/',formats=('apk',),prefer=('arm64-v8a','universal'),target_abi='arm64-v8a')
           r=ApkMirrorResolver(min_request_interval=1.2,max_release_attempts=3,max_variant_attempts=10)
           out=Path('.validation/input/ytmusic.apk')
@@ -139,7 +169,11 @@ jobs:
                       names=set(z.namelist())
                   if 'AndroidManifest.xml' not in names or 'resources.arsc' not in names:
                       raise RuntimeError('candidate is a split/bundle container, not a standalone patchable APK')
-                  print('selected standalone candidate',got.size,got.sha256,ref)
+                  if not any(name == 'classes.dex' or (name.startswith('classes') and name.endswith('.dex')) for name in names):
+                      raise RuntimeError('classes.dex missing')
+                  if got.sha256.lower() != expected:
+                      raise RuntimeError(f'standalone SHA-256 mismatch: {got.sha256}')
+                  print('selected exact pinned standalone candidate',got.size,got.sha256,ref)
                   break
               except Exception as e:
                   errs.append(str(e)); out.unlink(missing_ok=True)
