@@ -1,3 +1,9 @@
+## [1.10.9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.8...v1.10.9) (2026-10-31)
+
+### 🔧 Improvements
+
+* **android:** cache common watched profile off feed hot path ([4b873cd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/4b873cd1398419d74f9b197e7ff1ebf6903cf866))
+
 ## [1.10.8](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.7...v1.10.8) (2026-10-31)
 
 ### 🐛 Bug Fixes

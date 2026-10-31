@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-31T11:03:40",
-  "description": "## [1.10.8](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.7...v1.10.8) (2026-10-31)\n\n### 🐛 Bug Fixes\n\n* **android:** optimize feed hot path and validate Morphe 2 transition ([d521206](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/d52120693404ee8fc586163517a96be742514f12))\n* **android:** restore deployed-state evidence ([c1420ff](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c1420ff2109bcd8320b628ed4ccdd18555027894))\n* sync YouTube compatibility with stable Morphe release ([d52d44c](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/d52d44c2dd6c84c452f81016a8124884345a3eae))\n\n### 🔧 Improvements\n\n* **android:** reduce Eternal toolbar pre-draw churn ([c6d868d](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/c6d868de7d111a8abc3cb991ac29e9b777ae8d61))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.8/patches-1.10.8.mpp",
+  "created_at": "2026-10-31T11:38:11",
+  "description": "## [1.10.9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.8...v1.10.9) (2026-10-31)\n\n### 🔧 Improvements\n\n* **android:** cache common watched profile off feed hot path ([4b873cd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/4b873cd1398419d74f9b197e7ff1ebf6903cf866))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.9/patches-1.10.9.mpp",
   "signature_download_url": "",
-  "version": "1.10.8"
+  "version": "1.10.9"
 }
