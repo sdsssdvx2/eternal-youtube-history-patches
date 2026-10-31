@@ -30,7 +30,7 @@ const maintenance = text('maintenance.js');
 const popup = text('popup.js');
 const popupHtml = text('popup.html');
 
-assert.equal(manifest.version, '0.10.15', 'startup/idle resource release must have a distinct version');
+assert.equal(manifest.version, '0.10.16', 'display-cache preservation release must have a distinct version');
 assert.equal(manifest.background?.service_worker, 'background-entry.js', 'background wrapper must run reconnect logic as well as the canonical worker');
 assert.match(backgroundEntry, /import '\.\/background\.js'/);
 assert.match(backgroundEntry, /import '\.\/pc-update-reconnect\.js'/);
@@ -98,6 +98,20 @@ assert.match(spaLifecycle, /function stopHeartbeat\(\)/);
 assert.match(spaLifecycle, /setTimeout\(\(\) => \{[\s\S]*?reconcile\(false\);[\s\S]*?scheduleHeartbeat\(\);[\s\S]*?\}, HEARTBEAT_MS\)/);
 assert.doesNotMatch(spaLifecycle, /setInterval|MutationObserver|querySelectorAll|ytd-|yt-lockup|chrome\.storage/,
   'SPA lifecycle reconciler must stay O(1), hidden-tab idle, and must not scan cards or mutate settings');
+
+// v0.10.16 treats display/policy changes as local repaint only. A quick mode click must not flush
+// the warm ledger caches and cause CHECK_WATCHED to be reissued for every card. True ledger changes
+// (active sync imports and explicit RESCAN) keep their existing cache invalidation paths.
+const settingsListener = content.match(/chrome\.storage\.onChanged\.addListener\(\(changes, area\) => \{([\s\S]*?)\n  \}\);\n\n  const observer/)?.[1] || '';
+assert.ok(settingsListener, 'storage settings listener must be present');
+assert.doesNotMatch(settingsListener, /watchedCache\.clear\(\)|progressCache\.clear\(\)/,
+  'display-only storage changes must preserve the ledger caches');
+assert.match(settingsListener, /loadDisplaySettings\(\)\.then\(\(\) => scheduleScan\(\)\)/,
+  'display-only storage changes should repaint locally');
+assert.match(content, /if \(Number\(result\?\.pulled\?\.imported \|\| 0\) > 0\) \{[\s\S]*?watchedCache\.clear\(\);[\s\S]*?progressCache\.clear\(\)/,
+  'real server imports must still invalidate cached ledger state');
+assert.match(content, /msg\?\.type === 'RESCAN'[\s\S]*?watchedCache\.clear\(\); progressCache\.clear\(\)/,
+  'explicit RESCAN must retain hard invalidation semantics');
 
 assert.doesNotMatch(css, /\.eyh-hidden\s*,\s*\n\.eyh-surface-hidden\s*\{\s*\n\s*display:\s*none/i);
 assert.match(css, /ytd-playlist-video-renderer\.eyh-hidden/);
@@ -266,4 +280,4 @@ assert.match(hotfix, /MutationObserver/);
 assert.ok(!isolatedWorld.js.includes('surface-profiles.js'));
 assert.ok(!isolatedWorld.js.includes('pc-ui-hotfix.js'));
 
-console.log('PASS pc v0.10.15 startup-pinned + hidden-tab-idle + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
+console.log('PASS pc v0.10.16 startup-pinned + hidden-tab-idle + warm display-cache + reduced hot-path IPC/DOM churn + safe Watch Later integration self-test');
