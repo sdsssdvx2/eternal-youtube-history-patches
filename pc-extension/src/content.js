@@ -27,6 +27,61 @@
   let activeSyncInFlight = null;
   let lastActiveSyncRequestAt = 0;
 
+  const clamp = value => Math.max(0, Math.min(100, Number(value) || 0));
+
+  function surfaceKey() {
+    const path = location.pathname;
+    const query = new URLSearchParams(location.search);
+    if (path.startsWith('/shorts/')) return 'shorts';
+    if (path === '/watch') return 'watch';
+    if (path === '/results') return 'search';
+    if (path.startsWith('/feed/subscriptions')) return 'subscriptions';
+    if (path.startsWith('/feed/history')) return 'history';
+    if (path.startsWith('/feed/playlists')) return 'playlists';
+    if (path === '/feed/you' || path.startsWith('/feed/library')) return 'library';
+    if (path === '/playlist') {
+      const list = query.get('list') || '';
+      if (list === 'WL') return 'watch_later';
+      if (list === 'LL') return 'liked';
+      return 'playlist_detail';
+    }
+    if (/^\/(?:@[^/]+|channel\/|c\/|user\/)/.test(path)) return 'channel';
+    if (path === '/' || path === '') return 'home';
+    return 'other';
+  }
+
+  function normalizeProfile(profile, fallbackMode = 'dim', fallbackThreshold = 0) {
+    if (!profile || typeof profile !== 'object') {
+      const threshold = clamp(fallbackThreshold);
+      return {
+        dimEnabled: fallbackMode === 'dim',
+        hideEnabled: fallbackMode === 'hide',
+        linkedThresholds: true,
+        sharedThreshold: threshold,
+        dimThreshold: threshold,
+        hideThreshold: threshold
+      };
+    }
+    return {
+      dimEnabled: Boolean(profile.dimEnabled),
+      hideEnabled: Boolean(profile.hideEnabled),
+      linkedThresholds: profile.linkedThresholds !== false,
+      sharedThreshold: clamp(profile.sharedThreshold),
+      dimThreshold: clamp(profile.dimThreshold),
+      hideThreshold: clamp(profile.hideThreshold)
+    };
+  }
+
+  function effectivePresentation(profile) {
+    if (profile.hideEnabled) {
+      return { mode: 'hide', threshold: profile.linkedThresholds ? profile.sharedThreshold : profile.hideThreshold };
+    }
+    if (profile.dimEnabled) {
+      return { mode: 'dim', threshold: profile.linkedThresholds ? profile.sharedThreshold : profile.dimThreshold };
+    }
+    return { mode: 'none', threshold: 0 };
+  }
+
   function normalizeProgressPct(value) {
     if (value === null || value === undefined || value === '') return null;
     const n = Number(value);
@@ -65,14 +120,27 @@
     const v = await chrome.storage.local.get({
       watchedDisplayMode: 'dim',
       watchedMinProgressPct: 0,
+      watchedSurfaceDefaultProfile: null,
+      watchedSurfaceProfiles: {},
       watchedThumbnailOpacityPct: 65,
       watchedThumbnailGrayscale: false,
       watchedLinkCardInfo: false,
       watchLaterAutoCleanupEnabled: false,
       watchLaterCleanupMinProgressPct: 60
     });
-    watchedDisplayMode = ['dim','hide','none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
-    watchedMinProgressPct = Math.max(0, Math.min(100, Number(v.watchedMinProgressPct) || 0));
+    const legacyMode = ['dim', 'hide', 'none'].includes(v.watchedDisplayMode) ? v.watchedDisplayMode : 'dim';
+    const defaults = normalizeProfile(v.watchedSurfaceDefaultProfile, legacyMode, v.watchedMinProgressPct);
+    const profiles = v.watchedSurfaceProfiles && typeof v.watchedSurfaceProfiles === 'object'
+      ? v.watchedSurfaceProfiles : {};
+    const key = surfaceKey();
+    const profile = normalizeProfile(
+      Object.prototype.hasOwnProperty.call(profiles, key) ? profiles[key] : defaults,
+      legacyMode,
+      v.watchedMinProgressPct
+    );
+    const presentation = key === 'shorts' ? { mode: 'none', threshold: 0 } : effectivePresentation(profile);
+    watchedDisplayMode = presentation.mode;
+    watchedMinProgressPct = presentation.threshold;
     watchedThumbnailOpacityPct = Math.max(10, Math.min(100, Number(v.watchedThumbnailOpacityPct) || 65));
     watchedThumbnailGrayscale = Boolean(v.watchedThumbnailGrayscale);
     watchedLinkCardInfo = Boolean(v.watchedLinkCardInfo);
@@ -81,6 +149,16 @@
     document.documentElement.style.setProperty('--eyh-watched-opacity', String(watchedThumbnailOpacityPct / 100));
     updateHeaderControls();
   }
+
+  globalThis.EYHApplySurfacePresentation = ({ mode, threshold = null } = {}) => {
+    if (!['dim', 'hide', 'none'].includes(mode)) return;
+    watchedDisplayMode = mode;
+    if (threshold !== null && threshold !== undefined && Number.isFinite(Number(threshold))) {
+      watchedMinProgressPct = clamp(threshold);
+    }
+    updateHeaderControls();
+    scheduleScan(0);
+  };
 
   function nativeProgressPct(container) {
     if (!container?.querySelector) return null;
@@ -217,7 +295,16 @@
     bindVideoWatcher().catch(() => {});
   }
 
-  function scheduleScan() { if (document.visibilityState === 'hidden' || scanTimer) return; scanTimer = setTimeout(scanAndMark, 650); }
+  function scheduleScan(delayMs = 650) {
+    if (document.visibilityState === 'hidden') return;
+    const delay = Math.max(0, Number(delayMs) || 0);
+    if (scanTimer) {
+      if (delay > 0) return;
+      clearTimeout(scanTimer);
+      scanTimer = null;
+    }
+    scanTimer = setTimeout(scanAndMark, delay);
+  }
 
   function requestWatchLater(type, payload = {}, timeoutMs = 600000) {
     const requestId = crypto.randomUUID();
@@ -256,7 +343,11 @@
       const brand = document.createElement('span'); brand.className = 'eyh-header-brand'; brand.textContent = 'Eternal'; root.appendChild(brand);
       for (const [mode, label] of [['none','표시'], ['dim','흐림'], ['hide','숨김']]) {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'eyh-header-button'; b.dataset.eyhMode = mode; b.textContent = label; b.title = `시청 영상 ${label}`;
-        b.addEventListener('click', () => { watchedDisplayMode = mode; chrome.storage.local.set({ watchedDisplayMode: mode }).catch(() => {}); updateHeaderControls(); scheduleScan(); }); root.appendChild(b);
+        b.addEventListener('click', () => {
+          if (typeof globalThis.EYHChooseSurfaceMode === 'function') globalThis.EYHChooseSurfaceMode(mode);
+          else globalThis.EYHApplySurfacePresentation?.({ mode, threshold: null });
+        });
+        root.appendChild(b);
       }
       const auto = document.createElement('button'); auto.type = 'button'; auto.id = 'eyh-watch-later-auto'; auto.className = 'eyh-header-button eyh-wl-only';
       auto.addEventListener('click', async () => { watchLaterAutoCleanupEnabled = !watchLaterAutoCleanupEnabled; await chrome.storage.local.set({ watchLaterAutoCleanupEnabled }).catch(() => {}); lastAutoPageCleanupKey = ''; updateHeaderControls(); setHeaderStatus(watchLaterAutoCleanupEnabled ? 'Watch Later 자동 정리 켜짐' : '자동 정리 꺼짐'); if (watchLaterAutoCleanupEnabled) maybeAutoCleanupWatchLaterPage().catch(() => {}); }); root.appendChild(auto);
@@ -310,7 +401,7 @@
 
   async function getPageDiagnostics() {
     const bridge = await requestWatchLater('EYH_WL_DIAGNOSTIC_REQUEST', {}, 15000).catch(error => ({ ok: false, error: error.message }));
-    return { version: '0.8.0', url: location.href, visibility: document.visibilityState, watchedDisplayMode, watchedMinProgressPct, watchedCacheSize: watchedCache.size, progressCacheSize: progressCache.size, watchLaterAutoCleanupEnabled, watchLaterCleanupMinProgressPct, isWatchLaterPage: isWatchLaterPage(), headerMounted: Boolean(document.querySelector('#eyh-header-controls')), headerMountFound: Boolean(findHeaderMount()), cleanupInFlight: Boolean(watchLaterCleanupInFlight), lastCleanupSummary, bridge: bridge?.diagnostics || bridge };
+    return { version: '0.8.0', url: location.href, visibility: document.visibilityState, surfaceKey: surfaceKey(), watchedDisplayMode, watchedMinProgressPct, watchedCacheSize: watchedCache.size, progressCacheSize: progressCache.size, watchLaterAutoCleanupEnabled, watchLaterCleanupMinProgressPct, isWatchLaterPage: isWatchLaterPage(), headerMounted: Boolean(document.querySelector('#eyh-header-controls')), headerMountFound: Boolean(findHeaderMount()), cleanupInFlight: Boolean(watchLaterCleanupInFlight), lastCleanupSummary, bridge: bridge?.diagnostics || bridge };
   }
 
   function normalizeHistoryDateLabel(raw) {
@@ -389,14 +480,20 @@
     }
     if (msg?.type === 'GET_PAGE_DIAGNOSTICS') { getPageDiagnostics().then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message })); return true; }
     if (msg?.type === 'RUN_WATCH_LATER_CLEANUP') { cleanupWatchLater({ manual: Boolean(msg.manual) }).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message })); return true; }
-    if (msg?.type === 'RESCAN') { watchedCache.clear(); progressCache.clear(); scheduleScan(); sendResponse({ ok: true }); }
+    if (msg?.type === 'RESCAN') { watchedCache.clear(); progressCache.clear(); scheduleScan(0); sendResponse({ ok: true }); }
   });
 
-  loadDisplaySettings().then(() => { scheduleScan(); scheduleHeaderMount(); maybeAutoCleanupWatchLaterPage().catch(() => {}); }).catch(() => {});
+  loadDisplaySettings().then(() => { scheduleScan(0); scheduleHeaderMount(); maybeAutoCleanupWatchLaterPage().catch(() => {}); }).catch(() => {});
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.watchedDisplayMode || changes.watchedMinProgressPct || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale || changes.watchedLinkCardInfo || changes.watchLaterAutoCleanupEnabled || changes.watchLaterCleanupMinProgressPct) {
-      loadDisplaySettings().then(() => { watchedCache.clear(); progressCache.clear(); scheduleScan(); }).catch(() => {});
+    if (changes.watchedDisplayMode || changes.watchedMinProgressPct
+        || changes.watchedSurfaceDefaultProfile || changes.watchedSurfaceProfiles
+        || changes.watchedThumbnailOpacityPct || changes.watchedThumbnailGrayscale
+        || changes.watchedLinkCardInfo || changes.watchLaterAutoCleanupEnabled
+        || changes.watchLaterCleanupMinProgressPct) {
+      // Presentation/profile changes do not mutate the watch ledger. Keep cached watched/progress
+      // state and repaint immediately in this tab using this tab's own current surface profile.
+      loadDisplaySettings().then(() => scheduleScan(0)).catch(() => {});
     }
   });
 
@@ -406,8 +503,19 @@
   });
   observer.observe(document.documentElement, { subtree: true, childList: true });
 
-  const onYoutubeNavigation = () => { scheduleScan(); scheduleHeaderMount(); updateHeaderControls(); bindVideoWatcher().catch(() => {}); syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {}); };
+  const onYoutubeNavigation = () => {
+    loadDisplaySettings().then(() => scheduleScan(0)).catch(() => {});
+    scheduleHeaderMount();
+    bindVideoWatcher().catch(() => {});
+    syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {});
+  };
   window.addEventListener('yt-navigate-finish', onYoutubeNavigation, true); window.addEventListener('popstate', onYoutubeNavigation, true);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { scheduleScan(); scheduleHeaderMount(); bindVideoWatcher().catch(() => {}); syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {}); } }, true);
-  scheduleScan(); scheduleHeaderMount(); bindVideoWatcher().catch(() => {}); syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadDisplaySettings().then(() => scheduleScan(0)).catch(() => {});
+      scheduleHeaderMount(); bindVideoWatcher().catch(() => {});
+      syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {});
+    }
+  }, true);
+  scheduleHeaderMount(); bindVideoWatcher().catch(() => {}); syncServerWhileActive().then(() => maybeAutoCleanupWatchLaterPage()).catch(() => {});
 })();
