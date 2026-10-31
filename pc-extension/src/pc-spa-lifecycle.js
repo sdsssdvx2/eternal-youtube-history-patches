@@ -1,26 +1,55 @@
 (() => {
   'use strict';
 
-  // YouTube occasionally changes SPA routes without delivering the navigation event to an
-  // extension's isolated world. Keep this deliberately tiny: it never scans video cards or the
-  // document tree. It only compares the URL and the single Eternal header root twice per second.
-  // When either changes, replay the same completion signal our lightweight coordinators already
-  // consume. This repairs page-profile, Watch Later and inline-control lifecycle state without a
-  // second DOM observer or another renderer.
-  const HEARTBEAT_MS = 500;
-  let lastRoute = `${location.pathname}${location.search}`;
+  // O(1) fallback for YouTube SPA transitions. The normal yt-navigate-finish path still does the
+  // immediate work; this heartbeat exists only to repair a missed route/header transition.
+  const HEARTBEAT_MS = 1000;
+  let lastRoute = routeKey();
   let lastHeaderRoot = document.getElementById('eyh-header-controls');
+  let heartbeatTimer = null;
 
-  function reconcile(force = false) {
-    const route = `${location.pathname}${location.search}`;
-    const headerRoot = document.getElementById('eyh-header-controls');
-    if (!force && route === lastRoute && headerRoot === lastHeaderRoot) return;
-
-    lastRoute = route;
-    lastHeaderRoot = headerRoot;
-    window.dispatchEvent(new Event('yt-navigate-finish'));
+  function routeKey() {
+    return `${location.pathname}${location.search}`;
   }
 
-  setInterval(() => reconcile(false), HEARTBEAT_MS);
-  setTimeout(() => reconcile(true), 0);
+  function reconcile() {
+    const nextRoute = routeKey();
+    const nextHeaderRoot = document.getElementById('eyh-header-controls');
+    if (nextRoute === lastRoute && nextHeaderRoot === lastHeaderRoot) return false;
+    lastRoute = nextRoute;
+    lastHeaderRoot = nextHeaderRoot;
+    window.dispatchEvent(new Event('yt-navigate-finish'));
+    return true;
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer != null) {
+      clearTimeout(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function scheduleHeartbeat() {
+    stopHeartbeat();
+    if (document.visibilityState !== 'visible') return;
+    heartbeatTimer = setTimeout(() => {
+      heartbeatTimer = null;
+      reconcile();
+      scheduleHeartbeat();
+    }, HEARTBEAT_MS);
+  }
+
+  // Resident scripts already initialize themselves. Avoid an eager synthetic navigation event at
+  // startup: it used to amplify the first seconds of storage/header churn for no functional gain.
+  scheduleHeartbeat();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      reconcile();
+      scheduleHeartbeat();
+    } else {
+      stopHeartbeat();
+    }
+  }, true);
+  window.addEventListener('pagehide', stopHeartbeat, { once: true });
 })();
