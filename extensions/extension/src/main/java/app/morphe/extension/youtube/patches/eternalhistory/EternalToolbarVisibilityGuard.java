@@ -139,8 +139,12 @@ public final class EternalToolbarVisibilityGuard {
         return null;
     }
 
-    private static void setControlVisibility(View control, int visibility) {
-        if (control.getVisibility() != visibility) control.setVisibility(visibility);
+    private static void hideControl(View control) {
+        if (control.getVisibility() != View.GONE) control.setVisibility(View.GONE);
+    }
+
+    private static void showControl(View control) {
+        if (control.getVisibility() != View.VISIBLE) control.setVisibility(View.VISIBLE);
     }
 
     private static void sync(ViewGroup root) {
@@ -148,13 +152,13 @@ public final class EternalToolbarVisibilityGuard {
         if (control == null) return;
 
         if (!EternalHistorySettings.ENABLED.get() || ShortsPlayerState.isOpen()) {
-            setControlVisibility(control, View.GONE);
+            hideControl(control);
             return;
         }
 
         ImageView anchor = anchorRef.get();
         if (!resolveVisibleAnchorGeometry(root, anchor)) {
-            setControlVisibility(control, View.GONE);
+            hideControl(control);
             return;
         }
 
@@ -164,13 +168,13 @@ public final class EternalToolbarVisibilityGuard {
         float y = anchorLocation[1] - rootLocation[1] + (anchor.getHeight() - height) / 2f;
         if (x < Dim.dp4 || x + width > root.getWidth() - Dim.dp4
                 || y < 0 || y > Dim.dp(160)) {
-            setControlVisibility(control, View.GONE);
+            hideControl(control);
             return;
         }
         // Avoid invalidating the overlay on every pre-draw when YouTube's native header is static.
         if (Math.abs(control.getX() - x) > 0.5f) control.setX(x);
         if (Math.abs(control.getY() - y) > 0.5f) control.setY(y);
-        setControlVisibility(control, View.VISIBLE);
+        showControl(control);
     }
 
     /**
