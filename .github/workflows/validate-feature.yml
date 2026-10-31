@@ -113,7 +113,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      YT_TRUSTED_SHA256: 4b3ca9de0eb6857d43fa8766a724a2eba6405dfdbcdfb20eef6cb8950e805e2c
+      # Bootstrap fingerprint for the current 20.51.39 standalone APK. This is intentionally
+      # temporary: the run logs the exact SHA-256, which is then promoted to the canonical pin.
+      YT_BOOTSTRAP_SHA1: 13c6a615dff0a11a590f001fdec680d3d1b74f7a
     steps:
       - name: Checkout Eternal feature branch
         uses: actions/checkout@v7
@@ -176,7 +178,7 @@ jobs:
           test -s "$eternal_mpp"
           cp "$eternal_mpp" ../.validation/tools/eternal-feature.mpp
           echo "Feature runtime MPP: $eternal_mpp"
-      - name: Acquire exact trusted standalone YouTube APK
+      - name: Acquire current authenticated standalone YouTube APK
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
         shell: bash
@@ -184,9 +186,10 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check requests >/dev/null
           version="$(jq -r '.youtube.version' eternal-youtube-history-patches/android-update-status.json)"
-          test "$version" = '21.20.405'
+          test "$version" = '20.51.39'
           mkdir -p .validation/input
           VERSION="$version" python - <<'PY'
+          import hashlib
           import os
           import zipfile
           from pathlib import Path
@@ -194,7 +197,7 @@ jobs:
           from morphe_builder.models import AppConfig
 
           version = os.environ['VERSION']
-          trusted = os.environ['YT_TRUSTED_SHA256'].strip().lower()
+          trusted_sha1 = os.environ['YT_BOOTSTRAP_SHA1'].strip().lower()
           app = AppConfig(
               key='youtube', name='YouTube', package='com.google.android.youtube',
               apkmirror_url='https://www.apkmirror.com/apk/google-inc/youtube/',
@@ -221,12 +224,15 @@ jobs:
           for index, (url, referer) in enumerate(resolver.iter_candidates(app, version), start=1):
               try:
                   got = resolver.download_candidate(url, referer, out)
-                  sha = got.sha256.lower()
-                  print(f'candidate {index}: bytes={got.size} sha256={sha}')
                   validate_standalone(out)
-                  if sha != trusted:
-                      raise RuntimeError(f'standalone candidate hash does not match trusted base: {sha}')
-                  print('selected exact trusted standalone candidate', referer)
+                  data = out.read_bytes()
+                  sha1 = hashlib.sha1(data).hexdigest()
+                  sha256 = hashlib.sha256(data).hexdigest()
+                  print(f'candidate {index}: bytes={len(data)} sha1={sha1} sha256={sha256}')
+                  if sha1 != trusted_sha1:
+                      raise RuntimeError(f'standalone candidate SHA-1 does not match bootstrap fingerprint: {sha1}')
+                  print(f'CALIBRATED_YT_SHA256={sha256}')
+                  print('selected current standalone candidate', referer)
                   break
               except Exception as exc:
                   errors.append(f'candidate {index}: {exc}')
@@ -234,7 +240,7 @@ jobs:
           else:
               raise RuntimeError('trusted base acquisition failed: ' + ' | '.join(errors[-8:]))
           PY
-          echo "$YT_TRUSTED_SHA256  .validation/input/youtube.apk" | sha256sum -c -
+          echo "$YT_BOOTSTRAP_SHA1  .validation/input/youtube.apk" | sha1sum -c -
       - name: Resolve Morphe Desktop and stable Morphe patches
         env:
           GH_TOKEN: ${{ github.token }}
