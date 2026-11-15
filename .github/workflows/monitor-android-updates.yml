@@ -30,14 +30,14 @@ jobs:
           set -euo pipefail
           mkdir -p .update-monitor
 
-          curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .update-monitor/morphe.json
+          curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .update-monitor/morphe.json
           MORPHE_TAG="$(jq -r '.tag_name' .update-monitor/morphe.json)"
           test -n "$MORPHE_TAG" && test "$MORPHE_TAG" != null
 
           curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${MORPHE_TAG}/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt" > .update-monitor/youtube.kt
           curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${MORPHE_TAG}/patches/src/main/kotlin/app/morphe/patches/music/shared/Constants.kt" > .update-monitor/music.kt
-          curl -fsSL https://api.github.com/repos/MorpheApp/MicroG-RE/releases/latest > .update-monitor/microg.json
-          curl -fsSL https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/latest > .update-monitor/eternal.json
+          curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/MorpheApp/MicroG-RE/releases/latest > .update-monitor/microg.json
+          curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/latest > .update-monitor/eternal.json
           ETERNAL_TAG="$(jq -r '.tag_name' .update-monitor/eternal.json)"
           test -n "$ETERNAL_TAG" && test "$ETERNAL_TAG" != null
           curl -fsSL "https://raw.githubusercontent.com/sdsssdvx2/eternal-youtube-history-patches/${ETERNAL_TAG}/patches/src/main/kotlin/app/eternal/patches/youtube/history/EternalHistoryPatch.kt" > .update-monitor/eternal-youtube.kt

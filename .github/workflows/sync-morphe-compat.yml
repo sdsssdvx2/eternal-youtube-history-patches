@@ -24,7 +24,7 @@ jobs:
         id: stable
         shell: bash
         run: |
-          tag="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest | jq -r '.tag_name')"
+          tag="$(curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest | jq -r '.tag_name')"
           if [ -z "$tag" ] || [ "$tag" = "null" ]; then
             echo 'Could not resolve latest stable Morphe release' >&2
             exit 1

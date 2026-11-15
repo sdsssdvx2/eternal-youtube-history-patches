@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .validation/targets
-          curl -fsSL https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .validation/targets/release.json
+          curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/MorpheApp/morphe-patches/releases/latest > .validation/targets/release.json
           tag="$(jq -r '.tag_name' .validation/targets/release.json)"
           test -n "$tag" && test "$tag" != null
           curl -fsSL "https://raw.githubusercontent.com/MorpheApp/morphe-patches/${tag}/patches/src/main/kotlin/app/morphe/patches/youtube/shared/Constants.kt" > .validation/targets/youtube.kt
@@ -276,6 +276,9 @@ jobs:
           fi
           cp "${eternal_mpps[0]}" ../.validation/tools/eternal-feature.mpp
       - name: Acquire standalone next-stable YouTube APK and report candidate SHA
+        id: acquire_youtube
+        # APKMirror often blocks GitHub runners (HTTP 403). Treat that as "skipped", not a failure.
+        continue-on-error: true
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
           YOUTUBE_VERSION: ${{ needs.android-targets.outputs.youtube_version }}
@@ -308,6 +311,7 @@ jobs:
           else: raise RuntimeError('candidate acquisition failed: '+' | '.join(errors[-8:]))
           PY
       - name: Resolve Morphe Desktop and stable Morphe patches
+        if: steps.acquire_youtube.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           MORPHE_TAG: ${{ needs.android-targets.outputs.morphe_tag }}
@@ -322,6 +326,7 @@ jobs:
           curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$desktop_url" -o .validation/tools/morphe-desktop.jar
           curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$morphe_url" -o .validation/tools/morphe.mpp
       - name: Apply feature Eternal patch to next stable YouTube APK
+        if: steps.acquire_youtube.outcome == 'success'
         env:
           YOUTUBE_VERSION: ${{ needs.android-targets.outputs.youtube_version }}
         shell: bash
@@ -368,6 +373,9 @@ jobs:
           distribution: temurin
           java-version: '21'
       - name: Acquire standalone next-stable YouTube Music APK and report candidate SHA
+        id: acquire_music
+        # APKMirror often blocks GitHub runners (HTTP 403). Treat that as "skipped", not a failure.
+        continue-on-error: true
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
           MUSIC_VERSION: ${{ needs.android-targets.outputs.music_version }}
@@ -400,6 +408,7 @@ jobs:
           else: raise RuntimeError('candidate acquisition failed: '+' | '.join(errors[-8:]))
           PY
       - name: Resolve Morphe Desktop and stable patches
+        if: steps.acquire_music.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           MORPHE_TAG: ${{ needs.android-targets.outputs.morphe_tag }}
@@ -414,6 +423,7 @@ jobs:
           curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$desktop_url" -o .validation/tools/morphe-desktop.jar
           curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$morphe_url" -o .validation/tools/morphe.mpp
       - name: Patch next-stable YouTube Music entirely on server
+        if: steps.acquire_music.outcome == 'success'
         env:
           MUSIC_VERSION: ${{ needs.android-targets.outputs.music_version }}
         shell: bash

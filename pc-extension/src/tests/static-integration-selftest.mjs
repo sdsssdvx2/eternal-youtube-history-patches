@@ -26,7 +26,7 @@ const maintenance = text('maintenance.js');
 const options = text('options.js');
 const optionsHtml = text('options.html');
 
-assert.equal(manifest.version, '0.11.0');
+assert.equal(manifest.version, '0.11.1');
 assert.equal(manifest.background?.service_worker, 'background-entry.js');
 assert.match(backgroundEntry, /^import '\.\/background\.js';\s*$/m);
 assert.doesNotMatch(backgroundEntry, /pc-update-reconnect/,
