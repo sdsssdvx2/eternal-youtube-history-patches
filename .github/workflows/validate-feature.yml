@@ -275,15 +275,6 @@ jobs:
             exit 1
           fi
           cp "${eternal_mpps[0]}" ../.validation/tools/eternal-feature.mpp
-      - name: Upload feature-branch Eternal patch bundle
-        # Lets a maintainer re-run the APK patch smoke elsewhere when APKMirror blocks hosted
-        # runners (HTTP 403). Contains only the Eternal patch bundle, never a YouTube APK.
-        uses: actions/upload-artifact@v4
-        with:
-          name: eternal-feature-mpp
-          path: .validation/tools/eternal-feature.mpp
-          retention-days: 3
-          if-no-files-found: error
       - name: Acquire standalone next-stable YouTube APK and report candidate SHA
         env:
           PYTHONPATH: ${{ github.workspace }}/.validation/morphe-builds
