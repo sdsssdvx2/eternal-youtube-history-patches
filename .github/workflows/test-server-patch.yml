@@ -76,7 +76,7 @@ jobs:
           mkdir -p .server-test/tools
           morphe_tag="$(jq -r '.morphe_patches' android-update-status.json)"
           eternal_tag="$(jq -r '.eternal_patches' android-update-status.json)"
-          desktop="$(curl -fsSL --retry 3 --retry-all-errors -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
+          desktop="$(curl -fsSL https://api.github.com/repos/MorpheApp/morphe-desktop/releases/latest)"
           morphe="$(curl -fsSL "https://api.github.com/repos/MorpheApp/morphe-patches/releases/tags/${morphe_tag}")"
           eternal="$(curl -fsSL "https://api.github.com/repos/sdsssdvx2/eternal-youtube-history-patches/releases/tags/${eternal_tag}")"
           desktop_url="$(jq -r '.assets[] | select(.name | startswith("morphe-desktop-") and endswith("-all.jar")) | .browser_download_url' <<<"$desktop" | head -1)"
