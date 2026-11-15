@@ -279,8 +279,16 @@
     return videoIdFromUrl(new URL(href, location.origin).href);
   }
 
+  // Live youtube.com (2026-11-15): a Shorts tile is ytm-shorts-lockup-view-model-v2 wrapping an inner
+  // ytm-shorts-lockup-view-model. closest() returns the inner one, and hiding only that left an empty
+  // 398px tile. Always act on the outer v2 wrapper when there is one.
+  function outerShorts(node) {
+    if (node?.tagName === 'YTM-SHORTS-LOCKUP-VIEW-MODEL') return node.parentElement?.closest?.('ytm-shorts-lockup-view-model-v2') || node;
+    return node;
+  }
+
   function candidateContainer(a) {
-    return a.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-playlist-video-renderer, ytd-reel-item-renderer, yt-lockup-view-model, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytd-rich-grid-media, ytd-thumbnail') || a.parentElement;
+    return outerShorts(a.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-playlist-video-renderer, ytd-reel-item-renderer, yt-lockup-view-model, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytd-rich-grid-media, ytd-thumbnail')) || a.parentElement;
   }
 
   // ---- Channel / keyword block list (BlockTube-style; rendered by this single card renderer) ----
@@ -303,7 +311,7 @@
 
   const CARD_ROOT_SELECTOR = 'ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-reel-item-renderer, yt-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytm-shorts-lockup-view-model';
   function cardRoot(node) {
-    return node?.closest?.('ytd-rich-item-renderer') || node?.closest?.(CARD_ROOT_SELECTOR) || null;
+    return node?.closest?.('ytd-rich-item-renderer') || outerShorts(node?.closest?.(CARD_ROOT_SELECTOR)) || null;
   }
 
   function cardMeta(root, anchor = null) {

@@ -99,6 +99,11 @@ function card(doc, { id, title, channel, handle }) {
     card(window.document, { id: 'CCCCCCCCCCC', title: 'from blocked channel', channel: 'Bad', handle: '@blocked' }),
     card(window.document, { id: 'DDDDDDDDDDD', title: '오늘의 스포일러', channel: 'Good', handle: '@good' })
   );
+  // Live search results (2026-11-15): a Shorts tile is ytm-shorts-lockup-view-model-v2 > ytm-shorts-lockup-view-model.
+  const shorts = window.document.createElement('ytm-shorts-lockup-view-model-v2');
+  shorts.innerHTML = `<ytm-shorts-lockup-view-model><a href="/shorts/EEEEEEEEEEE"><img></a>
+    <h3><a href="/shorts/EEEEEEEEEEE"><span>스포일러 쇼츠</span></a></h3></ytm-shorts-lockup-view-model>`;
+  grid.append(shorts);
   for (const f of ['watch-later-core.js', 'blocklist-core.js', 'content.js']) window.eval(read(f));
   await sleep(900);
 
@@ -109,6 +114,8 @@ function card(doc, { id, title, channel, handle }) {
   assert.ok(!roots[0].classList.contains('eyh-blocked'));
   assert.ok(roots[2].classList.contains('eyh-blocked'), 'blocked channel card is hidden');
   assert.ok(roots[3].classList.contains('eyh-blocked'), 'keyword card is hidden');
+  assert.ok(shorts.classList.contains('eyh-blocked'), 'the outer Shorts wrapper is hidden, not only the inner lockup');
+  assert.ok(!shorts.querySelector('ytm-shorts-lockup-view-model').classList.contains('eyh-blocked'));
   assert.ok(window.document.querySelector('#eyh-header-controls'), 'masthead controls mounted');
 
   // Display threshold change → repaint only matching cards.
