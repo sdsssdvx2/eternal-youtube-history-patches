@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Eternal YouTube History",
-  "version": "0.10.18",
-  "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger, stable page-scoped watched-card controls, and fail-closed Watch Later cleanup with durable undo.",
+  "version": "0.11.0",
+  "description": "Ultra-light YouTube client for a Cloudflare D1 central watch ledger: watched-card dim/hide controls, safe Watch Later cleanup, channel/keyword blocking and comment search.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "contextMenus"
   ],
   "optional_permissions": [
     "history"
@@ -31,7 +32,9 @@
         "watch-later-safe-core.js",
         "watch-later-safe-main.js",
         "watch-later-recovery-main.js",
-        "page-bridge.js"
+        "page-bridge.js",
+        "comment-search-core.js",
+        "comment-search-main.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"
@@ -43,11 +46,14 @@
       "js": [
         "watch-later-core.js",
         "watch-later-safe-core.js",
+        "blocklist-core.js",
         "content.js",
         "pc-stability-controller.js",
         "watch-later-safe.js",
         "watch-later-safe-auto.js",
         "pc-inline-controls.js",
+        "comment-search-core.js",
+        "comment-search.js",
         "pc-spa-lifecycle.js",
         "watch-later-recovery-content.js",
         "maintenance.js"

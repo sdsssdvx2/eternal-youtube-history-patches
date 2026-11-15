@@ -220,37 +220,57 @@
     scheduleScan();
   }
 
+  // One set of listeners per <video> element. YouTube reuses the same element across SPA
+  // navigations; binding fresh closures on every navigation used to accumulate N timeupdate
+  // handlers (each doing a storage read ~4x/s) over a long session.
+  const boundVideoEls = new WeakSet();
+  let directWatchSecondsCached = 5;
+  chrome.storage.local.get({ directWatchSeconds: 5 })
+    .then(v => { directWatchSecondsCached = Math.max(1, Number(v.directWatchSeconds) || 5); }).catch(() => {});
+
+  function adPlaying() {
+    // Pre/mid-roll ads play in the same <video>; their currentTime/duration must never be
+    // recorded as progress of the main video (it could push a never-watched video over the
+    // Watch Later cleanup threshold).
+    return Boolean(document.querySelector('.html5-video-player.ad-showing, .html5-video-player.ad-interrupting'));
+  }
+
+  async function onVideoTick(el) {
+    const vid = currentVideoId;
+    if (!vid || el !== currentVideoEl || vid !== videoIdFromUrl() || adPlaying()) return;
+    if (!directRecorded && !el.paused && Number(el.currentTime || 0) >= directWatchSecondsCached) await recordDirectWatch(vid).catch(() => {});
+    if (!directRecorded || currentVideoId !== vid) return;
+    const pct = currentVideoProgressPct(el);
+    if (pct != null && (lastProgressSent == null || pct >= lastProgressSent + 5 || (pct >= 99.5 && lastProgressSent < 99.5))) {
+      lastProgressSent = pct;
+      progressCache.set(vid, Math.max(progressCache.get(vid) ?? 0, pct));
+      chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: pct }] }).catch(() => {});
+      maybeAutoRemoveCurrentFromWatchLater(vid, pct).catch(() => {});
+    }
+  }
+
+  function onVideoEnded(el) {
+    const vid = currentVideoId;
+    if (!vid || el !== currentVideoEl || vid !== videoIdFromUrl() || adPlaying() || !directRecorded) return;
+    lastProgressSent = 100; progressCache.set(vid, 100);
+    chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: 100 }] }).catch(() => {});
+    maybeAutoRemoveCurrentFromWatchLater(vid, 100).catch(() => {}); scheduleScan();
+  }
+
   async function bindVideoWatcher() {
     const vid = videoIdFromUrl();
     if (!vid) { currentVideoId = null; currentVideoEl = null; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer); return; }
     const el = document.querySelector('video.html5-main-video, video');
     if (!el || (currentVideoId === vid && currentVideoEl === el)) return;
     currentVideoId = vid; currentVideoEl = el; directRecorded = false; lastProgressSent = null; clearTimeout(directTimer);
-    const maybeRecord = async () => {
-      const { directWatchSeconds = 5 } = await chrome.storage.local.get({ directWatchSeconds: 5 });
-      if (currentVideoId !== vid || currentVideoEl !== el) return;
-      if (!el.paused && Number(el.currentTime || 0) >= Number(directWatchSeconds || 5)) await recordDirectWatch(vid).catch(() => {});
-      if (directRecorded) {
-        const pct = currentVideoProgressPct(el);
-        if (pct != null && (lastProgressSent == null || pct >= lastProgressSent + 5 || pct >= 99.5)) {
-          lastProgressSent = pct;
-          progressCache.set(vid, Math.max(progressCache.get(vid) ?? 0, pct));
-          chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: pct }] }).catch(() => {});
-          maybeAutoRemoveCurrentFromWatchLater(vid, pct).catch(() => {});
-        }
-      }
-    };
-    const onTime = () => maybeRecord().catch(() => {});
-    el.addEventListener('timeupdate', onTime, { passive: true });
-    el.addEventListener('playing', onTime, { passive: true });
-    el.addEventListener('ended', () => {
-      if (currentVideoId === vid) {
-        lastProgressSent = 100; progressCache.set(vid, 100);
-        chrome.runtime.sendMessage({ type: 'UPDATE_PROGRESS', entries: [{ videoId: vid, progressPct: 100 }] }).catch(() => {});
-        maybeAutoRemoveCurrentFromWatchLater(vid, 100).catch(() => {}); scheduleScan();
-      }
-    }, { passive: true });
-    directTimer = setTimeout(() => maybeRecord().catch(() => {}), 7000);
+    if (!boundVideoEls.has(el)) {
+      boundVideoEls.add(el);
+      const onTime = () => onVideoTick(el).catch(() => {});
+      el.addEventListener('timeupdate', onTime, { passive: true });
+      el.addEventListener('playing', onTime, { passive: true });
+      el.addEventListener('ended', () => onVideoEnded(el), { passive: true });
+    }
+    directTimer = setTimeout(() => onVideoTick(el).catch(() => {}), 7000);
   }
 
   function idFromAnchor(a) {
@@ -263,10 +283,55 @@
     return a.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-playlist-video-renderer, ytd-reel-item-renderer, yt-lockup-view-model, ytm-shorts-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytd-rich-grid-media, ytd-thumbnail') || a.parentElement;
   }
 
+  // ---- Channel / keyword block list (BlockTube-style; rendered by this single card renderer) ----
+  const BL = globalThis.EYHBlocklistCore;
+  const BLOCK_SURFACES = new Set(['home', 'search', 'subscriptions', 'watch', 'other']);
+  let blockMatcher = BL ? BL.compile({}) : null;
+  let lastContextTarget = null;
+  let lastContextAt = 0;
+
+  async function loadBlocklist() {
+    if (!BL) return;
+    const v = await chrome.storage.local.get({ eyhBlockEnabled: true, eyhBlockChannels: [], eyhBlockKeywords: [] });
+    const next = BL.compile({ enabled: v.eyhBlockEnabled !== false, channels: v.eyhBlockChannels, keywords: v.eyhBlockKeywords });
+    if (blockMatcher?.signature !== next.signature) {
+      blockMatcher = next;
+      for (const node of document.querySelectorAll('.eyh-blocked')) node.classList.remove('eyh-blocked');
+      scheduleScan(0);
+    }
+  }
+
+  const CARD_ROOT_SELECTOR = 'ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-reel-item-renderer, yt-lockup-view-model, ytm-shorts-lockup-view-model-v2, ytm-shorts-lockup-view-model';
+  function cardRoot(node) {
+    return node?.closest?.('ytd-rich-item-renderer') || node?.closest?.(CARD_ROOT_SELECTOR) || null;
+  }
+
+  function cardMeta(root, anchor = null) {
+    if (!root?.querySelector) return {};
+    const titleEl = root.querySelector('#video-title, a#video-title-link, .yt-lockup-metadata-view-model__title, .yt-lockup-metadata-view-model-wiz__title, h3 a, h3');
+    const title = (titleEl?.textContent || titleEl?.getAttribute?.('title') || anchor?.getAttribute?.('title') || '').trim();
+    const channelLink = root.querySelector('ytd-channel-name a, #channel-name a, a[href^="/@"], a[href^="/channel/"], a[href*="youtube.com/@"]');
+    const channelHref = channelLink?.getAttribute('href') || '';
+    const channelName = (channelLink?.textContent
+      || root.querySelector('ytd-channel-name #text, #channel-name #text, .yt-content-metadata-view-model__metadata-text, .yt-content-metadata-view-model-wiz__metadata-text')?.textContent
+      || '').trim();
+    return { title, channelName, channelHref };
+  }
+
+  // Anchors that are not cards: player chrome, comment timestamps (watch?v=…&lc=…), our own UI.
+  function isNonCardAnchor(a) {
+    const href = a.getAttribute('href') || '';
+    return href.includes('lc=') || Boolean(a.closest('ytd-comments, #movie_player, ytd-masthead, #eyh-comment-panel, #eyh-inline-settings-panel, ytd-engagement-panel-section-list-renderer'));
+  }
+
+  const renderKeyByContainer = new WeakMap();
+  const blockKeyByRoot = new WeakMap();
+
   async function scanAndMark() {
     scanTimer = null;
     const map = new Map();
     for (const a of document.querySelectorAll('a[href*="watch?v="], a[href^="/shorts/"]')) {
+      if (isNonCardAnchor(a)) continue;
       const id = idFromAnchor(a); if (!id) continue; if (!map.has(id)) map.set(id, []); map.get(id).push(a);
     }
     const unknown = [...map.keys()].filter(id => !watchedCache.has(id));
@@ -276,24 +341,70 @@
         for (const id of unknown) { watchedCache.set(id, Boolean(resp?.watched?.[id])); progressCache.set(id, normalizeProgressPct(resp?.progress?.[id])); }
       } catch {}
     }
+    const blocking = Boolean(blockMatcher?.active) && BLOCK_SURFACES.has(surfaceKey());
+    const blockSig = blocking ? blockMatcher.signature : '';
+    const presentationKey = `${watchedDisplayMode}|${watchedMinProgressPct}|${watchedLinkCardInfo}|${watchedThumbnailGrayscale}`;
     for (const [id, anchors] of map) {
       const watched = watchedCache.get(id) === true;
+      const storedProgress = normalizeProgressPct(progressCache.get(id));
+      const renderKey = `${id}|${watched}|${storedProgress}|${presentationKey}`;
       for (const a of anchors) {
         const c = candidateContainer(a); if (!c) continue;
-        const storedProgress = normalizeProgressPct(progressCache.get(id));
-        const cardProgress = nativeProgressPct(c);
-        const effectiveProgress = storedProgress == null ? cardProgress : (cardProgress == null ? storedProgress : Math.max(storedProgress, cardProgress));
-        const matchesProgress = watchedMinProgressPct <= 0 || (effectiveProgress != null && effectiveProgress >= watchedMinProgressPct);
-        const matches = watched && matchesProgress && watchedDisplayMode !== 'none';
-        const dimmed = matches && watchedDisplayMode === 'dim';
-        c.classList.toggle('eyh-watched', dimmed); c.classList.toggle('eyh-watched-linked', dimmed && watchedLinkCardInfo);
-        c.classList.toggle('eyh-watched-grayscale', dimmed && watchedThumbnailGrayscale); c.classList.toggle('eyh-hidden', matches && watchedDisplayMode === 'hide');
-        c.dataset.eyhVideoId = id;
-        if (effectiveProgress != null) c.dataset.eyhProgressPct = String(Math.round(effectiveProgress)); else delete c.dataset.eyhProgressPct;
+        const cached = renderKeyByContainer.get(c);
+        // YouTube's view-model renderers may rewrite `class` on re-render, so a cache hit also
+        // requires our classes to still be present.
+        if (!cached || cached.key !== renderKey || c.classList.contains('eyh-watched') !== cached.dimmed || c.classList.contains('eyh-hidden') !== cached.hidden) {
+          const cardProgress = watched ? nativeProgressPct(c) : null;
+          const effectiveProgress = storedProgress == null ? cardProgress : (cardProgress == null ? storedProgress : Math.max(storedProgress, cardProgress));
+          const matchesProgress = watchedMinProgressPct <= 0 || (effectiveProgress != null && effectiveProgress >= watchedMinProgressPct);
+          const matches = watched && matchesProgress && watchedDisplayMode !== 'none';
+          const dimmed = matches && watchedDisplayMode === 'dim';
+          c.classList.toggle('eyh-watched', dimmed); c.classList.toggle('eyh-watched-linked', dimmed && watchedLinkCardInfo);
+          c.classList.toggle('eyh-watched-grayscale', dimmed && watchedThumbnailGrayscale); c.classList.toggle('eyh-hidden', matches && watchedDisplayMode === 'hide');
+          c.dataset.eyhVideoId = id;
+          if (effectiveProgress != null) c.dataset.eyhProgressPct = String(Math.round(effectiveProgress)); else delete c.dataset.eyhProgressPct;
+          renderKeyByContainer.set(c, { key: renderKey, dimmed, hidden: matches && watchedDisplayMode === 'hide' });
+        }
+        if (blocking) {
+          const root = cardRoot(a);
+          if (root) {
+            const blockKey = `${id}|${blockSig}`;
+            const prev = blockKeyByRoot.get(root);
+            if (!prev || prev.key !== blockKey || root.classList.contains('eyh-blocked') !== prev.blocked) {
+              const meta = cardMeta(root, a);
+              const blocked = Boolean(blockMatcher.match(meta));
+              root.classList.toggle('eyh-blocked', blocked);
+              // Lazily rendered metadata: re-check on the next scan until channel info exists.
+              if (blocked || meta.channelName || meta.channelHref) blockKeyByRoot.set(root, { key: blockKey, blocked });
+            }
+          }
+        }
       }
     }
     bindVideoWatcher().catch(() => {});
   }
+
+  async function blockFromContextMenu(linkUrl) {
+    if (!BL) return { ok: false };
+    let entry = null;
+    let label = null;
+    const handle = BL.handleFromHref(linkUrl);
+    const channelId = BL.channelIdFromHref(linkUrl);
+    if (handle || channelId) { entry = handle || channelId; label = entry; }
+    else if (lastContextTarget && Date.now() - lastContextAt < 60_000) {
+      const meta = cardMeta(cardRoot(lastContextTarget));
+      entry = BL.channelEntryFromMeta(meta);
+      label = meta.channelName || entry;
+    }
+    if (!entry) { alert('이 항목에서 채널 정보를 찾지 못했습니다. 채널 이름이나 아바타를 우클릭해 보세요.'); return { ok: false }; }
+    if (!confirm(`'${label}' 채널을 Eternal 차단 목록에 추가할까요?\n(확장 설정 › 채널·키워드 차단에서 언제든 해제할 수 있습니다.)`)) return { ok: false, cancelled: true };
+    const v = await chrome.storage.local.get({ eyhBlockChannels: [] });
+    await chrome.storage.local.set({ eyhBlockChannels: BL.addLine(v.eyhBlockChannels, entry), eyhBlockEnabled: true });
+    setHeaderStatus(`차단됨: ${label}`);
+    return { ok: true, entry };
+  }
+
+  document.addEventListener('contextmenu', event => { lastContextTarget = event.target; lastContextAt = Date.now(); }, true);
 
   function scheduleScan(delayMs = 650) {
     if (document.visibilityState === 'hidden') return;
@@ -401,7 +512,7 @@
 
   async function getPageDiagnostics() {
     const bridge = await requestWatchLater('EYH_WL_DIAGNOSTIC_REQUEST', {}, 15000).catch(error => ({ ok: false, error: error.message }));
-    return { version: '0.8.0', url: location.href, visibility: document.visibilityState, surfaceKey: surfaceKey(), watchedDisplayMode, watchedMinProgressPct, watchedCacheSize: watchedCache.size, progressCacheSize: progressCache.size, watchLaterAutoCleanupEnabled, watchLaterCleanupMinProgressPct, isWatchLaterPage: isWatchLaterPage(), headerMounted: Boolean(document.querySelector('#eyh-header-controls')), headerMountFound: Boolean(findHeaderMount()), cleanupInFlight: Boolean(watchLaterCleanupInFlight), lastCleanupSummary, bridge: bridge?.diagnostics || bridge };
+    return { version: chrome.runtime.getManifest().version, url: location.href, visibility: document.visibilityState, surfaceKey: surfaceKey(), watchedDisplayMode, watchedMinProgressPct, watchedCacheSize: watchedCache.size, progressCacheSize: progressCache.size, watchLaterAutoCleanupEnabled, watchLaterCleanupMinProgressPct, isWatchLaterPage: isWatchLaterPage(), headerMounted: Boolean(document.querySelector('#eyh-header-controls')), headerMountFound: Boolean(findHeaderMount()), cleanupInFlight: Boolean(watchLaterCleanupInFlight), lastCleanupSummary, bridge: bridge?.diagnostics || bridge };
   }
 
   function normalizeHistoryDateLabel(raw) {
@@ -480,9 +591,11 @@
     }
     if (msg?.type === 'GET_PAGE_DIAGNOSTICS') { getPageDiagnostics().then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message })); return true; }
     if (msg?.type === 'RUN_WATCH_LATER_CLEANUP') { cleanupWatchLater({ manual: Boolean(msg.manual) }).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message })); return true; }
+    if (msg?.type === 'EYH_BLOCK_CONTEXT_TARGET') { blockFromContextMenu(msg.linkUrl || '').then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message })); return true; }
     if (msg?.type === 'RESCAN') { watchedCache.clear(); progressCache.clear(); scheduleScan(0); sendResponse({ ok: true }); }
   });
 
+  loadBlocklist().catch(() => {});
   loadDisplaySettings().then(() => { scheduleScan(0); scheduleHeaderMount(); maybeAutoCleanupWatchLaterPage().catch(() => {}); }).catch(() => {});
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -495,6 +608,8 @@
       // state and repaint immediately in this tab using this tab's own current surface profile.
       loadDisplaySettings().then(() => scheduleScan(0)).catch(() => {});
     }
+    if (changes.directWatchSeconds) directWatchSecondsCached = Math.max(1, Number(changes.directWatchSeconds.newValue) || 5);
+    if (changes.eyhBlockEnabled || changes.eyhBlockChannels || changes.eyhBlockKeywords) loadBlocklist().catch(() => {});
   });
 
   const observer = new MutationObserver(mutations => {

@@ -220,3 +220,80 @@ ytd-app[dark] #eyh-surface-panel {
   #eyh-header-controls #eyh-header-status { display: none; }
   #eyh-header-controls { margin-inline-end: 2px; }
 }
+
+/* Channel / keyword block list. Same fail-open rule as .eyh-hidden: only known card roots. */
+ytd-rich-item-renderer.eyh-blocked,
+ytd-video-renderer.eyh-blocked,
+ytd-grid-video-renderer.eyh-blocked,
+ytd-compact-video-renderer.eyh-blocked,
+ytd-reel-item-renderer.eyh-blocked,
+yt-lockup-view-model.eyh-blocked,
+ytm-shorts-lockup-view-model.eyh-blocked,
+ytm-shorts-lockup-view-model-v2.eyh-blocked {
+  display: none !important;
+}
+
+/* Watch-page comment search panel */
+#eyh-comment-panel {
+  position: fixed;
+  z-index: 2147483646;
+  top: 64px;
+  right: 18px;
+  width: min(440px, calc(100vw - 36px));
+  max-height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid rgba(0,0,0,.16);
+  border-radius: 14px;
+  background: #fff;
+  color: #0f0f0f;
+  box-shadow: 0 10px 34px rgba(0,0,0,.28);
+  font: 14px/1.45 Roboto, Arial, sans-serif;
+}
+html[dark] #eyh-comment-panel {
+  border-color: rgba(255,255,255,.18);
+  background: #212121;
+  color: #f1f1f1;
+}
+#eyh-comment-panel .eyh-cs-head { display: flex; align-items: center; justify-content: space-between; }
+#eyh-comment-panel .eyh-cs-head strong { font-size: 16px; }
+#eyh-comment-panel button {
+  border: 0;
+  border-radius: 16px;
+  padding: 6px 12px;
+  cursor: pointer;
+  background: rgba(127,127,127,.18);
+  color: inherit;
+  font: inherit;
+}
+#eyh-comment-panel .eyh-cs-close { padding: 4px 9px; }
+#eyh-comment-panel .eyh-cs-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid rgba(127,127,127,.45);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+#eyh-comment-panel .eyh-cs-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+#eyh-comment-panel .eyh-cs-status { font-size: 12px; opacity: .75; }
+#eyh-comment-panel .eyh-cs-status[data-kind="error"] { color: #ff6b63; opacity: 1; }
+#eyh-comment-panel .eyh-cs-results { overflow: auto; min-height: 60px; display: flex; flex-direction: column; gap: 4px; }
+#eyh-comment-panel .eyh-cs-count, #eyh-comment-panel .eyh-cs-empty { font-size: 12px; opacity: .7; padding: 2px 0; }
+#eyh-comment-panel .eyh-cs-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(127,127,127,.10);
+}
+#eyh-comment-panel .eyh-cs-item:hover { background: rgba(127,127,127,.22); }
+#eyh-comment-panel .eyh-cs-meta { font-size: 12px; opacity: .72; margin-bottom: 2px; }
+#eyh-comment-panel .eyh-cs-text { white-space: pre-wrap; word-break: break-word; }
+#eyh-comment-panel mark { background: #ffd54a; color: #0f0f0f; border-radius: 2px; }

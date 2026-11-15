@@ -59,7 +59,7 @@ final class EternalHistoryClient {
     private static final long MIN_UPLOAD_INTERVAL_MS = 60_000L;
 
     private static volatile long lastUploadAttemptElapsed;
-    private static String currentVideoId = "";
+    private static volatile String currentVideoId = "";
     private static long sessionStartedAt;
     private static long lastVideoTimeMs = -1;
     private static long playedMs;
@@ -191,6 +191,12 @@ final class EternalHistoryClient {
         if (pct == null) return false;
         if (minimumProgress <= 0) return true;
         return pct >= 0 && pct >= minimumProgress;
+    }
+
+    /** Most recently played video id (read-only, for UI such as comment search). */
+    static String currentVideoIdForUi() {
+        String id = currentVideoId;
+        return id != null && id.length() == 11 ? id : null;
     }
 
     static String cachedTitle(String videoId) {

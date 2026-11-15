@@ -17,7 +17,10 @@
     const selectors = [
       'ytd-playlist-header-renderer #stats',
       'ytd-playlist-header-renderer #stats yt-formatted-string',
-      'ytd-playlist-sidebar-primary-info-renderer #stats'
+      'ytd-playlist-sidebar-primary-info-renderer #stats',
+      // 2025+ desktop playlist header (page-header view model).
+      'ytd-browse[page-subtype="playlist"] yt-page-header-view-model yt-content-metadata-view-model',
+      'ytd-browse[page-subtype="playlist"] .yt-page-header-view-model__page-header-content-metadata'
     ];
     const patterns = [
       /동영상\s*([0-9,]+)\s*개/i,

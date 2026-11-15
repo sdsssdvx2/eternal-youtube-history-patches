@@ -10,8 +10,15 @@ let flushPromise = null;
 let pullPromise = null;
 const internalSyncTabs = new Set();
 
+let dbPromise = null;
+
+// One shared IndexedDB connection per service-worker lifetime instead of open/close per message
+// (CHECK_WATCHED runs on every feed scan). The returned handle's close() is a no-op so existing
+// `finally { db.close() }` call sites stay correct; the real connection is dropped only on
+// versionchange/unexpected close and then reopened lazily.
 function openDb() {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -32,9 +39,23 @@ function openDb() {
         db.createObjectStore(OUTBOX_STORE, { keyPath: 'key' });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const drop = () => { try { db.close(); } catch {} dbPromise = null; };
+      db.onversionchange = drop;
+      db.onclose = () => { dbPromise = null; };
+      resolve(new Proxy(db, {
+        get(target, prop) {
+          if (prop === 'close') return () => {};
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+      }));
+    };
+    req.onerror = () => { dbPromise = null; reject(req.error); };
+    req.onblocked = () => { dbPromise = null; reject(new Error('IndexedDB open blocked')); };
   });
+  return dbPromise;
 }
 
 function normalizeProgressPct(value) {
@@ -136,7 +157,7 @@ async function upsertRecords(records = [], { queueCloud = true, flush = true } =
           if (!old) inserted++;
           const next = normalizeRecord(incoming, old, now);
           videos.put(next);
-          if (outbox && cloudRelevantVideoChanged(old, next)) outbox.put({ key: `video:${next.videoId}`, kind: 'video', id: next.videoId, queuedAt: now });
+          if (outbox && cloudRelevantVideoChanged(old, next)) outbox.put({ key: `video:${next.videoId}`, kind: 'video', id: next.videoId, queuedAt: now, token: crypto.randomUUID() });
         };
         req.onerror = () => { tx.abort(); reject(req.error); };
       }
@@ -166,7 +187,7 @@ async function upsertEvents(events = [], { queueCloud = true, flush = true } = {
         req.onsuccess = () => {
           if (!req.result) {
             eventStore.put(next);
-            if (outbox) outbox.put({ key: `event:${next.eventId}`, kind: 'event', id: next.eventId, queuedAt: now });
+            if (outbox) outbox.put({ key: `event:${next.eventId}`, kind: 'event', id: next.eventId, queuedAt: now, token: crypto.randomUUID() });
           }
         };
         req.onerror = () => { tx.abort(); reject(req.error); };
@@ -208,7 +229,7 @@ async function updateProgress(entries = []) {
           if (oldPct != null && pct <= oldPct) return;
           const next = { ...old, maxProgressPct: pct, updatedAt: now };
           videos.put(next);
-          outbox.put({ key: `video:${next.videoId}`, kind: 'video', id: next.videoId, queuedAt: now });
+          outbox.put({ key: `video:${next.videoId}`, kind: 'video', id: next.videoId, queuedAt: now, token: crypto.randomUUID() });
           updated++;
         };
         req.onerror = () => { tx.abort(); reject(req.error); };
@@ -224,8 +245,8 @@ async function updateProgress(entries = []) {
 
 async function checkWatched(ids = []) {
   const clean = [...new Set(ids.filter(id => /^[A-Za-z0-9_-]{11}$/.test(id || '')))];
-  const watched = {}, progress = {};
-  if (!clean.length) return { watched, progress };
+  const watched = {}, progress = {}, titles = {};
+  if (!clean.length) return { watched, progress, titles };
   const db = await openDb();
   try {
     await new Promise((resolve, reject) => {
@@ -237,13 +258,14 @@ async function checkWatched(ids = []) {
         req.onsuccess = () => {
           watched[id] = Boolean(req.result);
           progress[id] = normalizeProgressPct(req.result?.maxProgressPct);
+          if (req.result?.title) titles[id] = String(req.result.title).slice(0, 160);
           if (--pending === 0) resolve();
         };
         req.onerror = () => reject(req.error);
       }
     });
   } finally { db.close(); }
-  return { watched, progress };
+  return { watched, progress, titles };
 }
 
 async function storeCount(storeName) {
@@ -291,15 +313,26 @@ async function getStoreValues(storeName, ids) {
   } finally { db.close(); }
 }
 
-async function deleteOutboxKeys(keys) {
-  if (!keys.length) return;
+async function deleteOutboxEntries(entries) {
+  if (!entries.length) return;
   const db = await openDb();
   try {
     await new Promise((resolve, reject) => {
       const tx = db.transaction(OUTBOX_STORE, 'readwrite');
       const store = tx.objectStore(OUTBOX_STORE);
-      for (const key of keys) store.delete(key);
-      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      for (const entry of entries) {
+        // A newer progress/metadata write may have re-queued the same key while this batch was
+        // uploading. Keep it so the newer value is sent on the next flush instead of being lost.
+        const req = store.get(entry.key);
+        req.onsuccess = () => {
+          const current = req.result;
+          const same = current && (current.token || entry.token
+            ? current.token === entry.token
+            : Number(current.queuedAt || 0) === Number(entry.queuedAt || 0));
+          if (same) store.delete(entry.key);
+        };
+      }
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error || new Error('outbox delete aborted'));
     });
   } finally { db.close(); }
 }
@@ -357,7 +390,7 @@ async function flushCloudQueue({ maxRounds = 4 } = {}) {
       const events = await getStoreValues(EVENT_STORE, eventEntries.map(x => x.id));
       if (videos.length) uploaded += await pushCloudVideos(videos);
       if (events.length) uploaded += await pushCloudEvents(events);
-      await deleteOutboxKeys(entries.map(x => x.key));
+      await deleteOutboxEntries(entries);
       if (entries.length < 720) break;
     }
     const pending = await storeCount(OUTBOX_STORE);
@@ -580,4 +613,28 @@ chrome.runtime.onInstalled.addListener(async () => {
     await chrome.alarms.clear('eyh-auto-sync').catch(() => {});
     await chrome.alarms.clear('eyh-cloud-retry').catch(() => {});
   }
+});
+
+// ---- Channel block from the right-click menu (BlockTube-style) ----
+const BLOCK_MENU_ID = 'eyh-block-channel';
+
+function ensureContextMenu() {
+  if (!chrome.contextMenus) return;
+  chrome.contextMenus.removeAll(() => {
+    void chrome.runtime.lastError;
+    chrome.contextMenus.create({
+      id: BLOCK_MENU_ID,
+      title: 'Eternal: 이 채널 차단',
+      contexts: ['link', 'image', 'page'],
+      documentUrlPatterns: ['https://www.youtube.com/*']
+    }, () => void chrome.runtime.lastError);
+  });
+}
+
+chrome.runtime.onInstalled.addListener(ensureContextMenu);
+chrome.runtime.onStartup?.addListener(ensureContextMenu);
+chrome.contextMenus?.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== BLOCK_MENU_ID || tab?.id == null) return;
+  chrome.tabs.sendMessage(tab.id, { type: 'EYH_BLOCK_CONTEXT_TARGET', linkUrl: info.linkUrl || '' }, { frameId: info.frameId ?? 0 })
+    .catch(() => {});
 });

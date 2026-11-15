@@ -9,6 +9,7 @@
   const HISTORY_KEY = 'eyhWatchLaterSafeTransactionHistoryV1';
   const pending = new Map();
   let busy = false;
+  const titleById = {};
   let decorateQueued = false;
 
   function extensionAlive() {
@@ -33,7 +34,10 @@
     const selectors = [
       'ytd-playlist-header-renderer #stats',
       'ytd-playlist-header-renderer #stats yt-formatted-string',
-      'ytd-playlist-sidebar-primary-info-renderer #stats'
+      'ytd-playlist-sidebar-primary-info-renderer #stats',
+      // 2025+ desktop playlist header (page-header view model).
+      'ytd-browse[page-subtype="playlist"] yt-page-header-view-model yt-content-metadata-view-model',
+      'ytd-browse[page-subtype="playlist"] .yt-page-header-view-model__page-header-content-metadata'
     ];
     const patterns = [
       /동영상\s*([0-9,]+)\s*개/i,
@@ -151,6 +155,7 @@
       const result = await chrome.runtime.sendMessage({ type: 'CHECK_WATCHED', ids: chunk });
       Object.assign(watched, result?.watched || {});
       Object.assign(progress, result?.progress || {});
+      Object.assign(titleById, result?.titles || {});
     }
     return { watched, progress };
   }
@@ -251,15 +256,19 @@
         return;
       }
 
+      const label = id => {
+        const t = titleById[id];
+        return t ? (t.length > 42 ? `${t.slice(0, 41)}…` : t) : id;
+      };
       const preview = tx.candidates.slice(0, 6)
-        .map(e => `${e.videoId} (${Math.round(e.progressPct)}%)`).join('\n');
+        .map(e => `• ${label(e.videoId)} (${Math.round(e.progressPct)}%)`).join('\n');
       const more = tx.candidates.length > 6 ? `\n외 ${tx.candidates.length - 6}개` : '';
       const unknown = tx.unparsedCount > 0
-        ? `\n\nYouTube 표시 ${tx.declaredCount}개 중 ${tx.unparsedCount}개는 유효한 videoId+setVideoId를 안전하게 확인할 수 없어 이번 정리에서 완전히 제외합니다.`
+        ? `\n\n(비공개·삭제 등으로 식별할 수 없는 ${tx.unparsedCount}개는 건드리지 않습니다.)`
         : '';
       if (!confirm(
         `Eternal 진행률 ${tx.threshold}% 이상인 Watch Later 영상 ${tx.candidates.length}개를 안전 정리할까요?\n\n` +
-        `${preview}${more}${unknown}\n\n삭제 전에 식별 가능한 전체 Watch Later 스냅샷과 대상 journal을 저장하고, 사용자 확인 뒤 표시 개수와 식별된 멤버십을 한 번 더 대조한 다음 각 대상의 현재 식별자를 다시 검증합니다. 마지막 정리는 되돌릴 수 있습니다.`
+        `${preview}${more}${unknown}\n\n삭제 직전에 목록을 한 번 더 대조하며, 마지막 정리는 '되돌리기'로 복구할 수 있습니다.`
       )) {
         setStatus('안전 정리를 취소했습니다.');
         return;
