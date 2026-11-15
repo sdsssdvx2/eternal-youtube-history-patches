@@ -31,7 +31,7 @@ function makeChrome(store, ledger, sent) {
     listeners,
     runtime: {
       id: 'test-extension',
-      getManifest: () => ({ version: '0.11.0' }),
+      getManifest: () => ({ version: '0.11.1' }),
       sendMessage: async msg => {
         sent.push(msg);
         if (msg.type === 'CHECK_WATCHED') {

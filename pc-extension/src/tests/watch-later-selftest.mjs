@@ -101,6 +101,6 @@ assert.ok(isolated.js.includes('pc-inline-controls.js'));
 assert.ok(isolated.js.includes('pc-spa-lifecycle.js'));
 assert.doesNotMatch(backgroundEntry, /pc-update-reconnect/,
   'extension updates must never auto-reload an active YouTube playback tab');
-assert.equal(manifest.version, '0.11.0');
+assert.equal(manifest.version, '0.11.1');
 
 console.log('PASS watch-later core + fail-closed safe path + v0.10.18 no-auto-reload contract');

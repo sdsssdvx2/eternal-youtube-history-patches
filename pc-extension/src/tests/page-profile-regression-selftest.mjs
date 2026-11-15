@@ -18,7 +18,7 @@ const options = text('options.js');
 const optionsHtml = text('options.html');
 const backgroundEntry = text('background-entry.js');
 
-assert.equal(manifest.version, '0.11.0');
+assert.equal(manifest.version, '0.11.1');
 const isolatedWorlds = manifest.content_scripts.filter(cs => cs.world === 'ISOLATED');
 assert.equal(isolatedWorlds.length, 1, 'only one isolated runtime may be resident');
 const isolated = isolatedWorlds[0];
