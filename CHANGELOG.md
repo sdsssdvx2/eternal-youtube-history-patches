@@ -1,3 +1,13 @@
+## [1.11.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.9...v1.11.0) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **build:** follow morphe-patcher 2.3.0 non-generic Patch API ([fb36eb2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/fb36eb253e25d754fcef41df858b66830c8f66dc))
+
+### ✨ New Features
+
+* **pc,android:** channel/keyword block, comment search, and runtime fixes ([2201bbd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/2201bbd2c02a9a61373215cc280a33925fcde4d1))
+
 ## [1.10.9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.8...v1.10.9) (2026-10-31)
 
 ### 🔧 Improvements

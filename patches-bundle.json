@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-10-31T11:38:11",
-  "description": "## [1.10.9](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.8...v1.10.9) (2026-10-31)\n\n### 🔧 Improvements\n\n* **android:** cache common watched profile off feed hot path ([4b873cd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/4b873cd1398419d74f9b197e7ff1ebf6903cf866))",
-  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.10.9/patches-1.10.9.mpp",
+  "created_at": "2026-11-15T05:49:07",
+  "description": "## [1.11.0](https://github.com/sdsssdvx2/eternal-youtube-history-patches/compare/v1.10.9...v1.11.0) (2026-11-15)\n\n### 🐛 Bug Fixes\n\n* **build:** follow morphe-patcher 2.3.0 non-generic Patch API ([fb36eb2](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/fb36eb253e25d754fcef41df858b66830c8f66dc))\n\n### ✨ New Features\n\n* **pc,android:** channel/keyword block, comment search, and runtime fixes ([2201bbd](https://github.com/sdsssdvx2/eternal-youtube-history-patches/commit/2201bbd2c02a9a61373215cc280a33925fcde4d1))",
+  "download_url": "https://github.com/sdsssdvx2/eternal-youtube-history-patches/releases/download/v1.11.0/patches-1.11.0.mpp",
   "signature_download_url": "",
-  "version": "1.10.9"
+  "version": "1.11.0"
 }
