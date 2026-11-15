@@ -82,7 +82,10 @@ async function load() {
     autoHistoryPages: 3,
     cloudEnabled: false,
     workerUrl: '',
-    apiToken: ''
+    apiToken: '',
+    eyhBlockEnabled: true,
+    eyhBlockChannels: [],
+    eyhBlockKeywords: []
   });
   const profile = v.watchedSurfaceDefaultProfile
     ? normalizeProfile(v.watchedSurfaceDefaultProfile)
@@ -105,7 +108,20 @@ async function load() {
   $('#cloudEnabled').checked = Boolean(v.cloudEnabled);
   $('#workerUrl').value = v.workerUrl || '';
   $('#apiToken').value = v.apiToken || '';
+  $('#eyhBlockEnabled').checked = v.eyhBlockEnabled !== false;
+  $('#eyhBlockChannels').value = (globalThis.EYHBlocklistCore?.splitLines(v.eyhBlockChannels) || []).join('\n');
+  $('#eyhBlockKeywords').value = (globalThis.EYHBlocklistCore?.splitLines(v.eyhBlockKeywords) || []).join('\n');
+  refreshBlockSummary();
   await refreshStatus();
+}
+
+function refreshBlockSummary() {
+  const BL = globalThis.EYHBlocklistCore;
+  if (!BL) return;
+  const compiled = BL.compile({ enabled: true, channels: $('#eyhBlockChannels').value, keywords: $('#eyhBlockKeywords').value });
+  const parts = [`채널 ${compiled.counts.channels}개 · 키워드 ${compiled.counts.keywords}개`];
+  for (const e of compiled.errors) parts.push(`잘못된 정규식 무시됨: ${e.line} (${e.error})`);
+  $('#blockSummary').textContent = parts.join('\n');
 }
 
 async function save() {
@@ -132,6 +148,9 @@ async function save() {
     cloudEnabled: enabled,
     workerUrl,
     apiToken: $('#apiToken').value,
+    eyhBlockEnabled: $('#eyhBlockEnabled').checked,
+    eyhBlockChannels: globalThis.EYHBlocklistCore ? globalThis.EYHBlocklistCore.splitLines($('#eyhBlockChannels').value) : [],
+    eyhBlockKeywords: globalThis.EYHBlocklistCore ? globalThis.EYHBlocklistCore.splitLines($('#eyhBlockKeywords').value) : [],
     autoSyncEnabled: false,
     autoSyncMode: 'manual'
   });
@@ -152,6 +171,8 @@ async function refreshStatus() {
 }
 
 $('#watchedDefaultLinkedThresholds').addEventListener('change', refreshDefaultThresholdRows);
+$('#eyhBlockChannels').addEventListener('input', refreshBlockSummary);
+$('#eyhBlockKeywords').addEventListener('input', refreshBlockSummary);
 $('#save').addEventListener('click', () => save().catch(e => $('#status').textContent = e.message));
 $('#testCloud').addEventListener('click', async () => {
   try {
@@ -184,10 +205,10 @@ $('#runDiagnostics').addEventListener('click', async () => {
   const out = $('#diagnostics');
   out.textContent = '진단 중…';
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !/^https:\/\/www\.youtube\.com\//.test(tab.url || '')) {
-      throw new Error('현재 창의 활성 탭이 youtube.com이 아닙니다.');
-    }
+    // The options page is itself the active tab, so pick the most recently used YouTube tab.
+    const tabs = await chrome.tabs.query({ url: ['https://www.youtube.com/*'] });
+    const tab = tabs.sort((a, b) => (Number(b.active) - Number(a.active)) || ((b.lastAccessed || 0) - (a.lastAccessed || 0)))[0];
+    if (!tab?.id) throw new Error('열려 있는 YouTube 탭이 없습니다. YouTube를 연 뒤 다시 시도하세요.');
     const page = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_DIAGNOSTICS' });
     const client = await chrome.runtime.sendMessage({ type: 'GET_CLIENT_STATUS' }).catch(() => null);
     const prefs = await chrome.storage.local.get({
@@ -204,3 +225,15 @@ $('#runDiagnostics').addEventListener('click', async () => {
 });
 
 load();
+
+// Keep the block list fields in sync with right-click additions made while this page is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !globalThis.EYHBlocklistCore) return;
+  for (const [key, id] of [['eyhBlockChannels', '#eyhBlockChannels'], ['eyhBlockKeywords', '#eyhBlockKeywords']]) {
+    const field = $(id);
+    if (changes[key] && document.activeElement !== field) {
+      field.value = globalThis.EYHBlocklistCore.splitLines(changes[key].newValue).join('\n');
+    }
+  }
+  if (changes.eyhBlockChannels || changes.eyhBlockKeywords) refreshBlockSummary();
+});

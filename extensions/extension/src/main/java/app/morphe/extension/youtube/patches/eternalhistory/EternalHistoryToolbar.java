@@ -303,6 +303,23 @@ public final class EternalHistoryToolbar {
         cleanNow.setOnClickListener(v -> EternalCleanupCoordinator.previewAndConfirm(activity));
         box.addView(cleanNow);
 
+        String recentVideo = EternalHistoryClient.currentVideoIdForUi();
+        if (recentVideo != null) {
+            TextView commentTitle = text(activity, "댓글", 15, true);
+            commentTitle.setPadding(0, Dim.dp12, 0, Dim.dp4);
+            box.addView(commentTitle);
+            Button commentSearch = new Button(activity);
+            commentSearch.setText("최근 재생 영상 댓글 검색…");
+            commentSearch.setOnClickListener(v -> {
+                try { EternalCommentSearch.show(activity, recentVideo); }
+                catch (Throwable t) {
+                    Logger.printException(() -> "Eternal comment search failure", t);
+                    Utils.showToastShort("댓글 검색을 열지 못했습니다.");
+                }
+            });
+            box.addView(commentSearch);
+        }
+
         Button diagnostics = new Button(activity);
         diagnostics.setText("진단 정보");
         box.addView(diagnostics);
@@ -343,10 +360,13 @@ public final class EternalHistoryToolbar {
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int p, boolean fromUser) {
                 value.setText(label + ": " + p + "%");
-                if (fromUser && row.onUserChange != null) row.onUserChange.run();
+                // Persist + RecyclerView rebind only once on release (onStopTrackingTouch), not on
+                // every drag tick; keyboard/accessibility changes have no touch phase, so keep them.
+                if (fromUser && !row.tracking && row.onUserChange != null) row.onUserChange.run();
             }
-            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStartTrackingTouch(SeekBar bar) { row.tracking = true; }
             @Override public void onStopTrackingTouch(SeekBar bar) {
+                row.tracking = false;
                 if (row.onUserChange != null) row.onUserChange.run();
             }
         });
@@ -506,6 +526,7 @@ public final class EternalHistoryToolbar {
         final LinearLayout root;
         final SeekBar seek;
         Runnable onUserChange;
+        boolean tracking;
 
         ThresholdRow(LinearLayout root, SeekBar seek) {
             this.root = root;

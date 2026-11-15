@@ -1,12 +1,10 @@
 const $ = s => document.querySelector(s);
 
-function formatSweep(sweep) {
-  if (!sweep || typeof sweep !== 'object' || !Number(sweep.at)) {
-    return 'Watch Later 자동 정리 안전 잠금: 켜짐 · 기록된 PC 자동 정리 실행 없음';
-  }
-  const when = new Date(Number(sweep.at)).toLocaleString();
-  if (sweep.error) return `Watch Later 자동 정리 안전 잠금: 켜짐 · 최근 PC 자동 정리 시도 ${when} · 오류: ${String(sweep.error)}`;
-  return `Watch Later 자동 정리 안전 잠금: 켜짐 · 최근 PC 자동 정리 ${when} · 기준 ${Number(sweep.threshold || 0)}% · 확인 ${Number(sweep.scanned || 0)} · 대상 ${Number(sweep.qualified || 0)} · 삭제 ${Number(sweep.removed || 0)} · 실패 ${Number(sweep.failures || 0)}`;
+function formatSafeTx(tx) {
+  if (!tx || typeof tx !== 'object' || !Number(tx.updatedAt || tx.completedAt)) return '최근 정리 기록 없음';
+  const when = new Date(Number(tx.completedAt || tx.updatedAt)).toLocaleString('ko-KR');
+  const labels = { completed: '완료', partial: '부분 완료(되돌리기 가능)', aborted: '중단', undone: '되돌림', undo_partial: '되돌리기 일부 실패', removing: '진행 중/중단됨', prepared: '준비됨' };
+  return `최근 정리 ${when} · ${labels[tx.state] || tx.state} · 제거 ${Number(tx.removedCount || 0)}개`;
 }
 
 async function refresh() {
@@ -22,16 +20,29 @@ async function refresh() {
   const cfg = await chrome.storage.local.get({
     watchedDisplayMode: 'dim',
     watchedMinProgressPct: 0,
+    watchedSurfaceDefaultProfile: null,
     watchedThumbnailOpacityPct: 65,
     watchedThumbnailGrayscale: false,
-    watchedLinkCardInfo: false,
-    watchLaterAutoCleanupEnabled: false,
-    eyhLastAutoWatchLaterSweep: null
+    watchLaterSafeAutoCleanupEnabled: false,
+    watchLaterCleanupMinProgressPct: 60,
+    eyhWatchLaterSafeTransactionV1: null,
+    eyhBlockEnabled: true,
+    eyhBlockChannels: [],
+    eyhBlockKeywords: []
   });
-  const modeLabel = cfg.watchedDisplayMode === 'hide' ? '숨기기' : cfg.watchedDisplayMode === 'none' ? '표시 변경 안 함' : '옅게 표시';
-  const styleLabel = cfg.watchedDisplayMode === 'dim' ? ` · 불투명도 ${Math.max(10, Math.min(100, Number(cfg.watchedThumbnailOpacityPct) || 65))}% · 흑백 ${cfg.watchedThumbnailGrayscale ? '켬' : '끔'} · 영상 정보 연동 ${cfg.watchedLinkCardInfo ? '켬' : '끔'}` : '';
-  $('#displayRule').textContent = `시청 영상: ${modeLabel}${styleLabel} · 최소 진행률 ${Number(cfg.watchedMinProgressPct || 0)}%`;
-  $('#watchLaterSafety').textContent = `${formatSweep(cfg.eyhLastAutoWatchLaterSweep)} · 현재 자동 설정 ${cfg.watchLaterAutoCleanupEnabled ? '켜짐(안전 잠금으로 실행 차단)' : '꺼짐'}`;
+  const p = cfg.watchedSurfaceDefaultProfile;
+  let mode = cfg.watchedDisplayMode, threshold = Number(cfg.watchedMinProgressPct || 0);
+  if (p && typeof p === 'object') {
+    mode = p.hideEnabled ? 'hide' : p.dimEnabled ? 'dim' : 'none';
+    threshold = Number((p.linkedThresholds !== false ? p.sharedThreshold : (p.hideEnabled ? p.hideThreshold : p.dimThreshold)) || 0);
+  }
+  const modeLabel = mode === 'hide' ? '숨기기' : mode === 'none' ? '표시 변경 안 함' : '흐리게';
+  const styleLabel = mode === 'dim' ? ` · 불투명도 ${Math.max(10, Math.min(100, Number(cfg.watchedThumbnailOpacityPct) || 65))}%${cfg.watchedThumbnailGrayscale ? ' · 흑백' : ''}` : '';
+  $('#displayRule').textContent = `시청 영상 기본값: ${modeLabel}${styleLabel} · 최소 진행률 ${threshold}% (페이지별 설정은 YouTube 상단 ⚙)`;
+  const wlPct = Math.max(1, Math.min(100, Number(cfg.watchLaterCleanupMinProgressPct) || 60));
+  $('#watchLaterSafety').textContent = `나중에 볼 동영상 ${wlPct}%+ 자동 정리: ${cfg.watchLaterSafeAutoCleanupEnabled ? '켜짐' : '꺼짐'} · ${formatSafeTx(cfg.eyhWatchLaterSafeTransactionV1)}`;
+  const blockCount = (Array.isArray(cfg.eyhBlockChannels) ? cfg.eyhBlockChannels.length : 0) + (Array.isArray(cfg.eyhBlockKeywords) ? cfg.eyhBlockKeywords.length : 0);
+  $('#blockRule').textContent = blockCount ? `차단 목록 ${cfg.eyhBlockEnabled !== false ? '사용' : '꺼짐'} · ${blockCount}개 항목` : '차단 목록 비어 있음 (YouTube에서 우클릭 → Eternal: 이 채널 차단)';
 }
 
 async function sync(maxPages, label) {

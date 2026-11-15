@@ -24,6 +24,13 @@ Auto cleanup does not create a periodic background alarm. It runs only while You
 
 The options page also includes **현재 YouTube 탭 진단**, which reports the masthead mount, Watch Later bridge state, current cleanup configuration, and recent cleanup summary without exposing the Eternal API token.
 
+## v0.11 additions
+
+- **채널·키워드 차단 (BlockTube-style)** — options page lists for channels (`@handle`, `UC…` id, channel URL, exact name) and title keywords (`/regex/` supported). Right-click any YouTube card or channel link → **Eternal: 이 채널 차단**. Applied on home, search, subscriptions and watch-page related videos; never on Watch Later, playlists, history or channel pages.
+- **댓글 검색** — on watch pages a **댓글** button in the Eternal masthead group opens a panel that loads the video's comments read-only (InnerTube `next`, paced, capped at 200 pages, optional replies) and searches them locally (AND terms, `"phrase"`). Clicking a result scrolls to it or opens the `&lc=` permalink in a new tab.
+- Fixes: `<video>` listeners no longer accumulate per SPA navigation; ad playback is never recorded as main-video progress; cloud outbox no longer drops progress re-queued during an upload; one shared IndexedDB connection; options-page tab diagnostics now find the YouTube tab; Watch Later cleanup confirm shows titles; popup shows the real (safe) auto-cleanup setting.
+- Optional DOM behaviour test: `JSDOM_DIR=/path/with/jsdom node pc-extension/dev-tests/content-dom-selftest.mjs`.
+
 ## Install / update an existing unpacked extension
 
 ### One-time bootstrap to v0.9.0 or newer
